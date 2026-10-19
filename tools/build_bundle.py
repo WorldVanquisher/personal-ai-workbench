@@ -54,7 +54,7 @@ from pathlib import Path
 NAME = "pai-workbench"
 FORBIDDEN = ("pai.local.toml", "*.local.toml", "trial-evidence/*", "trial-evidence", ".git", ".git/*", "*/.git/*",
              "*__pycache__*", "*.pyc", ".env", "*.env", ".env.*", "*secret*", "*credential*", "*password*", "*token*",
-             "*.key", "*.pem", "dist/*", "release/*", "tools/*", "tests/*", "HANDOFF.md", "*/HANDOFF.md", "Agent Inbox/*",
+             "*.key", "*.pem", "dist/*", "release/*", "tools/*", "tests/*", "Agent Inbox/*",
              "context-*.md", ".DS_Store", "*~")
 EXECUTABLE = ("bin/pai",)
 ZIP_MIN_EPOCH = 315532800  # 1980-01-01T00:00:00Z, the earliest time a ZIP entry can record
@@ -95,7 +95,12 @@ def read_allowlist(root):
 def check_entries(root, entries):
     real_root = os.path.realpath(root)
     for rel in entries:
-        if any(fnmatch.fnmatch(rel, p) or fnmatch.fnmatch(os.path.basename(rel), p) for p in FORBIDDEN):
+        # Policy paths use '/' and case-insensitive matching on every host. Only this
+        # exact shipped template is exempt from the private HANDOFF.md filename rule.
+        name = rel.rsplit("/", 1)[-1]
+        private_handoff = name.casefold() == "handoff.md" and rel != "pai/templates/handoff.md"
+        if private_handoff or any(fnmatch.fnmatchcase(rel.casefold(), p.casefold())
+                                  or fnmatch.fnmatchcase(name.casefold(), p.casefold()) for p in FORBIDDEN):
             raise BuildError(f"allowlist entry is forbidden by policy: {rel}")
         full = os.path.join(root, rel)
         if os.path.islink(full) or not os.path.isfile(full):

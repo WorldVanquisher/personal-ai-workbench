@@ -6,6 +6,7 @@ Run: python3 -B -m unittest discover -s tests -v   (from the repository root)
 import io
 import json
 import os
+import ntpath
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,7 @@ import unittest
 import zipfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -174,6 +176,16 @@ class BuildTests(unittest.TestCase):
             shutil.copy2(ROOT / rel, src / rel)
         return src
 
+    def test_portable_policy_allows_only_the_runtime_handoff_template(self):
+        # Emulate Windows normcase on Linux; policy must not use host-normalizing fnmatch.
+        with mock.patch("fnmatch.os.path.normcase", side_effect=ntpath.normcase):
+            build_bundle.check_entries(str(ROOT), build_bundle.read_allowlist(str(ROOT)))
+            for rel in ("HANDOFF.md", "Inbox/task/handoff.md", "pai/templates/HANDOFF.md",
+                        "pai/other/handoff.md", "PAI/Templates/handoff.md", "PRIVATE-TOKEN.md",
+                        "Credentials.json", "private.KEY", "PAI.LOCAL.TOML", "Agent Inbox/report.md"):
+                with self.subTest(rel=rel), self.assertRaisesRegex(build_bundle.BuildError, "forbidden"):
+                    build_bundle.check_entries(str(ROOT), [rel])
+
     def test_deterministic_and_allowlisted(self):
         r1, version, n = build_bundle.build(str(ROOT), str(self.tmp / "o1"), 0)
         r2, *_ = build_bundle.build(str(ROOT), str(self.tmp / "o2"), 0)
@@ -255,8 +267,8 @@ class BuildTests(unittest.TestCase):
         allow.write_text(original)
 
         readme = src / "README.md"
-        text = readme.read_text()
-        readme.write_text(text + "\nsee /home/alice/notes\n")
+        text = readme.read_text(encoding="utf-8")
+        readme.write_text(text + "\nsee /home/alice/notes\n", encoding="utf-8")
         with self.assertRaisesRegex(build_bundle.BuildError, "developer path"):
             build_bundle.build(str(src), str(self.tmp / "o"), 0)
         readme.unlink()
@@ -264,7 +276,7 @@ class BuildTests(unittest.TestCase):
             os.symlink(self.tmp / "elsewhere.md", readme)
         except OSError as e:
             self.skipTest(f"cannot create symlinks here: {e}")
-        (self.tmp / "elsewhere.md").write_text(text)
+        (self.tmp / "elsewhere.md").write_text(text, encoding="utf-8")
         with self.assertRaisesRegex(build_bundle.BuildError, "symlink"):
             build_bundle.build(str(src), str(self.tmp / "o"), 0)
 

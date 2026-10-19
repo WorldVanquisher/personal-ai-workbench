@@ -48,14 +48,14 @@ class DiscoveryTests(unittest.TestCase):
     def test_isolation_metadata_and_shallow_reads(self):
         good = self.create(summary="MATCHED")
         other = self.create("OTHER", summary="UNRELATED BODY")
-        other.write_text(other.read_text().replace("project: demo", "project: unrelated"))
+        other.write_text(other.read_text(encoding="utf-8").replace("project: demo", "project: unrelated"), encoding="utf-8")
         # The directory name says nothing about project identity.
         renamed = self.inbox / "unrelated-looking"
         good.parent.rename(renamed)
         nested = self.inbox / "container" / "nested"
         nested.mkdir(parents=True)
-        (nested / "HANDOFF.md").write_text((renamed / "HANDOFF.md").read_text().replace("MATCHED", "NESTED BODY"))
-        (renamed / "extra.md").write_text("EXTRA PRIVATE BODY")
+        (nested / "HANDOFF.md").write_text((renamed / "HANDOFF.md").read_text(encoding="utf-8").replace("MATCHED", "NESTED BODY"), encoding="utf-8")
+        (renamed / "extra.md").write_text("EXTRA PRIVATE BODY", encoding="utf-8")
         reports, _ = handoff.discover(self.p)
         self.assertEqual([r["label"] for r in reports], ["unrelated-looking/HANDOFF.md"])
         out = context.build(self.p, "release", handoffs=20)
@@ -67,7 +67,7 @@ class DiscoveryTests(unittest.TestCase):
         a = self.create("A")
         b = self.create("B")
         c = self.create("C")
-        a.write_text(a.read_text().replace("2031-01-01T00:00:00Z", "2032-01-01T00:00:00Z"))
+        a.write_text(a.read_text(encoding="utf-8").replace("2031-01-01T00:00:00Z", "2032-01-01T00:00:00Z"), encoding="utf-8")
         os.utime(c, (1, 1))
         expected = [p.relative_to(self.inbox).as_posix() for p in (a, b, c)]
         for _ in range(3):
@@ -83,7 +83,7 @@ class DiscoveryTests(unittest.TestCase):
         self.assertNotIn("\r", reports[0]["text"])
 
     def test_malformed_metadata_missing_and_encoding(self):
-        original = self.create().read_text()
+        original = self.create().read_text(encoding="utf-8")
         mutations = [original.replace("project: demo\n", ""),
                      original.replace("project: demo", "project: demo\nproject: unrelated"),
                      original.replace("created: 2031", "created: 203X"),
@@ -94,7 +94,7 @@ class DiscoveryTests(unittest.TestCase):
         for i, text in enumerate(mutations):
             directory = self.inbox / f"bad-{i}"
             directory.mkdir()
-            (directory / "HANDOFF.md").write_text(text)
+            (directory / "HANDOFF.md").write_text(text, encoding="utf-8")
         missing = self.inbox / "missing"
         missing.mkdir()
         invalid = self.inbox / "invalid-encoding"
@@ -114,7 +114,7 @@ class DiscoveryTests(unittest.TestCase):
         original = self.create()
         outside = Path(self.tmp.name) / "outside"
         outside.mkdir()
-        (outside / "HANDOFF.md").write_text(original.read_text().replace("UNKNOWN", "OUTSIDE BODY"))
+        (outside / "HANDOFF.md").write_text(original.read_text(encoding="utf-8").replace("UNKNOWN", "OUTSIDE BODY"), encoding="utf-8")
         symlink_or_skip(self, outside, self.inbox / "escape-dir", directory=True)
         directory = self.inbox / "escape-file"
         directory.mkdir()
@@ -158,7 +158,7 @@ class DiscoveryTests(unittest.TestCase):
         self.assertIn("Deployment failed", out)
         self.assertIn("Conflicting claims remain unresolved", out)
         huge = self.create("C", summary="BIG REPORT")
-        huge.write_text(huge.read_text() + "\n" + "synthetic body " * 2000)
+        huge.write_text(huge.read_text(encoding="utf-8") + "\n" + "synthetic body " * 2000, encoding="utf-8")
         for budget in (4000, 8000, 16000):
             out = context.build(self.p, "release", budget, handoffs=3)
             self.assertLessEqual(len(out), budget)
@@ -171,8 +171,8 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_approval_metadata_and_exclusions(self):
         report = self.create(summary="REPORTED APPROVAL")
-        report.write_text(report.read_text().replace("status: draft", "status: approved")
-                          .replace("approved: false", "approved: true"))
+        report.write_text(report.read_text(encoding="utf-8").replace("status: draft", "status: approved")
+                          .replace("approved: false", "approved: true"), encoding="utf-8")
         excluded = self.create("SKIP", summary="EXCLUDED BODY")
         self.p.exclude = [excluded.parent.name]
         listing, problems = handoff.listing(self.p)
@@ -184,10 +184,36 @@ class DiscoveryTests(unittest.TestCase):
         self.assertIn("Reports are claims", out)
         self.assertNotIn("EXCLUDED BODY", out)
 
+    def test_required_constraints_precede_discovery_bookkeeping_and_proposals(self):
+        issues = [f"UNAVAILABLE/MALFORMED {'x' * 100}-{i}/HANDOFF.md: synthetic problem" for i in range(30)]
+        for extra in (0, 1100):
+            # Exercise both detailed and compact bookkeeping with a longer header.
+            self.p.name = "Demo" + "x" * extra
+            with self.subTest(header_chars=extra), mock.patch.object(handoff, "discover", return_value=([], issues)):
+                out = context.build(self.p, "deployment freeze", 4000, handoffs=3)
+            self.assertIn("[HUMAN] Public deployment is frozen.", out)
+            self.assertIn("[HUMAN] Keep DNS at Example Registrar.", out)
+            self.assertLessEqual(len(out), 4000)
+            self.assertLess(out.index("## Required:"), out.index("## Handoff discovery"))
+            self.assertIn("handoff list demo", out)
+            self.assertEqual("full diagnostics" in out, bool(extra))
+
+    def test_mandatory_content_cannot_be_replaced_by_optional_content(self):
+        (self.f.mem / "mandatory.md").write_text(
+            "# Rules\n\n## Human decisions\n\n" + "[HUMAN] Preserve this constraint. " * 200,
+            encoding="utf-8")
+        for count in (0, 3):
+            with self.subTest(handoffs=count), self.assertRaisesRegex(handoff.HandoffError, "required.*raise --budget"):
+                context.build(self.f.project(), "deployment freeze", 4000, handoffs=count)
+        rc, out, err = run_cli("--config", str(self.f.cfg), "context", "demo", "--task", "release",
+                               "--budget", "4000", "--handoffs", "3")
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("raise --budget", err)
+
     def test_file_replaced_by_symlink_at_open_is_refused(self):
         report = self.create(summary="INSIDE")
         outside = Path(self.tmp.name) / "outside.md"
-        outside.write_text(report.read_text().replace("INSIDE", "ESCAPED"))
+        outside.write_text(report.read_text(encoding="utf-8").replace("INSIDE", "ESCAPED"), encoding="utf-8")
         real_open = os.open
         replaced = False
 
@@ -209,7 +235,7 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_required_constraints_take_budget_before_reports(self):
         (self.f.mem / "more.md").write_text(
-            "# More\n\n## Human decisions\n\n" + "[HUMAN] Preserve this constraint. " * 30)
+            "# More\n\n## Human decisions\n\n" + "[HUMAN] Preserve this constraint. " * 30, encoding="utf-8")
         self.create(summary="HANDOFF SHOULD WAIT")
         out = context.build(self.f.project(), "release", 6000, handoffs=1)
         self.assertIn("Preserve this constraint", out)

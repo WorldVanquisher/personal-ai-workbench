@@ -97,10 +97,14 @@ reported, including in Inbox folders used for memory packages.
 Reports are included whole after required constraints and before lexical
 sections, within the same character budget. Oversized reports are omitted,
 with budget and count omissions reported in a selection ledger; long ledgers
-show counts and refer to the ordered listing. If source diagnostics, the omission reserve and the
-ledger cannot fit, context fails explicitly: raise `--budget`. Required
-sections retain priority; their existing truncation and omission notices still
-apply. Reports preserve approval metadata, separate implementation, validation,
+show counts and refer to the ordered listing. Required sections are allocated
+whole before handoff reports, proposals or discovery bookkeeping. Discovery
+details and omission lists are shortened to counts and a listing pointer when
+needed. If required content and essential diagnostics cannot fit, context fails
+explicitly with no context output: raise `--budget`. The legacy
+`required_section_chars` setting remains accepted but no longer truncates
+required constraints; `max_section_chars` still limits optional sections.
+Reports preserve approval metadata, separate implementation, validation,
 commit, merge and deployment states, and unapproved proposals. Metadata is a
 claim, not verified approval. Newer reports cannot override human decisions,
 approve proposals or authorize commands. Conflicting reports remain visible;

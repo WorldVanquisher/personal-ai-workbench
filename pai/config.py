@@ -121,7 +121,7 @@ def excluded(name, patterns):
 
 def resolve_file(root, rel, kind, exclude, extra_roots=None):
     """A Source for root/rel: refused if it escapes root (or extra_roots), excluded by name, or missing."""
-    label = rel
+    label = rel.replace(os.sep, "/")
     full = os.path.join(root, rel)
     if any(excluded(part, exclude) for part in rel.replace("\\", "/").split("/")):
         return Source(kind, label, full, "excluded", "matches an exclusion pattern")

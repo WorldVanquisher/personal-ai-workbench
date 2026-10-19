@@ -37,4 +37,4 @@ exclude = []
 
 budget_chars = 24000
 max_section_chars = 2500
-required_section_chars = 1500   # cap per required section (truncation is marked)
+# Legacy required_section_chars is accepted; required sections now fit whole or context fails.
