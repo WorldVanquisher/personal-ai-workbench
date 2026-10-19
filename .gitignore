@@ -2,3 +2,4 @@ pai.local.toml
 __pycache__/
 *.pyc
 trial-evidence/
+dist/

@@ -113,19 +113,32 @@ def resolve_file(root, rel, kind, exclude, extra_roots=None):
     return Source(kind, label, real, "ok")
 
 
-def load(project_key, path=None):
+def read(path=None):
+    """(path, parsed TOML) of the configuration, with actionable errors."""
     path = config_path(path)
     try:
         with open(path, "rb") as f:
-            data = tomllib.load(f)
+            return path, tomllib.load(f)
     except FileNotFoundError:
-        raise ConfigError(f"no configuration at {path} (copy pai.example.toml to pai.local.toml)")
+        raise ConfigError(f"no configuration at {path}; create one with `python3 -m pai init …` "
+                          "(see `python3 -m pai init --help`) or copy pai.example.toml")
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"invalid TOML in {path}: {e}")
+
+
+def load(project_key, path=None):
+    path, data = read(path)
     projects = data.get("projects", {})
     if project_key not in projects:
-        raise ConfigError(f"project {project_key!r} not registered in {path}; known: {', '.join(sorted(projects)) or 'none'}")
-    p = projects[project_key]
+        known = ", ".join(sorted(projects)) or "none"
+        raise ConfigError(f"project {project_key!r} not registered in {path}; known: {known}")
+    return from_dict(project_key, projects[project_key])
+
+
+def from_dict(project_key, p):
+    """Validate one project table and resolve its sources (no file is written)."""
+    if not isinstance(p, dict):
+        raise ConfigError(f"[projects.{project_key}] must be a table")
     repo = _real_dir(p.get("repo"), "repo")
     vault = _real_dir(p.get("vault"), "vault")
     if inside(repo, vault) or inside(vault, repo):
@@ -144,7 +157,7 @@ def load(project_key, path=None):
         if not inside(real, vault) or real == vault:
             raise ConfigError(f"{name} must resolve to a directory inside the vault")
     if not os.path.isdir(inbox):
-        raise ConfigError(f"inbox does not exist: {inbox_rel}")
+        raise ConfigError(f"inbox does not exist: {inbox_rel} (create that folder in the vault yourself; pai does not create it)")
     budget = int(p.get("budget_chars", 16000))
     if not 2000 <= budget <= 200000:
         raise ConfigError("budget_chars must be between 2000 and 200000")

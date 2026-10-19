@@ -12,6 +12,7 @@
 
 import os
 import re
+import string
 from datetime import datetime, timezone
 
 from pai import __version__
@@ -48,62 +49,24 @@ def _create_dir(inbox, task_id, stamp):
     raise HandoffError("could not find a free handoff directory name")
 
 
+TEMPLATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "handoff.md")
+
+
 def render(project, task_id, created, states, summary, evidence, blockers, next_steps, proposals):
+    """Fill the shipped template. Only the template's own $placeholders are substituted."""
     def bullets(items, empty):
         return "\n".join(f"- {x}" for x in items) if items else f"- {empty}"
 
+    with open(TEMPLATE, encoding="utf-8") as f:
+        template = string.Template(f.read())
     rows = "\n".join(f"| {k.capitalize()} | {states.get(k) or UNKNOWN} |" for k in STATES)
-    return f"""---
-status: draft
-approved: false
-task: {task_id}
-project: {project.key}
-created: {created}
-generator: pai {__version__}
----
-
-# {task_id} handoff (DRAFT, not approved)
-
-Draft created by `pai handoff new`. Creating it marks no work complete and
-approves no knowledge. Values below are exactly what was supplied; anything
-not supplied is UNKNOWN. The tool ran no Git, tests or deployment checks.
-
-## Summary
-
-{summary or "UNKNOWN (not supplied)"}
-
-## State
-
-Each state is separate; none is inferred from another.
-
-| State | Value |
-| --- | --- |
-{rows}
-
-## Evidence
-
-{bullets(evidence, "None supplied.")}
-
-## Blockers
-
-{bullets(blockers, "None supplied (not the same as none existing).")}
-
-## Next steps
-
-{bullets(next_steps, "None supplied.")}
-
-## Knowledge-update proposals (UNAPPROVED)
-
-These are proposals only. They change no formal note and constrain nothing
-until the human approves them.
-
-{bullets(proposals, "None supplied.")}
-
-## Sync
-
-Created locally at {created}. Cross-device synchronization is **UNVERIFIED**
-until the human confirms the file on another device.
-"""
+    return template.substitute(
+        task_id=task_id, project=project.key, created=created, version=__version__,
+        summary=summary or "UNKNOWN (not supplied)", state_rows=rows,
+        evidence=bullets(evidence, "None supplied."),
+        blockers=bullets(blockers, "None supplied (not the same as none existing)."),
+        next_steps=bullets(next_steps, "None supplied."),
+        proposals=bullets(proposals, "None supplied."))
 
 
 def create(project, task_id, states=None, summary="", evidence=(), blockers=(), next_steps=(), proposals=(), now=None):

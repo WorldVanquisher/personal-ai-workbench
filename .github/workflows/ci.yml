@@ -1,0 +1,63 @@
+name: CI
+
+# Synthetic tests and a release-bundle smoke check on Linux and macOS.
+# Nothing is published: no release, tag, package upload or secret is used.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.11", "3.13"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Unit and synthetic tests
+        timeout-minutes: 5
+        run: python3 -B -W error::ResourceWarning -m unittest discover -s tests -v
+
+      - name: Build the release bundle
+        timeout-minutes: 3
+        run: |
+          out="$(python3 -B tools/build_bundle.py --out "$RUNNER_TEMP/dist")"
+          echo "$out"
+          echo "PAI_ARCHIVE=$(printf '%s\n' "$out" | sed -n 2p)" >> "$GITHUB_ENV"
+
+      - name: Bundle migration smoke
+        timeout-minutes: 5
+        run: python3 -B tools/bundle_smoke.py "$PAI_ARCHIVE" --work "$RUNNER_TEMP/smoke work"
+
+      - name: Upload smoke report on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-report-${{ matrix.os }}-${{ matrix.python }}
+          path: ${{ runner.temp }}/smoke work/smoke-results.json
+          if-no-files-found: ignore
+          retention-days: 5

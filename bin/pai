@@ -1,0 +1,5 @@
+#!/bin/sh
+# Launcher for pai from an extracted bundle or a checkout; works from any directory.
+# PAI_PYTHON selects the interpreter (default: python3, which must be 3.11 or newer).
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd) || exit 2
+PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" exec "${PAI_PYTHON:-python3}" -B -m pai "$@"
