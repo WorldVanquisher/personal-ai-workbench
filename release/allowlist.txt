@@ -1,12 +1,15 @@
 # Every file in the release bundle, one relative path per line. Nothing else is
 # packaged. build_bundle.py refuses unlisted runtime modules or templates, and
 # any entry that names local configuration, evidence, caches, secrets or VCS data.
+LICENSE
 README.md
 INSTALL.md
 RELEASE_NOTES.md
 SESSION_START.md
 pai.example.toml
 bin/pai
+bin/pai.cmd
+bin/pai.py
 pai/__init__.py
 pai/__main__.py
 pai/cli.py

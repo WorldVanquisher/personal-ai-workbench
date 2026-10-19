@@ -10,8 +10,9 @@ Every file the tool reads is named in the configuration, or sits directly
 inside the registered memory-package directory (non-recursive). Explicit handoff
 discovery additionally reads direct Inbox task directories and HANDOFF.md only.
 After symlinks
-are resolved, every path must stay inside its declared root. Anything else is
-refused, never followed.
+(and, on Windows, junctions and other reparse points) are resolved, every path
+must stay inside its declared root. Containment compares path components, never
+string prefixes. Anything else is refused, never followed.
 """
 
 import fnmatch
@@ -73,8 +74,16 @@ def config_path(explicit=None):
     return explicit or os.environ.get("PAI_CONFIG") or DEFAULT_CONFIG
 
 
+def is_absolute(path):
+    """Absolute on this platform. On Windows this needs a drive or UNC share: a rooted path such as
+    \\notes is relative to the current drive, so it is not accepted."""
+    if not isinstance(path, str) or not path or not os.path.isabs(path):
+        return False
+    return os.name != "nt" or bool(os.path.splitdrive(path)[0])
+
+
 def _real_dir(path, what):
-    if not path or not os.path.isabs(path):
+    if not is_absolute(path):
         raise ConfigError(f"{what} must be an absolute path (got {path!r})")
     real = os.path.realpath(path)
     if not os.path.isdir(real):
@@ -83,11 +92,24 @@ def _real_dir(path, what):
 
 
 def inside(path, root):
-    return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
+    """True when the resolved path is root or below it, compared by components (case-folded on Windows).
+
+    Paths on different drives are never inside each other.
+    """
+    path, root = os.path.normcase(os.path.abspath(path)), os.path.normcase(os.path.abspath(root))
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:  # different drives, or a mix of absolute and relative paths
+        return False
 
 
 def _rel(rel, what):
-    if not isinstance(rel, str) or not rel or os.path.isabs(rel) or ".." in rel.replace("\\", "/").split("/"):
+    bad = (not isinstance(rel, str) or not rel or os.path.isabs(rel) or rel[0] in "/\\"
+           or ".." in rel.replace("\\", "/").split("/"))
+    # Windows: no drive-relative paths (C:notes) and no alternate data streams (note.md:hidden).
+    if not bad and os.name == "nt" and (os.path.splitdrive(rel)[0] or ":" in rel):
+        bad = True
+    if bad:
         raise ConfigError(f"{what} must be a relative path without '..' (got {rel!r})")
     return rel
 
@@ -122,8 +144,8 @@ def read(path=None):
         with open(path, "rb") as f:
             return path, tomllib.load(f)
     except FileNotFoundError:
-        raise ConfigError(f"no configuration at {path}; create one with `python3 -m pai init …` "
-                          "(see `python3 -m pai init --help`) or copy pai.example.toml")
+        raise ConfigError(f"no configuration at {path}; create one with `pai init …` "
+                          "(see `pai init --help`) or copy pai.example.toml")
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"invalid TOML in {path}: {e}")
 

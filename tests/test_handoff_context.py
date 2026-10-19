@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
-from test_pai import Fixture, run_cli
+from test_pai import Fixture, run_cli, symlink_or_skip
 from pai import context, handoff
 
 
@@ -108,21 +108,24 @@ class DiscoveryTests(unittest.TestCase):
         outside = Path(self.tmp.name) / "outside"
         outside.mkdir()
         (outside / "HANDOFF.md").write_text(original.read_text().replace("UNKNOWN", "OUTSIDE BODY"))
-        (self.inbox / "escape-dir").symlink_to(outside, target_is_directory=True)
+        symlink_or_skip(self, outside, self.inbox / "escape-dir", directory=True)
         directory = self.inbox / "escape-file"
         directory.mkdir()
-        (directory / "HANDOFF.md").symlink_to(outside / "HANDOFF.md")
-        fifo = self.inbox / "fifo"
-        fifo.mkdir()
-        os.mkfifo(fifo / "HANDOFF.md")
+        symlink_or_skip(self, outside / "HANDOFF.md", directory / "HANDOFF.md")
+        labels = ["escape-dir", "escape-file"]
+        if hasattr(os, "mkfifo"):  # no FIFOs on Windows
+            fifo = self.inbox / "fifo"
+            fifo.mkdir()
+            os.mkfifo(fifo / "HANDOFF.md")
+            labels.append("fifo")
         reports, issues = handoff.discover(self.p)
         self.assertEqual(len(reports), 1)
-        for label in ("escape-dir", "escape-file", "fifo"):
+        for label in labels:
             self.assertTrue(any(label in issue for issue in issues))
         self.assertNotIn("OUTSIDE BODY", context.build(self.p, "release", handoffs=20))
         original_inbox = self.inbox.with_name("saved-inbox")
         self.inbox.rename(original_inbox)
-        self.inbox.symlink_to(outside, target_is_directory=True)
+        symlink_or_skip(self, outside, self.inbox, directory=True)
         self.assertEqual(handoff.discover(self.p)[0], [])
         self.assertIn("UNAVAILABLE Inbox", handoff.discover(self.p)[1][0])
 
@@ -183,9 +186,9 @@ class DiscoveryTests(unittest.TestCase):
 
         def raced_open(path, flags, *args, **kwargs):
             nonlocal replaced
-            if path == "HANDOFF.md" and not replaced:
+            if os.path.basename(path) == "HANDOFF.md" and not replaced:  # relative (by fd) or full (by path)
                 report.unlink()
-                report.symlink_to(outside)
+                symlink_or_skip(self, outside, report)
                 replaced = True
             return real_open(path, flags, *args, **kwargs)
 
@@ -213,6 +216,42 @@ class DiscoveryTests(unittest.TestCase):
             second = context.build(self.p, "release", handoffs=0)
         self.assertEqual(first, second)
         self.assertNotIn("Handoff discovery", first)
+
+
+class PathDiscoveryTests(DiscoveryTests):
+    """The same PAI-004 behaviour through the path-based backend that Windows uses."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(handoff, "DIR_FD", False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_backend_selected(self):
+        with mock.patch.object(handoff, "_discover_by_fd", side_effect=AssertionError("descriptor backend used")):
+            self.create(summary="PATH BACKEND")
+            reports, _ = handoff.discover(self.p)
+        self.assertEqual(len(reports), 1)
+
+    def test_crlf_report_is_recognized(self):
+        report = self.create(summary="CRLF REPORT")
+        report.write_bytes(report.read_bytes().replace(b"\n", b"\r\n"))
+        reports, _ = handoff.discover(self.p)
+        self.assertEqual([r["meta"]["task"] for r in reports], ["T-1"])
+        self.assertNotIn("\r", reports[0]["text"])
+
+    def test_missing_file_identity_is_refused(self):
+        self.create(summary="NO IDENTITY")
+        real_fstat = os.fstat
+
+        def no_ino(fd):
+            st = real_fstat(fd)
+            return os.stat_result((st.st_mode, 0) + tuple(st)[2:])
+
+        with mock.patch("pai.handoff.os.fstat", side_effect=no_ino):
+            reports, issues = handoff.discover(self.p)
+        self.assertEqual(reports, [])
+        self.assertTrue(any("file identity unavailable" in x for x in issues), issues)
 
 
 if __name__ == "__main__":

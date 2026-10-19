@@ -12,6 +12,7 @@
 
 import os
 import re
+import stat
 import string
 from datetime import datetime, timezone
 
@@ -85,7 +86,8 @@ def create(project, task_id, states=None, summary="", evidence=(), blockers=(), 
     created = moment.strftime("%Y-%m-%dT%H:%M:%SZ")
     path = _create_dir(inbox, task_id, moment.strftime("%Y%m%dT%H%M%SZ"))
     target = os.path.join(path, "HANDOFF.md")
-    with open(target, "x", encoding="utf-8") as f:
+    # LF line endings on every platform, so a report synchronized between devices is byte-identical.
+    with open(target, "x", encoding="utf-8", newline="\n") as f:
         f.write(render(project, task_id, created, states, summary, *lists))
     return target
 
@@ -132,6 +134,13 @@ def _metadata(text):
     return meta
 
 
+# Descriptor-relative, no-follow opens (Linux, macOS, BSD). Elsewhere, notably Windows, discovery
+# falls back to _discover_by_path, which refuses symlinks, junctions and other reparse points.
+DIR_FD = (hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY")
+          and {os.open, os.stat} <= os.supports_dir_fd and os.scandir in os.supports_fd)
+REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+
+
 def discover(project):
     """Return (reports, diagnostics). Never follow a directory or file symlink.
 
@@ -139,7 +148,22 @@ def discover(project):
     On entry overflow no subset is returned: filesystem enumeration order must
     never determine which reports win selection.
     """
-    import stat
+    reports, issues = (_discover_by_fd if DIR_FD else _discover_by_path)(project)
+    reports.sort(key=lambda r: r["label"])
+    reports.sort(key=lambda r: r["meta"]["created"], reverse=True)
+    return reports, issues
+
+
+def _report(name, raw, project):
+    """A report dict for raw HANDOFF.md bytes, None for another project; ValueError if malformed."""
+    if len(raw) > MAX_FILE_BYTES:
+        raise ValueError(f"file exceeds {MAX_FILE_BYTES}-byte limit")
+    text = raw.decode("utf-8").replace("\r\n", "\n")  # a report edited on Windows keeps its content
+    meta = _metadata(text)
+    return {"label": name + "/HANDOFF.md", "meta": meta, "text": text} if meta["project"] == project.key else None
+
+
+def _discover_by_fd(project):
     from pai.config import excluded
 
     reports, issues = [], []
@@ -181,12 +205,9 @@ def discover(project):
                             if not stat.S_ISREG(info.st_mode):
                                 raise ValueError("HANDOFF.md is not a regular file")
                             raw = stream.read(MAX_FILE_BYTES + 1)
-                        if len(raw) > MAX_FILE_BYTES:
-                            raise ValueError(f"file exceeds {MAX_FILE_BYTES}-byte limit")
-                        text = raw.decode("utf-8")
-                        meta = _metadata(text)
-                        if meta["project"] == project.key:
-                            reports.append({"label": name + "/HANDOFF.md", "meta": meta, "text": text})
+                        report = _report(name, raw, project)
+                        if report:
+                            reports.append(report)
                     finally:
                         os.close(task_fd)
                 except (OSError, ValueError) as exc:
@@ -197,8 +218,84 @@ def discover(project):
             os.close(fd)
     except OSError as exc:
         issues.append(f"UNAVAILABLE Inbox: {exc.strerror or 'invalid inbox path'}")
-    reports.sort(key=lambda r: r["label"])
-    reports.sort(key=lambda r: r["meta"]["created"], reverse=True)
+    return reports, issues
+
+
+def _is_link(info):
+    """A symlink, or on Windows any reparse point (junction, mount point, cloud placeholder…)."""
+    return stat.S_ISLNK(info.st_mode) or bool(getattr(info, "st_file_attributes", 0) & REPARSE_POINT)
+
+
+def _identity(info):
+    if not info.st_ino:  # some filesystems report no file identity; then a swap cannot be detected
+        raise ValueError("file identity unavailable on this filesystem")
+    return info.st_dev, info.st_ino
+
+
+def _discover_by_path(project):
+    """Path-based discovery for platforms without descriptor-relative no-follow opens (Windows).
+
+    Same rules and output as _discover_by_fd. Every Inbox component, task directory and HANDOFF.md
+    is checked with lstat and refused if it is a link or reparse point. After opening, the file and
+    its task directory must still be the objects checked (device and file id), so a swap between
+    check and open is refused. A residual window remains: an attacker able to write inside the
+    Inbox could swap a directory and swap it back between those checks.
+    """
+    from pai.config import excluded
+
+    reports, issues = [], []
+    try:
+        rel = os.path.relpath(project.inbox, project.vault)
+        if rel == "." or rel == ".." or rel.startswith(".." + os.sep) or os.path.isabs(rel):
+            raise OSError(0, "inbox escapes vault")
+        inbox = project.vault
+        for part in [""] + rel.split(os.sep):
+            inbox = os.path.join(inbox, part) if part else inbox
+            info = os.lstat(inbox)
+            if _is_link(info) or not stat.S_ISDIR(info.st_mode):
+                raise OSError(0, "link, reparse point or non-directory in the inbox path")
+        names = []
+        with os.scandir(inbox) as entries:
+            for entry in entries:
+                names.append(entry.name)
+                if len(names) > MAX_ENTRIES:
+                    return [], [f"LIMIT: Inbox exceeds {MAX_ENTRIES} entries; discovery refused (no partial ordering)"]
+        for name in sorted(names):
+            label = repr(name + "/HANDOFF.md")
+            task = os.path.join(inbox, name)
+            try:
+                info = os.lstat(task)
+                if _is_link(info):
+                    issues.append(f"REFUSED {label}: symlink entry")
+                    continue
+                if not stat.S_ISDIR(info.st_mode):
+                    continue
+                if excluded(name, project.exclude):
+                    issues.append(f"EXCLUDED {label}: exclusion pattern")
+                    continue
+                path = os.path.join(task, "HANDOFF.md")
+                before = os.lstat(path)
+                if _is_link(before):
+                    raise ValueError("HANDOFF.md is a link or reparse point")
+                if not stat.S_ISREG(before.st_mode):
+                    raise ValueError("HANDOFF.md is not a regular file")
+                fd = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+                with os.fdopen(fd, "rb") as stream:
+                    opened = os.fstat(stream.fileno())
+                    if not stat.S_ISREG(opened.st_mode) or _identity(opened) != _identity(before):
+                        raise ValueError("HANDOFF.md changed while it was opened")
+                    raw = stream.read(MAX_FILE_BYTES + 1)
+                if _identity(os.lstat(task)) != _identity(info):
+                    raise ValueError("task directory changed while it was read")
+                report = _report(name, raw, project)
+                if report:
+                    reports.append(report)
+            except (OSError, ValueError) as exc:
+                # Do not leak absolute paths from OS errors into generated context.
+                reason = (exc.strerror or "unavailable") if isinstance(exc, OSError) else str(exc)
+                issues.append(f"UNAVAILABLE/MALFORMED {label}: {reason}")
+    except OSError as exc:
+        issues.append(f"UNAVAILABLE Inbox: {exc.strerror or 'invalid inbox path'}")
     return reports, issues
 
 

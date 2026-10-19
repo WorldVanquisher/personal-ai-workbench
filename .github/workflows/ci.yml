@@ -1,6 +1,7 @@
 name: CI
 
-# Synthetic tests and a release-bundle smoke check on Linux and macOS.
+# Synthetic tests and release-bundle smoke checks on Windows, macOS and Linux, plus
+# lightweight runs in Debian, Ubuntu, Fedora and Alpine userspaces.
 # Nothing is published: no release, tag, package upload or secret is used.
 
 on:
@@ -21,17 +22,27 @@ jobs:
   test:
     name: ${{ matrix.os }} / Python ${{ matrix.python }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         python: ["3.11", "3.13"]
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
         with:
           persist-credentials: false
+
+      # Installed first so that the tested interpreter below stays the default on PATH.
+      - name: Set up Python 3.10 (must be refused)
+        id: old
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -39,19 +50,85 @@ jobs:
           python-version: ${{ matrix.python }}
 
       - name: Unit and synthetic tests
-        timeout-minutes: 5
-        run: python3 -B -W error::ResourceWarning -m unittest discover -s tests -v
+        timeout-minutes: 8
+        run: python -B -W error::ResourceWarning -m unittest discover -s tests -v
 
-      - name: Build the release bundle
+      - name: Build both release archives
         timeout-minutes: 3
         run: |
-          out="$(python3 -B tools/build_bundle.py --out "$RUNNER_TEMP/dist")"
+          out="$(python -B tools/build_bundle.py --out "$RUNNER_TEMP/dist")"
           echo "$out"
-          echo "PAI_ARCHIVE=$(printf '%s\n' "$out" | sed -n 2p)" >> "$GITHUB_ENV"
+          echo "PAI_TGZ=$(printf '%s\n' "$out" | sed -n 2p)" >> "$GITHUB_ENV"
+          echo "PAI_ZIP=$(printf '%s\n' "$out" | sed -n 4p)" >> "$GITHUB_ENV"
 
-      - name: Bundle migration smoke
-        timeout-minutes: 5
-        run: python3 -B tools/bundle_smoke.py "$PAI_ARCHIVE" --work "$RUNNER_TEMP/smoke work"
+      - name: Rebuild is byte-identical
+        timeout-minutes: 3
+        run: |
+          python -B tools/build_bundle.py --out "$RUNNER_TEMP/dist2" > /dev/null
+          for f in "$PAI_TGZ" "$PAI_ZIP"; do
+            cmp "$f" "$RUNNER_TEMP/dist2/$(basename "$f")"
+          done
+
+      - name: Downloaded-bundle smoke (this platform's format first)
+        timeout-minutes: 8
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then first="$PAI_ZIP"; second="$PAI_TGZ"; else first="$PAI_TGZ"; second="$PAI_ZIP"; fi
+          python -B tools/bundle_smoke.py "$first" "$second" --work "$RUNNER_TEMP/smoke work" --keep
+          bundle="$(ls -d "$RUNNER_TEMP/smoke work/location-one"/pai-workbench-*)"
+          if [ "$RUNNER_OS" = "Windows" ]; then bundle="$(cygpath -w "$bundle")"; fi
+          echo "PAI_BUNDLE=$bundle" >> "$GITHUB_ENV"
+
+      - name: Real Python 3.10 is refused (POSIX launcher)
+        if: runner.os != 'Windows'
+        timeout-minutes: 2
+        env:
+          PAI_PYTHON: ${{ steps.old.outputs.python-path }}
+        run: |
+          set +e
+          "$PAI_BUNDLE/bin/pai" --version 2> "$RUNNER_TEMP/err.txt"
+          rc=$?
+          set -e
+          cat "$RUNNER_TEMP/err.txt"
+          test "$rc" = 2
+          grep -q "3.11 or newer is required; this is 3.10" "$RUNNER_TEMP/err.txt"
+
+      - name: Windows launcher from cmd.exe in an unrelated directory
+        if: runner.os == 'Windows'
+        timeout-minutes: 3
+        shell: cmd
+        env:
+          OLD_PYTHON: ${{ steps.old.outputs.python-path }}
+        run: |
+          cd /d "%RUNNER_TEMP%"
+          set "PAI_PYTHON="
+          call "%PAI_BUNDLE%\bin\pai.cmd" --version || exit /b 1
+          call "%PAI_BUNDLE%\bin\pai.cmd" doctor
+          if not "%ERRORLEVEL%"=="1" exit /b 1
+          set "PAI_PYTHON=%OLD_PYTHON%"
+          call "%PAI_BUNDLE%\bin\pai.cmd" --version 2> "%RUNNER_TEMP%\old.txt"
+          if not "%ERRORLEVEL%"=="2" exit /b 1
+          type "%RUNNER_TEMP%\old.txt"
+          findstr /c:"3.11 or newer is required; this is 3.10" "%RUNNER_TEMP%\old.txt" || exit /b 1
+
+      - name: Windows launcher from PowerShell in an unrelated directory
+        if: runner.os == 'Windows'
+        timeout-minutes: 3
+        shell: pwsh
+        env:
+          OLD_PYTHON: ${{ steps.old.outputs.python-path }}
+        run: |
+          Set-Location $env:RUNNER_TEMP
+          Remove-Item Env:PAI_PYTHON -ErrorAction SilentlyContinue
+          & "$env:PAI_BUNDLE\bin\pai.cmd" --version
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & "$env:PAI_BUNDLE\bin\pai.cmd" doctor --agents
+          if ($LASTEXITCODE -ne 1) { exit 1 }   # no configuration in this bundle yet
+          python "$env:PAI_BUNDLE\bin\pai.py" --version
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $env:PAI_PYTHON = $env:OLD_PYTHON
+          & "$env:PAI_BUNDLE\bin\pai.cmd" --version
+          if ($LASTEXITCODE -ne 2) { exit 1 }
+          exit 0
 
       - name: Upload smoke report on failure
         if: ${{ failure() }}
@@ -61,3 +138,34 @@ jobs:
           path: ${{ runner.temp }}/smoke work/smoke-results.json
           if-no-files-found: ignore
           retention-days: 5
+
+  userspace:
+    # Lightweight checks in other Linux userspaces, with each image's own python3. Containers run
+    # through docker directly because JavaScript actions do not run inside Alpine (musl).
+    name: userspace / ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: debian:stable-slim
+            setup: apt-get update -qq && apt-get install -y -qq python3 > /dev/null
+          - image: ubuntu:24.04
+            setup: apt-get update -qq && apt-get install -y -qq python3 > /dev/null
+          - image: fedora:latest
+            setup: dnf -y -q install python3 > /dev/null
+          - image: alpine:latest
+            setup: apk add --no-cache -q python3
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Tests, build and bundle smoke as an unprivileged user
+        timeout-minutes: 12
+        env:
+          IMAGE: ${{ matrix.image }}
+          SETUP: ${{ matrix.setup }}
+        run: docker run --rm -v "$PWD:/src:ro" -e SETUP "$IMAGE" sh /src/tools/ci_userspace.sh

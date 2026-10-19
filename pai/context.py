@@ -112,7 +112,8 @@ def collect(project):
             continue
         with open(src.path, "rb") as f:
             raw = f.read()
-        meta, body = front_matter(raw.decode("utf-8", errors="replace"))
+        # Notes saved on Windows may use CRLF; front matter and headings are matched on LF.
+        meta, body = front_matter(raw.decode("utf-8", errors="replace").replace("\r\n", "\n"))
         src.meta = meta
         src.sha = hashlib.sha256(raw).hexdigest()[:12]
         is_prop_file = src.kind == "memory" and os.path.basename(src.path) in project.proposal_files
