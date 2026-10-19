@@ -58,18 +58,30 @@ The 0.1.0 archive and its checksum are unchanged. See `INSTALL.md`.
 
 ### Tested environments
 
-What has actually been run for this version is listed here; everything else
-is configured in CI and counts as tested only once a CI run passes.
+The evidence below distinguishes local Linux checks from the passing PR CI
+run. It does not establish universal distribution, architecture or filesystem
+compatibility.
 
 - **Run locally (Linux):** the full suite, both builds and the bundle smoke on
   an Arch Linux host (Python 3.14), and in a Debian 13 container with Python
   3.11 (`/bin/sh` is dash), offline and unprivileged.
-- **Configured in CI, not yet observed for this release:** Windows Server,
-  macOS and Ubuntu runners with Python 3.11 and 3.13, including real Python 3.10
-  refusal, cmd.exe, PowerShell and junction tests; Debian stable, Ubuntu
-  24.04, Fedora and Alpine (musl) containers with their own `python3`.
-- **Not tested:** Windows on a personal machine, ARM Linux, network shares,
-  FAT/exFAT, other distributions and filesystems.
+- **Verified PR CI:** PR #6 passed all **10 jobs** in
+  [run 39325458683](https://github.com/WorldVanquisher/personal-ai-workbench/actions/runs/39325458683),
+  testing PR head `b8a9b0f33ced4639ba5d64044bd8419dc1e2f923`.
+  Passing environments were Windows, macOS and Ubuntu runners with Python
+  **3.11 and 3.13**, plus Debian, Ubuntu 24.04, Fedora and Alpine userspaces.
+  The workflow checks unit/synthetic tests, release builds, reproducibility
+  and extracted-bundle smoke. Windows also exercises cmd.exe, PowerShell and
+  explicit Python 3.10 refusal.
+- **Post-merge status:** PR #6 merged as
+  `49c2e71e884d82d81e5bd465dde6429b8400cc0b`. The
+  [post-merge main run 39325609161](https://github.com/WorldVanquisher/personal-ai-workbench/actions/runs/39325609161)
+  was still running when this evidence was supplied; a successful result is
+  not established here. The passing PR run does not establish that 0.2.0 has
+  been tagged or published.
+- **Not verified:** installation on the user's actual Windows and Mac
+  devices; ARM Linux, network shares, FAT/exFAT, and distributions and
+  filesystems beyond those covered by the evidence above.
 
 ## 0.1.0
 
