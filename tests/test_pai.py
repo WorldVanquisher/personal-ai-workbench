@@ -156,6 +156,7 @@ class ContextTests(unittest.TestCase):
             self.assertLessEqual(len(out), budget, budget)
             self.assertNotIn("OUTPUT CUT", out)
             self.assertIn("## Omitted", out)
+            self.assertIn("[HUMAN] Public deployment is frozen.", out)
             self.assertGreater(out.index("## Omitted"), out.rfind("\n### "))  # the list comes after every section
         out = context.build(p, "release checksum", 4000)
         self.assertRegex(out, r"Release topic \d+.*chars")
@@ -222,19 +223,18 @@ class ContextTests(unittest.TestCase):
         self.assertNotIn("Known limits", req)  # "limits" is not the configured pattern "limitation"
         self.assertIn("Human decisions in force", req)
 
-    def test_required_cannot_starve_relevant(self):
+    def test_required_overflow_fails_instead_of_serving_optional_sections(self):
         many = "\n\n".join(f"## Limitation {i}\n\n" + ("required filler text " * 60) for i in range(30))
         (self.f.mem / "many.md").write_text("---\ncreated: 2030-01-01T00:00Z\n---\n# Many\n\n" + many)
-        out = context.build(self.f.project(), "release checksum", 8000)
-        self.assertLessEqual(len(out), 8000)
-        self.assertIn("## Task-relevant sections", out)
-        self.assertIn("docs/release.md § Release > Checksums", out)
-        self.assertIn("**REQUIRED**", out)  # overflowing required sections are named, not dropped silently
+        with self.assertRaisesRegex(handoff.HandoffError, "required.*raise --budget"):
+            context.build(self.f.project(), "release checksum", 8000)
 
     def test_human_decisions_first_under_small_budget(self):
         (self.f.mem / "aaa.md").write_text("---\ncreated: 2030-01-01T00:00Z\n---\n# A\n\n## Blockers\n\n" + "blocker text " * 150 + "\n")
-        out = context.build(self.f.project(), "release", 4000)
-        self.assertIn("[HUMAN] Public deployment is frozen.", out)  # ranked before the earlier, larger Blockers section
+        with self.assertRaisesRegex(handoff.HandoffError, "required.*raise --budget"):
+            context.build(self.f.project(), "release", 4000)
+        out = context.build(self.f.project(), "release", 8000)
+        self.assertLess(out.index("[HUMAN] Public deployment is frozen."), out.index("blocker text"))
 
     def test_cli_context_and_check(self):
         rc, out, _ = run_cli("--config", str(self.f.cfg), "context", "demo", "--task", "release", "--budget", "3000")

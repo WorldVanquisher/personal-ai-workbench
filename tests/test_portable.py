@@ -23,8 +23,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
 import bundle_smoke  # noqa: E402
-from pai import config, handoff, initcfg  # noqa: E402
-from test_pai import run_cli  # noqa: E402
+from pai import config, context, handoff, initcfg  # noqa: E402
+from test_pai import run_cli, symlink_or_skip  # noqa: E402
 
 WINDOWS = os.name == "nt"
 LAUNCHER = ROOT / "bin" / ("pai.cmd" if WINDOWS else "pai")
@@ -129,6 +129,32 @@ class UnicodeWorkflowTests(unittest.TestCase):
         self.assertIn("task=UNI-1", out)
         self.assertIn("approved=false", out)
 
+    def test_source_escape_and_secret_exclusion_prevent_reads(self):
+        outside = self.base / "outside"
+        outside.mkdir()
+        for name in ("Note.md", "Secret.md"):
+            (outside / name).write_text("# N\n\n## Goal\n\nOUTSIDE-CONTENT\n", encoding="utf-8")
+        symlink_or_skip(self, outside, self.vault / "Projects" / "linked", directory=True)
+        project = config.from_dict("demo", {
+            "repo": str(self.repo), "vault": str(self.vault), "memory": "Agent Inbox/MEM-1",
+            "inbox": "Agent Inbox", "markdown_roots": ["Projects"],
+            "project_notes": ["Projects/linked/Note.md", "Projects/linked/Secret.md"],
+        })
+        sources = [s for s in project.sources if s.kind == "vault-note"]
+        self.assertEqual([s.status for s in sources], ["refused", "excluded"])
+        self.assertIn("escapes its root", sources[0].reason)
+        with mock.patch("pai.context.open", wraps=open) as reads:
+            out = context.build(project, "goal")
+        self.assertNotIn("OUTSIDE-CONTENT", out)
+        self.assertFalse(any(Path(call.args[0]).resolve().is_relative_to(outside.resolve())
+                             for call in reads.call_args_list))
+
+    def test_source_labels_use_portable_separators(self):
+        run_cli(*init_args(self.cfg, self.repo, self.vault, "--write"))
+        project = config.load("demo", str(self.cfg))
+        self.assertTrue(all("\\" not in s.label for s in project.sources))
+        self.assertIn("Agent Inbox/MEM-1/status.md", [s.label for s in project.sources])
+
     def test_concurrent_handoffs_in_unicode_inbox(self):
         run_cli(*init_args(self.cfg, self.repo, self.vault, "--write"))
         project = config.load("demo", str(self.cfg))
@@ -175,12 +201,17 @@ class JunctionTests(unittest.TestCase):
         self._t.cleanup()
 
     def test_junction_source_is_refused(self):
+        # Secret.md exercises the credential denylist, not junction containment.
+        (self.outside / "Note.md").write_text("# N\n\n## Goal\n\nOUTSIDE-CONTENT\n", encoding="utf-8")
         self.junction(str(self.outside), str(self.vault / "Projects" / "linked"))
         p = config.from_dict("demo", {"repo": str(self.repo), "vault": str(self.vault), "memory": "Agent Inbox/MEM-1",
                                       "inbox": "Agent Inbox", "markdown_roots": ["Projects"],
-                                      "project_notes": ["Projects/linked/Secret.md"]})
+                                      "project_notes": ["Projects/linked/Note.md", "Projects/linked/Secret.md"]})
         src = [s for s in p.sources if s.kind == "vault-note"][0]
         self.assertEqual(src.status, "refused")
+        self.assertIn("escapes its root", src.reason)
+        self.assertEqual([s.status for s in p.sources if s.kind == "vault-note"], ["refused", "excluded"])
+        self.assertNotIn("OUTSIDE-CONTENT", context.build(p, "goal"))
 
     def test_junction_in_inbox_is_refused_by_discovery(self):
         project = config.load("demo", str(self.cfg))
@@ -319,9 +350,14 @@ class ExtractionTests(unittest.TestCase):
         with zipfile.ZipFile(path, "w") as z:
             z.writestr("top/ok.txt", b"ok")
             info = zipfile.ZipInfo(name)
+            # ZipInfo's constructor rewrites backslashes on Windows. Force the raw
+            # member name into both ZIP headers, then verify the archive we created.
+            info.filename = name
             if attr is not None:
                 info.create_system, info.external_attr = 3, attr << 16
             z.writestr(info, data)
+        with zipfile.ZipFile(path) as z:
+            self.assertEqual(z.infolist()[1].orig_filename, name)
         return str(path)
 
     def tar_with(self, member):
@@ -355,6 +391,16 @@ class ExtractionTests(unittest.TestCase):
         path.write_bytes(bytes(data))
         with self.assertRaisesRegex(RuntimeError, "CRC"):
             bundle_smoke.safe_extract(str(path), str(self.tmp / "dest"))
+
+    def test_raw_backslash_member_refused_after_windows_normalization(self):
+        archive = self.zip_with("top\\back.txt")
+        with mock.patch("zipfile.os.sep", "\\"):
+            with zipfile.ZipFile(archive) as z:
+                member = z.infolist()[1]
+                self.assertEqual(member.filename, "top/back.txt")
+                self.assertEqual(member.orig_filename, "top\\back.txt")
+            with self.assertRaisesRegex(RuntimeError, "unsafe member path"):
+                bundle_smoke.safe_extract(archive, str(self.tmp / "normalized dest"))
 
 
 if __name__ == "__main__":

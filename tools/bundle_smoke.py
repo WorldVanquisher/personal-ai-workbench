@@ -83,6 +83,9 @@ def safe_extract(archive, dest):
             infos = z.infolist()
             names = [i.filename for i in infos]
             for i in infos:
+                # ZipInfo normalizes backslashes on Windows. Validate the original
+                # archive name as well so a genuinely hostile member is still refused.
+                check_member_name(i.orig_filename)
                 check_member_name(i.filename)
                 kind = stat.S_IFMT(i.external_attr >> 16)
                 if kind not in (0, stat.S_IFREG, stat.S_IFDIR):

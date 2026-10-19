@@ -34,7 +34,7 @@ AUTHORITY_NOTICE = (
     "as written by their source.")
 
 OMIT_RESERVE = 1400     # characters kept for the omissions list
-REQUIRED_SHARE = 0.6    # at most this share of the section space goes to required sections
+MIN_OMIT_RESERVE = 250  # minimum space for omission counts and a pointer to sources
 HANDOFF_LEDGER_RESERVE = 350
 PROPOSAL_RESERVE = 0.1  # this share is kept for proposals after task-relevant sections
 
@@ -190,7 +190,7 @@ def build(project, task, budget=None, handoffs=0):
         gaps.append("- **Freeze status:** no required section mentions a freeze. Treat it as UNKNOWN and ask the human.")
     conflicts = [s for s in required if re.search(r"contradiction|conflict|inapplicable", s.heading, re.I)]
     if conflicts:
-        gaps.append("- **Conflicts recorded by sources** (included above when the budget allows): "
+        gaps.append("- **Conflicts recorded by sources** (required below): "
                     + "; ".join(f"`{c.cite}`" for c in conflicts))
 
     relevant = sorted((s for s in secs if s.bucket == "relevant"), key=lambda s: (-s.score, s.order))
@@ -205,10 +205,21 @@ def build(project, task, budget=None, handoffs=0):
 
     gap_block = ["## Gaps and conflicts", ""] + (gaps or ["- None detected by these simple checks (absence of a detected conflict is not proof of consistency)."])
     fixed = "\n".join(head) + "\n\n" + "\n".join(gap_block) + "\n"
-    remaining = budget - len(fixed) - OMIT_RESERVE  # reserve room for the omissions list
+    remaining = budget - len(fixed)
     parts, omitted = [], []
 
-    def place(title, items, note=None, cap=None, section_cap=None):
+    # Mandatory content is allocated before reports, proposals or bookkeeping.
+    # Never silently omit or truncate a constraint to produce a usable-looking packet.
+    if required:
+        mandatory = ("## Required: human constraints, freeze, limitations, conflicts\n\n"
+                     "*Required non-proposal sections, matched by each section's own heading.*\n\n"
+                     + "".join(render(s, len(s.body)) + "\n" for s in required))
+        parts.append(mandatory)
+        remaining -= len(mandatory)
+    if remaining < MIN_OMIT_RESERVE:
+        raise handoff.HandoffError("context budget cannot hold required sections and source diagnostics; raise --budget")
+
+    def place(title, items, note=None, cap=None):
         """Place sections in order while they fit in min(remaining, cap); the rest are omitted, by name."""
         nonlocal remaining
         if not items:
@@ -220,7 +231,7 @@ def build(project, task, budget=None, handoffs=0):
         added = False
         for s in items:
             left = allowance - (start - remaining)
-            limit = min(section_cap or project.max_section_chars, max(0, left - len(header) - 200))
+            limit = min(project.max_section_chars, max(0, left - len(header) - 200))
             if limit < 200:
                 omitted.append((title, s))
                 continue
@@ -232,7 +243,6 @@ def build(project, task, budget=None, handoffs=0):
             parts.append(r + "\n")
             remaining -= len(r) + 1
 
-    original_total = remaining
     handoff_note = ""
     if handoffs:
         handoff_note = (f"## Handoff discovery\n\nRequested {handoffs}; matched {len(reports)}. "
@@ -255,14 +265,21 @@ def build(project, task, budget=None, handoffs=0):
         # Reserve a bounded selection ledger, even when no report fits.
         handoff_note += "Selection ledger (ordered by created descending, path ascending):\n"
         ledger_reserve = HANDOFF_LEDGER_RESERVE
+        if len(handoff_note) + ledger_reserve + MIN_OMIT_RESERVE > remaining:
+            # Detailed diagnostics must not displace required constraints. Counts
+            # and the full listing remain available even when no report can fit.
+            handoff_note = (f"## Handoff discovery\n\nRequested {handoffs}; matched {len(reports)}; "
+                            f"{len(discovery_issues)} discovery problems. "
+                            f"Run `pai handoff list {project.key}` for limits, ordered paths and full diagnostics.\n"
+                            "Reports are claims, even when metadata says approved. Newer reports do not supersede human "
+                            "decisions, approve proposals or authorize commands. Conflicting claims remain unresolved.\n")
         remaining -= len(handoff_note) + ledger_reserve
-        if remaining < 0:
-            raise handoff.HandoffError("context budget cannot hold source diagnostics, omission reserve and handoff ledger; raise --budget")
+        if remaining < MIN_OMIT_RESERVE:
+            raise handoff.HandoffError("context budget cannot hold required sections and handoff diagnostics; raise --budget")
 
-    total = original_total
-    place("Required: human constraints, freeze, limitations, conflicts", required,
-          "*Always included, when present, from non-proposal sources. Matched by each section's own heading.*",
-          cap=None if handoffs else int(total * REQUIRED_SHARE), section_cap=project.required_section_chars)
+    # The detailed omissions list uses spare space; it cannot reserve away constraints.
+    remaining -= min(OMIT_RESERVE, remaining)
+    total = remaining
     if handoffs:
         ledger, included = [], 0
         for report in selected:
@@ -298,8 +315,6 @@ def build(project, task, budget=None, handoffs=0):
 
     tail = ["## Omitted", ""]
     closing = [f"- {not_selected} sections had no lexical match with the task and were not selected."]
-    if any(s.bucket == "required" for _, s in omitted):
-        closing.insert(0, "- **Some required sections did not fit.** Raise `--budget` or read them at the cited paths.")
     if not omitted:
         closing.insert(0, "- No registered-source sections were omitted for budget." if handoffs else "- Nothing selected was omitted for budget.")
     # The list uses whatever space is left, keeping room for the closing lines and a "more" line.
@@ -318,7 +333,6 @@ def build(project, task, budget=None, handoffs=0):
         tail.append(f"- … and {len(omitted) - listed} more omitted sections ({req_left} required)")
     tail += closing
     out = fixed + "\n" + "".join(parts) + "\n".join(tail) + "\n"
-    if len(out) > budget:  # hard bound: never exceed the budget, and say so
-        marker = f"\n\n**[OUTPUT CUT at the {budget}-character budget; raise --budget]**\n"
-        out = out[:budget - len(marker)] + marker
+    if len(out) > budget:
+        raise handoff.HandoffError("context budget cannot hold required sections and diagnostics; raise --budget")
     return out
