@@ -69,11 +69,18 @@ class DiscoveryTests(unittest.TestCase):
         c = self.create("C")
         a.write_text(a.read_text().replace("2031-01-01T00:00:00Z", "2032-01-01T00:00:00Z"))
         os.utime(c, (1, 1))
-        expected = [str(p.relative_to(self.inbox)) for p in (a, b, c)]
+        expected = [p.relative_to(self.inbox).as_posix() for p in (a, b, c)]
         for _ in range(3):
             self.assertEqual([r["label"] for r in handoff.discover(self.p)[0]], expected)
         out = context.build(self.p, "release", handoffs=1)
         self.assertIn("2 by requested count", out)
+
+    def test_crlf_report_is_recognized(self):
+        report = self.create(summary="CRLF REPORT")
+        report.write_bytes(report.read_bytes().replace(b"\n", b"\r\n"))
+        reports, _ = handoff.discover(self.p)
+        self.assertEqual([r["meta"]["task"] for r in reports], ["T-1"])
+        self.assertNotIn("\r", reports[0]["text"])
 
     def test_malformed_metadata_missing_and_encoding(self):
         original = self.create().read_text()
@@ -232,13 +239,6 @@ class PathDiscoveryTests(DiscoveryTests):
             self.create(summary="PATH BACKEND")
             reports, _ = handoff.discover(self.p)
         self.assertEqual(len(reports), 1)
-
-    def test_crlf_report_is_recognized(self):
-        report = self.create(summary="CRLF REPORT")
-        report.write_bytes(report.read_bytes().replace(b"\n", b"\r\n"))
-        reports, _ = handoff.discover(self.p)
-        self.assertEqual([r["meta"]["task"] for r in reports], ["T-1"])
-        self.assertNotIn("\r", reports[0]["text"])
 
     def test_missing_file_identity_is_refused(self):
         self.create(summary="NO IDENTITY")
