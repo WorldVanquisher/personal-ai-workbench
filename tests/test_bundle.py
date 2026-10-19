@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
 import build_bundle  # noqa: E402
+import bundle_smoke  # noqa: E402
 from pai import cli, config, doctor, handoff  # noqa: E402
 
 
@@ -286,11 +287,44 @@ class BuildTests(unittest.TestCase):
         order = ["zip", "tar.gz"] if os.name == "nt" else ["tar.gz", "zip"]
         p = subprocess.run([sys.executable, "-B", str(ROOT / "tools" / "bundle_smoke.py"),
                             *(archives[f][0] for f in order), "--work", str(self.tmp / "smoke work")],
-                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
+                           env=dict(os.environ, PYTHONIOENCODING="cp1252:strict"),
+                           capture_output=True, text=True, encoding="utf-8", errors="strict", timeout=300)
         self.assertEqual(p.returncode, 0, p.stdout[-3000:] + p.stderr[-2000:])
+        self.assertIn("6 concurrent handoffs → 6 distinct new files", p.stdout)
+        self.assertIn("dossier é 日本", p.stdout)
         report = json.loads((self.tmp / "smoke work" / "smoke-results.json").read_text(encoding="utf-8"))
         self.assertEqual(report["fail"], 0)
         self.assertGreaterEqual(report["pass"], 40)
+        self.assertTrue(any("handoffs →" in r["check"] for r in report["results"]))
+        self.assertTrue(any("日本" in r["check"] for r in report["results"]))
+
+
+class SmokeEncodingTests(unittest.TestCase):
+    def test_legacy_streams_emit_utf8_for_checks_diagnostics_and_stderr(self):
+        out_bytes, err_bytes = io.BytesIO(), io.BytesIO()
+        with io.TextIOWrapper(out_bytes, encoding="cp1252", errors="strict") as out, \
+                io.TextIOWrapper(err_bytes, encoding="cp1252", errors="strict") as err:
+            with mock.patch.object(bundle_smoke.sys, "stdout", out), \
+                    mock.patch.object(bundle_smoke.sys, "stderr", err), \
+                    mock.patch.object(bundle_smoke, "RESULTS", []):
+                bundle_smoke.configure_output()
+                bundle_smoke.check("handoffs → 日本", True)
+                bundle_smoke.check("failure → 日本", False, "détails → 日本")
+                bundle_smoke.skip("skip → 日本", "raison → 日本")
+                print("stderr → 日本", file=sys.stderr, flush=True)
+                self.assertEqual(out_bytes.getvalue().decode("utf-8"),
+                                 "PASS  handoffs → 日本\nFAIL  failure → 日本  — détails → 日本\n"
+                                 "SKIP  skip → 日本  — raison → 日本\n")
+                self.assertEqual(err_bytes.getvalue().decode("utf-8"), "stderr → 日本\n")
+
+    def test_runner_decodes_piped_utf8_from_both_streams(self):
+        text = "handoffs → é 日本\n"
+        code = (f"import sys; data = {ascii(text)}.encode('utf-8'); "
+                "sys.stdout.buffer.write(data); sys.stderr.buffer.write(data)")
+        run = bundle_smoke.Runner(str(ROOT), dict(os.environ, PYTHONIOENCODING="cp1252:strict"),
+                                  str(ROOT), command=[sys.executable, "-B", "-c", code])
+        rc, out, err = run()
+        self.assertEqual((rc, out, err), (0, text, text))
 
 
 class AliasPathTests(unittest.TestCase):
@@ -379,7 +413,8 @@ class AliasPathTests(unittest.TestCase):
         work = self.alias / "smoke work"
         p = subprocess.run([sys.executable, "-B", str(ROOT / "tools" / "bundle_smoke.py"),
                             archives["zip" if os.name == "nt" else "tar.gz"][0], "--work", str(work)],
-                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
+                           env=dict(os.environ, PYTHONIOENCODING="cp1252:strict"),
+                           capture_output=True, text=True, encoding="utf-8", errors="strict", timeout=300)
         self.assertEqual(p.returncode, 0, p.stdout[-3000:] + p.stderr[-2000:])
         report = json.loads((work / "smoke-results.json").read_text(encoding="utf-8"))
         self.assertEqual(report["fail"], 0)
