@@ -13,6 +13,7 @@ import tarfile
 import tempfile
 import tokenize
 import unittest
+import zipfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -53,7 +54,8 @@ class InitTests(unittest.TestCase):
         self._t = tempfile.TemporaryDirectory()
         self.tmp = Path(self._t.name)
         self.repo, self.vault = make_data(self.tmp)
-        self.cfg = self.tmp / 'cfg "quoted" dir' / "pai.toml"
+        # Windows forbids '"' in file names; elsewhere it exercises TOML string escaping.
+        self.cfg = self.tmp / ("cfg 'quoted' dir" if os.name == "nt" else 'cfg "quoted" dir') / "pai.toml"
         self.cfg.parent.mkdir()
 
     def tearDown(self):
@@ -66,7 +68,11 @@ class InitTests(unittest.TestCase):
         self.assertFalse(self.cfg.exists())
         rc, out, _ = run_cli(*init_args(self.cfg, self.repo, self.vault, "--write"))
         self.assertEqual(rc, 0)
-        self.assertEqual(self.cfg.stat().st_mode & 0o777, 0o600)
+        if os.name == "nt":  # POSIX modes are not Windows ACLs, and pai says so
+            self.assertIn("does not apply on Windows", out)
+        else:
+            self.assertEqual(self.cfg.stat().st_mode & 0o777, 0o600)
+            self.assertIn("mode 0600", out)
         before = self.cfg.read_bytes()
         rc, _, err = run_cli(*init_args(self.cfg, self.repo, self.vault, "--write"))
         self.assertEqual(rc, 2)
@@ -169,20 +175,64 @@ class BuildTests(unittest.TestCase):
         return src
 
     def test_deterministic_and_allowlisted(self):
-        a1, d1, version, n = build_bundle.build(str(ROOT), str(self.tmp / "o1"), 0)
-        a2, d2, *_ = build_bundle.build(str(ROOT), str(self.tmp / "o2"), 0)
-        self.assertEqual(d1, d2)
+        r1, version, n = build_bundle.build(str(ROOT), str(self.tmp / "o1"), 0)
+        r2, *_ = build_bundle.build(str(ROOT), str(self.tmp / "o2"), 0)
+        self.assertEqual(r1["tar.gz"][1], r2["tar.gz"][1])
+        self.assertEqual(r1["zip"][1], r2["zip"][1])
         allow = build_bundle.read_allowlist(str(ROOT))
-        with tarfile.open(a1) as t:
+        with tarfile.open(r1["tar.gz"][0]) as t:
             files = sorted(m.name.split("/", 1)[1] for m in t.getmembers() if m.isfile())
-            manifest = json.loads(t.extractfile(f"pai-workbench-{version}/MANIFEST.json").read())
+            tar_bytes = {m.name: t.extractfile(m).read() for m in t.getmembers() if m.isfile()}
+            manifest = json.loads(tar_bytes[f"pai-workbench-{version}/MANIFEST.json"])
+            modes = {m.name.split("/", 1)[1]: m.mode for m in t.getmembers() if m.isfile()}
+        with zipfile.ZipFile(r1["zip"][0]) as z:
+            zip_bytes = {i.filename: z.read(i) for i in z.infolist() if not i.is_dir()}
+            zip_modes = {i.filename.split("/", 1)[1]: (i.external_attr >> 16) & 0o777 for i in z.infolist() if not i.is_dir()}
+            self.assertTrue(all(i.date_time == (1980, 1, 1, 0, 0, 0) for i in z.infolist()))  # epoch 0, clamped
         self.assertEqual(files, sorted(allow + ["MANIFEST.json", "SHA256SUMS"]))
+        self.assertEqual(tar_bytes, zip_bytes)  # one allowlist, identical contents in both formats
+        self.assertEqual(modes, zip_modes)
+        self.assertEqual(modes["bin/pai"], 0o755)
+        self.assertEqual(modes["bin/pai.cmd"], 0o644)
         self.assertEqual(manifest["version"], version)
+        self.assertEqual(manifest["license"], "MIT")
         self.assertEqual(manifest["runtime_dependencies"], [])
-        for bad in ("pai.local.toml", "trial-evidence", ".git", "__pycache__", "tests/", "tools/", "dist/", ".pyc"):
+        for required in ("LICENSE", "bin/pai", "bin/pai.cmd", "bin/pai.py", "INSTALL.md", "SESSION_START.md",
+                         "pai.example.toml", "pai/templates/handoff.md"):
+            self.assertIn(required, files)
+        for bad in ("pai.local.toml", "trial-evidence", ".git", "__pycache__", "tests/", "tools/", "dist/", ".pyc",
+                    "HANDOFF", "context-"):
             self.assertFalse(any(bad in f for f in files), bad)
+        for name in os.listdir(self.tmp / "o1"):
+            path = self.tmp / "o1" / name
+            if name.endswith(".sha256"):
+                digest, archive = path.read_text(encoding="utf-8").split()
+                self.assertEqual(digest, build_bundle.sha256_bytes((self.tmp / "o1" / archive).read_bytes()))
         with self.assertRaises(build_bundle.BuildError):  # never overwrites
             build_bundle.build(str(ROOT), str(self.tmp / "o1"), 0)
+
+    def test_refuses_when_any_artifact_exists_and_writes_nothing(self):
+        out = self.tmp / "partial"
+        out.mkdir()
+        version = build_bundle.read_version(str(ROOT))
+        existing = out / f"pai-workbench-{version}.zip.sha256"
+        existing.write_text("published\n")
+        with self.assertRaisesRegex(build_bundle.BuildError, "never overwritten"):
+            build_bundle.build(str(ROOT), str(out), 0)
+        self.assertEqual(sorted(os.listdir(out)), [existing.name])
+        self.assertEqual(existing.read_text(), "published\n")
+
+    def test_line_endings_enforced(self):
+        src = self.copy_source()
+        cmd = src / "bin" / "pai.cmd"
+        cmd.write_bytes(cmd.read_bytes().replace(b"\r\n", b"\n"))
+        with self.assertRaisesRegex(build_bundle.BuildError, "CRLF"):
+            build_bundle.build(str(src), str(self.tmp / "o"), 0)
+        cmd.write_bytes((ROOT / "bin" / "pai.cmd").read_bytes())
+        launcher = src / "bin" / "pai"
+        launcher.write_bytes(launcher.read_bytes().replace(b"\n", b"\r\n"))
+        with self.assertRaisesRegex(build_bundle.BuildError, "LF line endings"):
+            build_bundle.build(str(src), str(self.tmp / "o"), 0)
 
     def test_refusals(self):
         src = self.copy_source()
@@ -210,19 +260,25 @@ class BuildTests(unittest.TestCase):
         with self.assertRaisesRegex(build_bundle.BuildError, "developer path"):
             build_bundle.build(str(src), str(self.tmp / "o"), 0)
         readme.unlink()
-        os.symlink(self.tmp / "elsewhere.md", readme)
+        try:
+            os.symlink(self.tmp / "elsewhere.md", readme)
+        except OSError as e:
+            self.skipTest(f"cannot create symlinks here: {e}")
         (self.tmp / "elsewhere.md").write_text(text)
         with self.assertRaisesRegex(build_bundle.BuildError, "symlink"):
             build_bundle.build(str(src), str(self.tmp / "o"), 0)
 
     def test_bundle_smoke_end_to_end(self):
-        archive, *_ = build_bundle.build(str(ROOT), str(self.tmp / "dist"), 0)
-        p = subprocess.run([sys.executable, "-B", str(ROOT / "tools" / "bundle_smoke.py"), archive,
-                            "--work", str(self.tmp / "smoke work")], capture_output=True, text=True, timeout=300)
+        archives, *_ = build_bundle.build(str(ROOT), str(self.tmp / "dist"), 0)
+        # The downloaded-style bundle for this platform first; the other format is checked against it.
+        order = ["zip", "tar.gz"] if os.name == "nt" else ["tar.gz", "zip"]
+        p = subprocess.run([sys.executable, "-B", str(ROOT / "tools" / "bundle_smoke.py"),
+                            *(archives[f][0] for f in order), "--work", str(self.tmp / "smoke work")],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
         self.assertEqual(p.returncode, 0, p.stdout[-3000:] + p.stderr[-2000:])
-        report = json.loads((self.tmp / "smoke work" / "smoke-results.json").read_text())
+        report = json.loads((self.tmp / "smoke work" / "smoke-results.json").read_text(encoding="utf-8"))
         self.assertEqual(report["fail"], 0)
-        self.assertGreaterEqual(report["pass"], 30)
+        self.assertGreaterEqual(report["pass"], 40)
 
 
 class AliasPathTests(unittest.TestCase):
@@ -234,7 +290,11 @@ class AliasPathTests(unittest.TestCase):
         real = Path(self._t.name) / "real root"
         real.mkdir()
         self.alias = Path(self._t.name) / "alias root"
-        os.symlink(real, self.alias)
+        try:
+            os.symlink(real, self.alias, target_is_directory=True)
+        except OSError as e:
+            self._t.cleanup()
+            self.skipTest(f"cannot create symlinks here: {e}")
         self.repo, self.vault = make_data(self.alias)  # every fixture path goes through the alias
         self.cfg = self.alias / "pai.toml"
         run_cli(*init_args(self.cfg, self.repo, self.vault, "--write"))
@@ -303,12 +363,13 @@ class AliasPathTests(unittest.TestCase):
         self.assertTrue(any("'writer 1' found 0 times" in x for x in problems), problems)
 
     def test_bundle_smoke_through_symlinked_work_dir(self):
-        archive, *_ = build_bundle.build(str(ROOT), str(Path(self._t.name) / "dist"), 0)
+        archives, *_ = build_bundle.build(str(ROOT), str(Path(self._t.name) / "dist"), 0)
         work = self.alias / "smoke work"
-        p = subprocess.run([sys.executable, "-B", str(ROOT / "tools" / "bundle_smoke.py"), archive, "--work", str(work)],
-                           capture_output=True, text=True, timeout=300)
+        p = subprocess.run([sys.executable, "-B", str(ROOT / "tools" / "bundle_smoke.py"),
+                            archives["zip" if os.name == "nt" else "tar.gz"][0], "--work", str(work)],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
         self.assertEqual(p.returncode, 0, p.stdout[-3000:] + p.stderr[-2000:])
-        report = json.loads((work / "smoke-results.json").read_text())
+        report = json.loads((work / "smoke-results.json").read_text(encoding="utf-8"))
         self.assertEqual(report["fail"], 0)
 
 
@@ -339,7 +400,7 @@ class CompatTests(unittest.TestCase):
         import ast
         banned = {"subprocess", "socket", "urllib", "http", "requests", "ssl", "asyncio"}
         for f in (ROOT / "pai").glob("*.py"):
-            for node in ast.walk(ast.parse(f.read_text())):
+            for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
                 names = [a.name.split(".")[0] for a in node.names] if isinstance(node, ast.Import) else (
                     [node.module.split(".")[0]] if isinstance(node, ast.ImportFrom) and node.module else [])
                 self.assertFalse(banned & set(names), f"{f.name}: {banned & set(names)}")

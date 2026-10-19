@@ -1,5 +1,33 @@
 #!/bin/sh
-# Launcher for pai from an extracted bundle or a checkout; works from any directory.
-# PAI_PYTHON selects the interpreter (default: python3, which must be 3.11 or newer).
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd) || exit 2
-PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" exec "${PAI_PYTHON:-python3}" -B -m pai "$@"
+# Launcher for pai on Linux and macOS (an extracted bundle or a checkout); works from any directory.
+# PAI_PYTHON selects the interpreter (a command name or a path); otherwise python3, then python.
+# Python 3.11 or newer is required. Arguments are passed through unchanged.
+self=$0
+while [ -L "$self" ]; do  # follow symlinks to this file, for example from ~/.local/bin/pai
+  link=$(readlink "$self") || exit 2
+  case $link in
+    /*) self=$link ;;
+    *) self=$(dirname -- "$self")/$link ;;
+  esac
+done
+BIN=$(CDPATH= cd -- "$(dirname -- "$self")" && pwd) || exit 2
+if [ -n "${PAI_PYTHON:-}" ]; then
+  PY=$PAI_PYTHON
+  case $PY in
+    */*) [ -f "$PY" ] && [ -x "$PY" ] ;;
+    *) command -v "$PY" >/dev/null 2>&1 ;;
+  esac || {
+    echo "pai: PAI_PYTHON=$PY was not found or is not executable." >&2
+    echo "     Set PAI_PYTHON to Python 3.11 or newer, for example PAI_PYTHON=/usr/bin/python3.11." >&2
+    exit 127
+  }
+elif command -v python3 >/dev/null 2>&1; then
+  PY=python3
+elif command -v python >/dev/null 2>&1; then
+  PY=python
+else
+  echo "pai: Python 3.11 or newer is required, but neither python3 nor python is on PATH." >&2
+  echo "     Install it (python.org or your package manager) or set PAI_PYTHON to its path." >&2
+  exit 127
+fi
+exec "$PY" -B "$BIN/pai.py" "$@"

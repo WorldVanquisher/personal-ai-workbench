@@ -2,8 +2,10 @@
 
 - Without --write it only previews. It prints the TOML and the validation
   result and writes nothing.
-- With --write it creates the file exclusively (mode 'x', permissions 0600).
-  It refuses if the file exists.
+- With --write it creates the file exclusively (O_EXCL). It refuses if the
+  file exists. On POSIX systems the file gets mode 0600 (owner read/write).
+  Windows ignores POSIX modes: the file inherits the folder's ACLs, so keep it
+  in a folder only you can read.
 - It looks only at the paths it is given: no scanning of home, vault or
   credential stores. It creates no vault folder and edits no note.
 """
@@ -58,7 +60,7 @@ def prepare(key, a):
     if not PROJECT_KEY.match(key or ""):
         raise config.ConfigError("project key must be 1-32 characters of [a-z0-9_-], starting with a letter or digit")
     for name in ("repo", "vault"):
-        if not a.get(name) or not os.path.isabs(a[name]):
+        if not config.is_absolute(a.get(name)):
             raise config.ConfigError(f"--{name} must be an absolute path to an existing directory")
     if not a.get("memory") or not a.get("inbox"):
         raise config.ConfigError("--memory and --inbox are required (paths relative to the vault)")
@@ -79,5 +81,13 @@ def write(path, text):
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
         raise config.ConfigError(f"{path} appeared while writing; pai init never overwrites it")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
+
+
+def permission_note():
+    """What protects the written file on this platform, stated without overclaiming."""
+    if os.name == "nt":
+        return ("POSIX mode 0600 does not apply on Windows; the file inherits the folder's ACLs, "
+                "so keep it in a folder only you can read")
+    return "mode 0600: readable and writable by the owner only"

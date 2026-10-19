@@ -1,6 +1,13 @@
-# Example pai configuration. Copy to pai.local.toml (git-ignored) and replace the
-# placeholder paths with absolute paths on your machine. Every file pai reads is
-# named here, or sits directly in the memory-package directory (*.md only).
+# Example pai configuration. `pai init` writes one like it for you; to write it by hand,
+# copy it to a file of your own (see INSTALL.md) and replace the placeholder paths with
+# absolute paths on this device. Every file pai reads is named here, or sits directly
+# in the memory-package directory (*.md only). Each device has its own copy with its
+# own paths; the vault-relative and repository-relative entries can stay the same.
+#
+# Windows: use single-quoted TOML strings so backslashes need no escaping, e.g.
+#   repo = 'D:\ABSOLUTE\PATH\TO\french-learning-hub'
+#   vault = 'D:\ABSOLUTE\PATH\TO\ObsidianVault'
+# Relative entries may use forward slashes on every system.
 
 [projects.flh]
 name = "French Learning Hub"

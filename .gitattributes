@@ -1,0 +1,4 @@
+# Identical bytes on every checkout, so release builds match across operating systems.
+* text=auto eol=lf
+# cmd.exe needs CRLF line endings in batch files.
+*.cmd text eol=crlf

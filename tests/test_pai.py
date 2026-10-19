@@ -5,6 +5,7 @@ Run: python3 -B -m unittest discover -s tests -v   (from the workbench root)
 
 import ast
 import io
+import json
 import os
 import subprocess
 import sys
@@ -96,16 +97,20 @@ class Fixture:
         p.update(over)
         lines = ["[projects.demo]"]
         for k, v in p.items():
-            if isinstance(v, list):
-                lines.append(f"{k} = [" + ", ".join(f'"{x}"' for x in v) + "]")
-            elif isinstance(v, int):
-                lines.append(f"{k} = {v}")
-            else:
-                lines.append(f'{k} = "{v}"')
-        self.cfg.write_text("\n".join(lines) + "\n")
+            # JSON strings are valid TOML basic strings, including Windows backslashes and Unicode.
+            lines.append(f"{k} = {json.dumps(v, ensure_ascii=False)}")
+        self.cfg.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def project(self):
         return config.load("demo", str(self.cfg))
+
+
+def symlink_or_skip(test, target, link, directory=False):
+    """Create a symlink, or skip on Windows when the account may not create symlinks."""
+    try:
+        os.symlink(target, link, target_is_directory=directory)
+    except (OSError, NotImplementedError) as e:
+        test.skipTest(f"cannot create symlinks here: {e}")
 
 
 def run_cli(*args):
@@ -178,10 +183,10 @@ class ContextTests(unittest.TestCase):
     def test_symlink_escapes_refused(self):
         outside = self.f.tmp / "outside.md"
         outside.write_text("# Out\n\n## Release\n\nOUTSIDE-CONTENT release\n")
-        os.symlink(outside, self.f.mem / "escape.md")
-        os.symlink(outside, self.f.repo / "docs" / "link.md")
+        symlink_or_skip(self, outside, self.f.mem / "escape.md")
+        symlink_or_skip(self, outside, self.f.repo / "docs" / "link.md")
         (self.f.vault / "Elsewhere.md").write_text("# E\n\nELSEWHERE-CONTENT\n")
-        os.symlink(self.f.vault / "Elsewhere.md", self.f.vault / "Projects" / "inner.md")
+        symlink_or_skip(self, self.f.vault / "Elsewhere.md", self.f.vault / "Projects" / "inner.md")
         self.f.write(repo_docs=["docs/release.md", "docs/link.md"], project_notes=["Projects/Demo.md", "Projects/inner.md"])
         out = context.build(self.f.project(), "release")
         self.assertNotIn("OUTSIDE-CONTENT", out)
@@ -195,7 +200,7 @@ class ContextTests(unittest.TestCase):
         self.f.write(memory="Inbox/MEM-1", repo="relative/path")
         with self.assertRaises(config.ConfigError):
             self.f.project()
-        os.symlink(self.f.tmp, self.f.vault / "up")
+        symlink_or_skip(self, self.f.tmp, self.f.vault / "up", directory=True)
         self.f.write(markdown_roots=["up"])
         with self.assertRaises(config.ConfigError):
             self.f.project()
@@ -321,7 +326,7 @@ class StaticTests(unittest.TestCase):
     def test_no_network_process_or_model_imports(self):
         banned = {"subprocess", "socket", "urllib", "http", "requests", "ssl", "asyncio"}
         for f in (ROOT / "pai").glob("*.py"):
-            tree = ast.parse(f.read_text())
+            tree = ast.parse(f.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 names = []
                 if isinstance(node, ast.Import):
@@ -329,12 +334,12 @@ class StaticTests(unittest.TestCase):
                 elif isinstance(node, ast.ImportFrom) and node.module:
                     names = [node.module.split(".")[0]]
                 self.assertFalse(banned & set(names), f"{f.name} imports {banned & set(names)}")
-            src = f.read_text()
+            src = f.read_text(encoding="utf-8")
             for call in ("os.system", "os.popen", "os.exec", "os.spawn", "eval(", "exec("):
                 self.assertNotIn(call, src, f"{f.name} uses {call}")
 
     def test_example_config_is_portable(self):
-        text = (ROOT / "pai.example.toml").read_text()
+        text = (ROOT / "pai.example.toml").read_text(encoding="utf-8")
         self.assertNotIn("/home/", text)
         self.assertNotIn("/srv/", text)
         self.assertIn("pai.local.toml", (ROOT / ".gitignore").read_text())

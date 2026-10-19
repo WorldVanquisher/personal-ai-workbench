@@ -55,8 +55,9 @@ def _sha256(path):
 def check_python(r):
     v = sys.version_info
     if v >= MIN_PYTHON:
-        r.ok(f"Python {v.major}.{v.minor}.{v.micro} (requires ≥ {MIN_PYTHON[0]}.{MIN_PYTHON[1]})")
-    else:  # unreachable via `python3 -m pai`, which refuses earlier; kept for direct calls
+        r.ok(f"Python {v.major}.{v.minor}.{v.micro} on {sys.platform} (requires ≥ {MIN_PYTHON[0]}.{MIN_PYTHON[1]}): "
+             f"{sys.executable or 'interpreter path unknown'}")
+    else:  # unreachable through the launchers and `-m pai`, which refuse earlier; kept for direct calls
         r.problem(f"Python {v.major}.{v.minor} is too old", "install Python 3.11 or newer")
 
 
@@ -110,7 +111,7 @@ def check_bundle(r, root=config.WORKBENCH):
 
 def check_config(r, path, only=None):
     path = config.config_path(path)
-    inside_bundle = os.path.dirname(os.path.abspath(path)) == config.WORKBENCH
+    inside_bundle = os.path.normcase(os.path.dirname(os.path.abspath(path))) == os.path.normcase(config.WORKBENCH)
     try:
         path, data = config.read(path)
     except config.ConfigError as e:
@@ -122,7 +123,7 @@ def check_config(r, path, only=None):
                "outside it, before replacing the bundle on update")
     projects = data.get("projects", {})
     if not projects:
-        r.problem("no [projects.…] table in the configuration", "run `python3 -m pai init …`")
+        r.problem("no [projects.…] table in the configuration", "run `pai init …`")
         return
     keys = [only] if only else sorted(projects)
     for key in keys:
@@ -133,7 +134,7 @@ def check_config(r, path, only=None):
         before = r.problems
         for name in ("repo", "vault"):
             value = p.get(name)
-            if not value or not os.path.isabs(value):
+            if not config.is_absolute(value):
                 r.problem(f"{key}: {name} must be an absolute path (got {value!r})", "fix it in the configuration")
             elif not os.path.isdir(value):
                 r.problem(f"{key}: {name} not found or not a directory: {value}",

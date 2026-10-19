@@ -8,11 +8,12 @@ from pai import __version__, config, context, doctor, handoff, initcfg
 
 INIT_EPILOG = """examples:
   preview (writes nothing):
-    python3 -m pai init flh --repo /abs/path/repo --vault /abs/path/vault \\
+    pai init flh --repo /abs/path/repo --vault /abs/path/vault \\
       --memory "Agent Inbox/PAI-001-X" --inbox "Agent Inbox" \\
       --markdown-root "30 Projects" --project-note "30 Projects/Project.md"
+  (Windows: --repo "C:\\path\\to\\repo" --vault "D:\\path\\to\\vault"; on PowerShell continue lines with `)
   then write it, exactly as previewed:
-    python3 -m pai init flh … --write
+    pai init flh … --write
 paths after --vault are relative to the vault; --instructions/--repo-doc are relative to the repo.
 pai init only looks at the paths you give it; it never overwrites an existing configuration."""
 
@@ -93,7 +94,7 @@ def _init(a):
         print(f"\n# Re-run with --write to create {path}. Existing files are never overwritten.")
         return 0
     initcfg.write(path, text)
-    print(f"\n# Wrote {path} (mode 0600). Next: python3 -m pai doctor {a.project}")
+    print(f"\n# Wrote {path} ({initcfg.permission_note()}). Next: pai doctor {a.project}")
     return 0
 
 

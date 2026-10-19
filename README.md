@@ -1,4 +1,4 @@
-# pai: personal AI workflow, version 0.1.0
+# pai: personal AI workflow, version 0.2.0
 
 A small, standard-library Python tool for agent sessions on a project:
 - it gives the agent the **context** for a task (rules, human decisions,
@@ -10,9 +10,12 @@ A small, standard-library Python tool for agent sessions on a project:
 - It never scans a vault or home directory.
 - It makes no network or model call and runs no commands, Git included.
 
-**Requirements:** Linux or macOS, Python 3.11+. No runtime dependencies.
-Install and update steps are in [INSTALL.md](INSTALL.md); what's new is in
+**Requirements:** Windows, macOS or Linux with Python 3.11+. No runtime
+dependencies, no administrator rights. Install, upgrade and per-device setup
+are in [INSTALL.md](INSTALL.md); what's new and what has been tested is in
 [RELEASE_NOTES.md](RELEASE_NOTES.md).
+
+**License:** MIT, see [LICENSE](LICENSE).
 
 **External prerequisites (not bundled, never installed, configured, launched
 or logged in to by pai):**
@@ -23,26 +26,29 @@ or logged in to by pai):**
 
 ## Quick start
 
+Linux and macOS use `bin/pai`; Windows uses `bin\pai.cmd` from PowerShell or
+cmd.exe (see INSTALL.md for the PowerShell form). `python3 bin/pai.py` or
+`py -3 bin\pai.py` works everywhere.
+
 ```sh
 bin/pai doctor --agents                       # Python, bundle integrity, configuration
 bin/pai init flh --repo "/abs/repo" --vault "/abs/vault" \
   --memory "Agent Inbox/PAI-001-…" --inbox "Agent Inbox" \
   --markdown-root "30 Projects" --project-note "30 Projects/Project.md"     # preview
-bin/pai init flh …same… --write               # creates pai.local.toml (0600); never overwrites
+bin/pai init flh …same… --write               # creates the configuration; never overwrites
 bin/pai handoff list flh                     # subsequent task reports and discovery problems
 bin/pai context flh --task "what you are about to do" --handoffs 3
 bin/pai handoff new flh --task-id TASK-1 --summary "…" --evidence "…"
 ```
 
-`bin/pai` works from any directory. `python3 -m pai …` run inside the pai
-directory is equivalent. Paste `SESSION_START.md` at the start of an agent
-session.
+The launchers work from any directory and never import code from it. Paste
+`SESSION_START.md` at the start of an agent session.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `init PROJECT --repo --vault --memory --inbox [...] [--write]` | Validates explicit paths and previews the TOML. Only `--write` creates the file, exclusively (`O_EXCL`, 0600), and it never overwrites. It looks at no other paths and creates no vault folder |
+| `init PROJECT --repo --vault --memory --inbox [...] [--write]` | Validates explicit paths and previews the TOML. Only `--write` creates the file, exclusively (`O_EXCL`), and it never overwrites. POSIX: mode 0600; Windows: the folder's ACLs apply. It looks at no other paths and creates no vault folder |
 | `doctor [PROJECT] [--agents]` | Read-only checks (below). Exit 1 if any PROBLEM is found |
 | `check PROJECT` | Lists each source's status: ok, MISSING, REFUSED (symlink escape or outside the permitted roots) or EXCLUDED |
 | `context PROJECT --task "…" [--budget N] [--handoffs N]` | Task context in Markdown, at most N Unicode characters (details below) |
@@ -75,8 +81,9 @@ match validated front matter, never folder names. The existing simple metadata
 requires `project`, `task`, `created` (UTC `YYYY-MM-DDTHH:MM:SSZ`), `status`
 (`draft`, `approved`, `rejected` or `superseded`) and `approved` (`true` or
 `false`). Duplicate keys, invalid UTF-8 and malformed fields are reported.
-Directory and file symlinks are refused, including links within the Vault.
-Exclusion patterns still apply. No recursive traversal occurs.
+Directory and file symlinks are refused, including links within the Vault; on
+Windows, so are junctions and other reparse points. Exclusion patterns still
+apply. No recursive traversal occurs.
 
 `context PROJECT --task "review deployment" --handoffs 3` selects up to three
 reports by created time descending, then Inbox-relative path ascending. The
@@ -108,37 +115,60 @@ these lexical checks do not resolve contradictions.
 
 ## Configuration
 
-`pai.local.toml` sits next to `pai/` by default; `--config FILE` or
-`PAI_CONFIG` selects another file. It holds machine paths: keep it out of
-version control (it is in `.gitignore`) and out of bundles (the allowlist
-excludes it). See `pai.example.toml` for every field.
+Lookup order: `--config FILE`, then `PAI_CONFIG`, then `pai.local.toml` next
+to `pai/`. Keep it outside the bundle (INSTALL.md) so upgrades never touch
+it, and give each device its own, with its own paths. It holds machine paths:
+keep it out of version control (it is in `.gitignore`) and out of bundles (the
+allowlist excludes it). See `pai.example.toml` for every field.
 
 ## Development and release tooling (not in the bundle)
 
 ```sh
 python3 -B -W error::ResourceWarning -m unittest discover -s tests -v    # synthetic tests
-python3 -B tools/build_bundle.py --out dist                            # dist/pai-workbench-<version>.tar.gz (+ .sha256)
-python3 -B tools/bundle_smoke.py dist/pai-workbench-<version>.tar.gz --work /abs/new/dir
 ```
+
+**Release build** (version from `pai/__init__.py`; output into a new
+directory under `dist/`, which is git-ignored and never overwritten):
+
+```sh
+SOURCE_DATE_EPOCH=0 python3 -B tools/build_bundle.py --out dist/0.2.0
+#   dist/0.2.0/pai-workbench-0.2.0.tar.gz  (+ .sha256)   Linux, macOS
+#   dist/0.2.0/pai-workbench-0.2.0.zip     (+ .sha256)   Windows
+python3 -B tools/bundle_smoke.py dist/0.2.0/pai-workbench-0.2.0.tar.gz \
+  dist/0.2.0/pai-workbench-0.2.0.zip --work "/tmp/pai-smoke-0.2.0"
+```
+
+Publishing (tag, GitHub release, asset upload) is a human action; previously
+published assets, such as 0.1.0's, are never rebuilt or replaced.
 
 - **`tools/build_bundle.py`:**
   - packages **only** `release/allowlist.txt` plus a generated
-    `MANIFEST.json` and `SHA256SUMS`;
+    `MANIFEST.json` and `SHA256SUMS`, into a tar.gz and a ZIP with identical
+    contents;
   - refuses unlisted runtime modules or templates, policy-forbidden entries
     (local configuration, evidence, handoffs, caches, `.git`, secrets),
-    symlinks and absolute developer paths in bundled text;
-  - is deterministic (`SOURCE_DATE_EPOCH`, default 0) and never overwrites an
-    archive.
+    symlinks, absolute developer paths in bundled text, and wrong line endings
+    (`.cmd` must be CRLF, everything else LF; `.gitattributes` keeps checkouts so);
+  - is deterministic (`SOURCE_DATE_EPOCH`, default 0; same Python/zlib) and
+    writes nothing if any of the four artifacts already exists.
 - **`tools/bundle_smoke.py`:** the migration acceptance check (below).
-- **CI:** `.github/workflows/ci.yml` runs the tests, the build and the smoke
-  check on Ubuntu and macOS with Python 3.11 and 3.13. It uses read-only
-  permissions, timeouts and no secrets, and it publishes nothing.
+- **CI:** `.github/workflows/ci.yml` runs the tests, both builds, a rebuild
+  comparison and the smoke check on Windows, macOS and Ubuntu with Python 3.11
+  and 3.13, plus a real Python 3.10 refusal, cmd.exe and PowerShell launches;
+  and the tests, build and smoke in Debian, Ubuntu, Fedora and Alpine
+  containers (`tools/ci_userspace.sh`). It uses read-only permissions,
+  timeouts and no secrets, and it publishes nothing.
 
 **What `tools/bundle_smoke.py` checks**, on synthetic data:
-- the archive checksum;
-- safe extraction into two absolute paths, one with spaces;
-- in each: `init` (preview, write, refused overwrite), `doctor`, `context` and
-  concurrent `handoff new`;
+- each archive's checksum, and that the tar.gz and ZIP hold the same bytes;
+- safe extraction (no absolute, parent, drive or backslash paths, no links)
+  into two absolute paths, one with spaces and non-ASCII characters;
+- in each, through the platform launcher, from an unrelated directory holding
+  a decoy `pai/` package: `init` (preview, write, refused overwrite), `doctor`,
+  `context` (with a CRLF note), concurrent `handoff new` and `handoff list`;
+- argument forwarding (spaces, quotes, Unicode, metacharacters, an empty
+  argument), `bin/pai.py`, a missing `PAI_PYTHON`, no Python on PATH and a
+  simulated Python 3.10;
 - the same version, but different configurations, in both locations;
 - missing roots;
 - a tampered bundle and a corrupted archive.
@@ -151,8 +181,8 @@ The runtime package `pai/` imports no `subprocess`, `socket`, `urllib` or
 | Path | In the bundle | Purpose |
 | --- | --- | --- |
 | `pai/`, `pai/templates/handoff.md` | yes | The tool and its handoff template |
-| `bin/pai` | yes | Launcher (`PAI_PYTHON` selects the interpreter) |
-| `README.md`, `INSTALL.md`, `RELEASE_NOTES.md`, `SESSION_START.md`, `pai.example.toml` | yes | Documentation and examples |
+| `bin/pai`, `bin/pai.cmd`, `bin/pai.py` | yes | Launchers: POSIX, Windows, any platform (`PAI_PYTHON` selects the interpreter) |
+| `LICENSE`, `README.md`, `INSTALL.md`, `RELEASE_NOTES.md`, `SESSION_START.md`, `pai.example.toml` | yes | License, documentation and examples |
 | `MANIFEST.json`, `SHA256SUMS` | generated | Bundle contents and checksums |
-| `tests/`, `tools/`, `release/allowlist.txt`, `.github/` | no | Development, release tooling and CI |
+| `tests/`, `tools/`, `release/allowlist.txt`, `.github/`, `.gitattributes` | no | Development, release tooling and CI |
 | `pai.local.toml`, `trial-evidence/`, `dist/` | no (git-ignored) | Local configuration, PAI-002 trial outputs, build output |
