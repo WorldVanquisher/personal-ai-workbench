@@ -244,26 +244,35 @@ class AliasPathTests(unittest.TestCase):
         self._t.cleanup()
 
     def concurrent(self, n=6):
+        """Run n writers concurrently. Returns ({writer index: path}, errors).
+
+        Each writer records its own result under its index, so writer identity never
+        depends on thread completion order.
+        """
         import threading
         project = config.load("demo", str(self.cfg))
-        paths, errs = [], []
+        by_writer, errs, lock = {}, [], threading.Lock()
 
         def make(i):
             try:
-                paths.append(handoff.create(project, "ALIAS-1", summary=f"writer {i}"))
+                path = handoff.create(project, "ALIAS-1", summary=f"writer {i}")
+                with lock:
+                    by_writer[i] = path
             except Exception as e:  # pragma: no cover
-                errs.append(repr(e))
+                with lock:
+                    errs.append(repr(e))
 
         ts = [threading.Thread(target=make, args=(i,)) for i in range(n)]
         for t in ts:
             t.start()
         for t in ts:
             t.join()
-        return paths, errs
+        return by_writer, errs
 
     def test_alias_paths_pass_resolved_containment(self):
         import bundle_smoke
-        paths, errs = self.concurrent()
+        by_writer, errs = self.concurrent()
+        paths = list(by_writer.values())
         # The alias case is really exercised: the old string-prefix check rejects these paths.
         self.assertTrue(paths and not any(p.startswith(self.inbox) for p in paths), paths)
         self.assertEqual(bundle_smoke.verify_concurrent_handoffs(paths, errs, self.inbox,
@@ -272,7 +281,9 @@ class AliasPathTests(unittest.TestCase):
     def test_resolved_containment_still_rejects_real_problems(self):
         import bundle_smoke
         want = [f"writer {i}" for i in range(6)]
-        paths, errs = self.concurrent()
+        by_writer, errs = self.concurrent()
+        self.assertEqual((sorted(by_writer), errs), (list(range(6)), []))
+        paths = [by_writer[i] for i in range(6)]  # paths[i] is writer i's file, whatever the completion order
         v = bundle_smoke.verify_concurrent_handoffs
         self.assertTrue(any("writer(s) failed" in x for x in v(paths, ["boom"], self.inbox, want)))
         self.assertTrue(any("successful writers" in x for x in v(paths[:5], [], self.inbox, want)))
@@ -285,7 +296,8 @@ class AliasPathTests(unittest.TestCase):
         nested.parent.mkdir(parents=True)
         nested.write_text(Path(paths[0]).read_text())
         self.assertTrue(any("directly under the inbox" in x for x in v(paths[1:] + [str(nested)], [], self.inbox, want)))
-        Path(paths[1]).write_text(Path(paths[0]).read_text())  # writer 0's summary twice, writer 1's lost
+        self.assertIn("## Summary\n\nwriter 1\n", Path(by_writer[1]).read_text())
+        Path(by_writer[1]).write_text(Path(by_writer[0]).read_text())  # writer 0's file over writer 1's
         problems = v(paths, [], self.inbox, want)
         self.assertTrue(any("'writer 0' found 2 times" in x for x in problems), problems)
         self.assertTrue(any("'writer 1' found 0 times" in x for x in problems), problems)
