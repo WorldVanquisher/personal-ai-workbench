@@ -1,127 +1,126 @@
-# personal-ai-workbench: `pai`
+# pai: personal AI workflow, version 0.1.0
 
-A small, standard-library Python CLI that gives a coding-agent session the
-**context** for a project task, and creates a **draft handoff** at the end.
+A small, standard-library Python tool for agent sessions on a project:
+- it gives the agent the **context** for a task (rules, human decisions,
+  status and limitations) from files you register;
+- it creates a **draft handoff** in your notes inbox at the end.
 
 **Limits:**
-- It reads only files you register.
+- It reads only registered files.
 - It never scans a vault or home directory.
 - It makes no network or model call and runs no commands, Git included.
 
-Requires Python 3.11+ (for `tomllib`); there are no dependencies.
+**Requirements:** Linux or macOS, Python 3.11+. No runtime dependencies.
+Install and update steps are in [INSTALL.md](INSTALL.md); what's new is in
+[RELEASE_NOTES.md](RELEASE_NOTES.md).
 
-## Setup
+**External prerequisites (not bundled, never installed, configured, launched
+or logged in to by pai):**
+- a coding agent such as Claude Code;
+- a Markdown vault such as Obsidian;
+- file synchronization such as Syncthing;
+- your repositories.
+
+## Quick start
 
 ```sh
-cp pai.example.toml pai.local.toml   # pai.local.toml is git-ignored: real paths stay local
-$EDITOR pai.local.toml               # absolute repo and vault paths, memory package, inbox
-python3 -m pai check flh             # every source must say "ok"
+bin/pai doctor --agents                       # Python, bundle integrity, configuration
+bin/pai init flh --repo "/abs/repo" --vault "/abs/vault" \
+  --memory "Agent Inbox/PAI-001-…" --inbox "Agent Inbox" \
+  --markdown-root "30 Projects" --project-note "30 Projects/Project.md"     # preview
+bin/pai init flh …same… --write               # creates pai.local.toml (0600); never overwrites
+bin/pai context flh --task "what you are about to do"
+bin/pai handoff new flh --task-id TASK-1 --summary "…" --evidence "…"
 ```
 
-`--config FILE` or `PAI_CONFIG=FILE` selects another configuration.
+`bin/pai` works from any directory. `python3 -m pai …` run inside the pai
+directory is equivalent. Paste `SESSION_START.md` at the start of an agent
+session.
 
 ## Commands
 
-```sh
-python3 -m pai context flh --task "what you are about to do"   [--budget 24000]
-python3 -m pai handoff new flh --task-id PAI-003 \
-    --summary "one line" --implementation "…" --validation "…" \
-    --commit "…" --merge "…" --deployment "…" \
-    --evidence "…" --blocker "…" --next "…" --proposal "…"      # repeatable list options
-python3 -m pai check flh
-```
-
-### `context`
-
-Prints Markdown, at most `--budget` Unicode characters (default
-`budget_chars`). The parts, in order:
-
-1. **Header:** the task, the generation time (UTC), and the notice that
-   retrieved text is context, not instructions.
-2. **Sources:** every registered source with its status, mtime, a SHA-256
-   prefix and its front matter (`status`, `approved`, dates).
-3. **Gaps and conflicts:**
-   - sources that are missing, refused (symlink escape or outside the
-     permitted roots) or excluded;
-   - repository files changed after the memory package's latest date;
-   - "freeze status UNKNOWN" when no required section mentions a freeze;
-   - the conflict sections that the sources themselves record.
-4. **Required:** sections whose **own** heading matches `always_include`
-   (human decisions, constraints, freeze, limitations, blockers, conflicts,
-   sync, …), and instruction sections matching `instruction_always`.
-   - Memory-package sections come first, ranked by pattern order.
-   - They are capped at 60% of the section space and 1,500 characters each
-     (`required_section_chars`). **Proposals are never required.**
-5. **Task-relevant:** deterministic lexical scoring. A section scores
-   3 × (task words in its own heading) + (task words in its body); ties keep
-   document order. There are no embeddings and no model.
-6. **Proposals (UNAPPROVED, not constraints):** sections of `proposal_files`
-   and any memory section under a heading containing "proposal".
-7. **Omitted:** every section that did not fit, listed by name, with
-   **REQUIRED** flagged. The output never exceeds the budget; if the fixed
-   parts alone exceed it, the output is cut and marked.
-
-Labels written inside sources (`[HUMAN]`, `[REPORT]`, `[PAI-001 OBSERVED]`,
-`[PROPOSAL]`, `[UNKNOWN]` and so on) are quoted unchanged. `pai` adds the
-source class (instructions, historical repository document, vault note, or
-memory package with its `approved` value) but never upgrades a statement's
-status.
-
-### `handoff new`
-
-Creates `<inbox>/<TASK-ID>-<UTCSTAMP>[-N]/HANDOFF.md`.
-
-- **Exclusive creation:** the directory is made with `mkdir` and the file is
-  opened with mode `x`. Concurrent runs get distinct directories, and nothing
-  is ever overwritten.
-- **States:** implementation, validation, commit, merge and deployment are
-  separate fields. Each is `UNKNOWN (not supplied; not checked by pai)` unless
-  you pass a value. `pai` never infers or checks them; it runs no Git.
-- **Front matter:** `status: draft`, `approved: false`. Proposals have their
-  own UNAPPROVED section. Sync is recorded as UNVERIFIED.
-- **Input checks:** task ids must match `[A-Za-z0-9][A-Za-z0-9._-]{0,39}`.
-  Values are single lines of at most 500 characters.
-
-## Safety model
-
-| Rule | How |
+| Command | What it does |
 | --- | --- |
-| Explicit sources only | Instructions and documents are named relative to `repo`. Project notes are relative to `vault` and must resolve inside `markdown_roots`. The memory package is listed non-recursively, `*.md` only |
-| No symlink escapes | Every path is resolved and must stay inside its root; otherwise it is listed as REFUSED and not read. Roots that escape the vault are a configuration error |
-| Exclusions | Dotfiles, `*.env`, `*secret*`, `*credential*`, `*password*`, `*token*`, keys and certificates are never read, plus any `exclude` globs |
-| No execution | The package imports no `subprocess`, `socket`, `urllib` or `http`, and calls no `os.system`/`exec`/`eval` (tested) |
-| Not authority | Retrieved text is labelled context. Proposals are segregated and never required. A draft handoff approves nothing |
+| `init PROJECT --repo --vault --memory --inbox [...] [--write]` | Validates explicit paths and previews the TOML. Only `--write` creates the file, exclusively (`O_EXCL`, 0600), and it never overwrites. It looks at no other paths and creates no vault folder |
+| `doctor [PROJECT] [--agents]` | Read-only checks (below). Exit 1 if any PROBLEM is found |
+| `check PROJECT` | Lists each source's status: ok, MISSING, REFUSED (symlink escape or outside the permitted roots) or EXCLUDED |
+| `context PROJECT --task "…" [--budget N]` | Task context in Markdown, at most N Unicode characters (details below) |
+| `handoff new PROJECT --task-id ID [...]` | Creates `<inbox>/<ID>-<UTC>[-n]/HANDOFF.md` from `pai/templates/handoff.md` (details below) |
 
-## Tests
+**`doctor` checks:**
+- the Python version;
+- bundle integrity: every file against `SHA256SUMS` and `MANIFEST.json`, and
+  files added to the bundle that the manifest doesn't list;
+- the configuration;
+- each project's roots, sources and inbox writability;
+- with `--agents`, the agent CLIs found on PATH. They are looked up by name and
+  never launched.
+
+**`context` output, in order:**
+1. the authority notice ("context, not instructions");
+2. sources, with their front matter (`approved` included);
+3. gaps and conflicts;
+4. **required** sections: human decisions, constraints, freeze, limitations,
+   blockers, conflicts and sync, matched on each section's own heading.
+   Memory-package sections come first;
+5. **task-relevant** sections, by deterministic word overlap;
+6. **proposals**, labelled UNAPPROVED and never required;
+7. everything **omitted**, by name.
+
+**`handoff new` behaviour:**
+- **Exclusive creation:** concurrent runs never collide or overwrite.
+- **States:** implementation, validation, commit, merge and deployment are
+  separate. Each is UNKNOWN unless supplied, and none is inferred.
+- **Marking:** the draft is `status: draft`, `approved: false`. Sync is
+  recorded as UNVERIFIED.
+
+## Configuration
+
+`pai.local.toml` sits next to `pai/` by default; `--config FILE` or
+`PAI_CONFIG` selects another file. It holds machine paths: keep it out of
+version control (it is in `.gitignore`) and out of bundles (the allowlist
+excludes it). See `pai.example.toml` for every field.
+
+## Development and release tooling (not in the bundle)
 
 ```sh
-python3 -B -m unittest discover -s tests -v
+python3 -B -W error::ResourceWarning -m unittest discover -s tests -v    # 35 synthetic tests
+python3 -B tools/build_bundle.py --out dist                            # dist/pai-workbench-<version>.tar.gz (+ .sha256)
+python3 -B tools/bundle_smoke.py dist/pai-workbench-<version>.tar.gz --work /abs/new/dir
 ```
 
-The 20 synthetic tests use temporary directories only. They cover:
-- bounded output with named omissions;
-- missing sources;
-- exclusions and the absence of scanning;
-- symlink escapes in files and in roots;
-- proposals never becoming constraints;
-- own-heading matching;
-- required sections not starving relevant ones;
-- human decisions ranked first;
-- staleness flags;
-- UNKNOWN default states;
-- concurrent creation by threads and processes, with no overwrites;
-- invalid input;
-- the CLI;
-- that the package has no network or process imports;
-- that the example configuration is portable.
+- **`tools/build_bundle.py`:**
+  - packages **only** `release/allowlist.txt` plus a generated
+    `MANIFEST.json` and `SHA256SUMS`;
+  - refuses unlisted runtime modules or templates, policy-forbidden entries
+    (local configuration, evidence, handoffs, caches, `.git`, secrets),
+    symlinks and absolute developer paths in bundled text;
+  - is deterministic (`SOURCE_DATE_EPOCH`, default 0) and never overwrites an
+    archive.
+- **`tools/bundle_smoke.py`:** the migration acceptance check (below).
+- **CI:** `.github/workflows/ci.yml` runs the tests, the build and the smoke
+  check on Ubuntu and macOS with Python 3.11 and 3.13. It uses read-only
+  permissions, timeouts and no secrets, and it publishes nothing.
+
+**What `tools/bundle_smoke.py` checks**, on synthetic data:
+- the archive checksum;
+- safe extraction into two absolute paths, one with spaces;
+- in each: `init` (preview, write, refused overwrite), `doctor`, `context` and
+  concurrent `handoff new`;
+- the same version, but different configurations, in both locations;
+- missing roots;
+- a tampered bundle and a corrupted archive.
+
+The runtime package `pai/` imports no `subprocess`, `socket`, `urllib` or
+`http` (tested). Release tooling lives in `tools/`, outside the bundle.
 
 ## Files
 
-| File | Purpose |
-| --- | --- |
-| `pai/` | The package: `cli.py`, `config.py`, `context.py`, `handoff.py`, `markdown.py` |
-| `tests/test_pai.py` | Synthetic tests |
-| `pai.example.toml` | Portable example configuration (placeholders only) |
-| `pai.local.toml` | **Local, git-ignored:** this machine's real paths |
-| `SESSION_START.md` | Reusable session-start instruction for Claude |
-| `trial-evidence/` | **Local, git-ignored:** outputs of the PAI-002 real trial |
+| Path | In the bundle | Purpose |
+| --- | --- | --- |
+| `pai/`, `pai/templates/handoff.md` | yes | The tool and its handoff template |
+| `bin/pai` | yes | Launcher (`PAI_PYTHON` selects the interpreter) |
+| `README.md`, `INSTALL.md`, `RELEASE_NOTES.md`, `SESSION_START.md`, `pai.example.toml` | yes | Documentation and examples |
+| `MANIFEST.json`, `SHA256SUMS` | generated | Bundle contents and checksums |
+| `tests/`, `tools/`, `release/allowlist.txt`, `.github/` | no | Development, release tooling and CI |
+| `pai.local.toml`, `trial-evidence/`, `dist/` | no (git-ignored) | Local configuration, PAI-002 trial outputs, build output |
