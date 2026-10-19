@@ -101,8 +101,14 @@ jobs:
         run: |
           cd /d "%RUNNER_TEMP%"
           set "PAI_PYTHON="
+          set "PAI_CONFIG="
           call "%PAI_BUNDLE%\bin\pai.cmd" --version || exit /b 1
+          rem Smoke already initialized this bundle; its default configuration must pass.
           call "%PAI_BUNDLE%\bin\pai.cmd" doctor
+          if not "%ERRORLEVEL%"=="0" exit /b 1
+          set "PAI_MISSING_CONFIG=%RUNNER_TEMP%\pai-missing-cmd-%RANDOM%-%RANDOM%.toml"
+          if exist "%PAI_MISSING_CONFIG%" exit /b 1
+          call "%PAI_BUNDLE%\bin\pai.cmd" --config "%PAI_MISSING_CONFIG%" doctor
           if not "%ERRORLEVEL%"=="1" exit /b 1
           set "PAI_PYTHON=%OLD_PYTHON%"
           call "%PAI_BUNDLE%\bin\pai.cmd" --version 2> "%RUNNER_TEMP%\old.txt"
@@ -119,10 +125,16 @@ jobs:
         run: |
           Set-Location $env:RUNNER_TEMP
           Remove-Item Env:PAI_PYTHON -ErrorAction SilentlyContinue
+          Remove-Item Env:PAI_CONFIG -ErrorAction SilentlyContinue
           & "$env:PAI_BUNDLE\bin\pai.cmd" --version
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          # Smoke already initialized this bundle; its default configuration must pass.
           & "$env:PAI_BUNDLE\bin\pai.cmd" doctor --agents
-          if ($LASTEXITCODE -ne 1) { exit 1 }   # no configuration in this bundle yet
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $missingConfig = Join-Path $env:RUNNER_TEMP ("pai-missing-pwsh-" + [guid]::NewGuid().ToString("N") + ".toml")
+          if (Test-Path -LiteralPath $missingConfig) { exit 1 }
+          & "$env:PAI_BUNDLE\bin\pai.cmd" --config $missingConfig doctor
+          if ($LASTEXITCODE -ne 1) { exit 1 }
           python "$env:PAI_BUNDLE\bin\pai.py" --version
           if ($LASTEXITCODE -ne 0) { exit 1 }
           $env:PAI_PYTHON = $env:OLD_PYTHON
