@@ -53,8 +53,12 @@ def _parser():
     c.add_argument("--task", required=True, help="the task, in a sentence")
     c.add_argument("--budget", type=int, help="maximum output characters (default: project budget_chars)")
 
+    c.add_argument("--handoffs", type=int, default=0, help="include up to N subsequent reports (0..20; default 0)")
+
     h = sub.add_parser("handoff", help="draft handoffs")
     hs = h.add_subparsers(dest="hcmd", required=True)
+    listing = hs.add_parser("list", help="list validated project handoffs and discovery problems")
+    listing.add_argument("project")
     n = hs.add_parser("new", help="create a new draft handoff in the project inbox (never overwrites)")
     n.add_argument("project")
     n.add_argument("--task-id", required=True)
@@ -114,8 +118,12 @@ def main(argv=None):
         if a.cmd == "context":
             if a.budget is not None and not 2000 <= a.budget <= 200000:
                 raise config.ConfigError("--budget must be between 2000 and 200000")
-            sys.stdout.write(context.build(project, a.task, a.budget))
+            sys.stdout.write(context.build(project, a.task, a.budget, handoffs=a.handoffs))
             return 0
+        if a.cmd == "handoff" and a.hcmd == "list":
+            text, problems = handoff.listing(project)
+            sys.stdout.write(text)
+            return 1 if problems else 0
         if a.cmd == "handoff" and a.hcmd == "new":
             states = {s: getattr(a, s) for s in handoff.STATES}
             path = handoff.create(project, a.task_id, states, a.summary, a.evidence, a.blocker, a.next, a.proposal)

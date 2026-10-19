@@ -6,7 +6,7 @@ A small, standard-library Python tool for agent sessions on a project:
 - it creates a **draft handoff** in your notes inbox at the end.
 
 **Limits:**
-- It reads only registered files.
+- It reads registered files and, when requested, direct Inbox handoffs.
 - It never scans a vault or home directory.
 - It makes no network or model call and runs no commands, Git included.
 
@@ -29,7 +29,8 @@ bin/pai init flh --repo "/abs/repo" --vault "/abs/vault" \
   --memory "Agent Inbox/PAI-001-…" --inbox "Agent Inbox" \
   --markdown-root "30 Projects" --project-note "30 Projects/Project.md"     # preview
 bin/pai init flh …same… --write               # creates pai.local.toml (0600); never overwrites
-bin/pai context flh --task "what you are about to do"
+bin/pai handoff list flh                     # subsequent task reports and discovery problems
+bin/pai context flh --task "what you are about to do" --handoffs 3
 bin/pai handoff new flh --task-id TASK-1 --summary "…" --evidence "…"
 ```
 
@@ -44,7 +45,8 @@ session.
 | `init PROJECT --repo --vault --memory --inbox [...] [--write]` | Validates explicit paths and previews the TOML. Only `--write` creates the file, exclusively (`O_EXCL`, 0600), and it never overwrites. It looks at no other paths and creates no vault folder |
 | `doctor [PROJECT] [--agents]` | Read-only checks (below). Exit 1 if any PROBLEM is found |
 | `check PROJECT` | Lists each source's status: ok, MISSING, REFUSED (symlink escape or outside the permitted roots) or EXCLUDED |
-| `context PROJECT --task "…" [--budget N]` | Task context in Markdown, at most N Unicode characters (details below) |
+| `context PROJECT --task "…" [--budget N] [--handoffs N]` | Task context in Markdown, at most N Unicode characters (details below) |
+| `handoff list PROJECT` | Lists matching reports and discovery problems; exit 1 when any source is malformed, unavailable, excluded or refused |
 | `handoff new PROJECT --task-id ID [...]` | Creates `<inbox>/<ID>-<UTC>[-n]/HANDOFF.md` from `pai/templates/handoff.md` (details below) |
 
 **`doctor` checks:**
@@ -67,6 +69,36 @@ session.
 6. **proposals**, labelled UNAPPROVED and never required;
 7. everything **omitted**, by name.
 
+**Subsequent handoffs:** `pai handoff list PROJECT` discovers only direct task
+folders under the configured Inbox, reading only their `HANDOFF.md`. Projects
+match validated front matter, never folder names. The existing simple metadata
+requires `project`, `task`, `created` (UTC `YYYY-MM-DDTHH:MM:SSZ`), `status`
+(`draft`, `approved`, `rejected` or `superseded`) and `approved` (`true` or
+`false`). Duplicate keys, invalid UTF-8 and malformed fields are reported.
+Directory and file symlinks are refused, including links within the Vault.
+Exclusion patterns still apply. No recursive traversal occurs.
+
+`context PROJECT --task "review deployment" --handoffs 3` selects up to three
+reports by created time descending, then Inbox-relative path ascending. The
+default is **0**, preserving the original context behavior without discovery.
+Limits are **256 Inbox entries**, **65,536 bytes per file**, and **20 requested
+reports**. An Inbox over the entry limit is refused as a whole. Discovery
+problems appear in context; diagnostics that do not fit are counted with a
+pointer to `handoff list` for full details. Missing `HANDOFF.md` files are
+reported, including in Inbox folders used for memory packages.
+
+Reports are included whole after required constraints and before lexical
+sections, within the same character budget. Oversized reports are omitted,
+with budget and count omissions reported in a selection ledger; long ledgers
+show counts and refer to the ordered listing. If source diagnostics, the omission reserve and the
+ledger cannot fit, context fails explicitly: raise `--budget`. Required
+sections retain priority; their existing truncation and omission notices still
+apply. Reports preserve approval metadata, separate implementation, validation,
+commit, merge and deployment states, and unapproved proposals. Metadata is a
+claim, not verified approval. Newer reports cannot override human decisions,
+approve proposals or authorize commands. Conflicting reports remain visible;
+these lexical checks do not resolve contradictions.
+
 **`handoff new` behaviour:**
 - **Exclusive creation:** concurrent runs never collide or overwrite.
 - **States:** implementation, validation, commit, merge and deployment are
@@ -84,7 +116,7 @@ excludes it). See `pai.example.toml` for every field.
 ## Development and release tooling (not in the bundle)
 
 ```sh
-python3 -B -W error::ResourceWarning -m unittest discover -s tests -v    # 35 synthetic tests
+python3 -B -W error::ResourceWarning -m unittest discover -s tests -v    # synthetic tests
 python3 -B tools/build_bundle.py --out dist                            # dist/pai-workbench-<version>.tar.gz (+ .sha256)
 python3 -B tools/bundle_smoke.py dist/pai-workbench-<version>.tar.gz --work /abs/new/dir
 ```

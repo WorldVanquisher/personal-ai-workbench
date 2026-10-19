@@ -7,7 +7,9 @@ A project registers:
   inside it.
 
 Every file the tool reads is named in the configuration, or sits directly
-inside the registered memory-package directory (non-recursive). After symlinks
+inside the registered memory-package directory (non-recursive). Explicit handoff
+discovery additionally reads direct Inbox task directories and HANDOFF.md only.
+After symlinks
 are resolved, every path must stay inside its declared root. Anything else is
 refused, never followed.
 """
