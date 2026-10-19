@@ -50,6 +50,14 @@ from pathlib import Path
 
 RESULTS = []
 WINDOWS = os.name == "nt"
+TEXT_ENCODING = "utf-8"
+
+
+def configure_output():
+    """Use UTF-8 for console and piped output, independent of Windows code pages."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding=TEXT_ENCODING, errors="strict", newline="\n")
 
 
 def check(name, ok, detail=""):
@@ -135,9 +143,9 @@ class Runner:
 
     def __call__(self, *args, timeout=60, env=None):
         p = subprocess.run([*self.command, *args], cwd=self.cwd, env=env or self.env,
-                           capture_output=True, timeout=timeout)
+                           capture_output=True, encoding=TEXT_ENCODING, errors="replace", timeout=timeout)
         # pai writes UTF-8 on every platform; decode it as such whatever the locale.
-        return p.returncode, p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace")
+        return p.returncode, p.stdout, p.stderr
 
 
 def make_fixture(root, label):
@@ -338,6 +346,7 @@ def other_archive(path, first_tree, work, n, env, cwd):
 
 
 def main(argv=None):
+    configure_output()
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("archives", nargs="+", metavar="ARCHIVE")
     p.add_argument("--work", required=True)
@@ -361,7 +370,8 @@ def main(argv=None):
     decoy = os.path.join(cwd, "pai")  # ...nor import code from it
     os.makedirs(decoy)
     for name in ("__init__.py", "__main__.py", "cli.py"):
-        Path(decoy, name).write_text("raise SystemExit('DECOY pai package imported from the working directory')\n")
+        Path(decoy, name).write_text("raise SystemExit('DECOY pai package imported from the working directory')\n",
+                                    encoding=TEXT_ENCODING)
     t0 = time.time()
     try:
         side = archive + ".sha256"
@@ -371,7 +381,8 @@ def main(argv=None):
         two = location(archive, work, "location two with spaces/dossier é 日本", "two", env, cwd)
         launcher_checks(two, work, env, cwd)
         check("same tool version in both locations", one["version"] == two["version"] and one["version"], (one["version"], two["version"]))
-        c1, c2 = Path(one["config"]).read_text(), Path(two["config"]).read_text()
+        c1 = Path(one["config"]).read_text(encoding=TEXT_ENCODING)
+        c2 = Path(two["config"]).read_text(encoding=TEXT_ENCODING)
         check("local configurations differ, each naming its own roots",
               c1 != c2 and json.dumps(one["vault"]) in c1 and json.dumps(two["vault"]) in c2
               and json.dumps(one["vault"]) not in c2, "")
@@ -414,7 +425,8 @@ def main(argv=None):
                    "pass": passed, "fail": failed, "skip": skipped,
                    "seconds": round(time.time() - t0, 1), "results": RESULTS}
         report = os.path.join(work, "smoke-results.json")
-        Path(report).write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        Path(report).write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n",
+                               encoding=TEXT_ENCODING, newline="\n")
         print(f"SMOKE {'PASSED' if not failed else 'FAILED'}: {passed} passed, {failed} failed, "
               f"{skipped} skipped ({report})")
         if not a.keep:
