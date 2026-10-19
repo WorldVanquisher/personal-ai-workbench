@@ -84,7 +84,7 @@ excludes it). See `pai.example.toml` for every field.
 ## Development and release tooling (not in the bundle)
 
 ```sh
-python3 -B -W error::ResourceWarning -m unittest discover -s tests -v    # 32 synthetic tests
+python3 -B -W error::ResourceWarning -m unittest discover -s tests -v    # 35 synthetic tests
 python3 -B tools/build_bundle.py --out dist                            # dist/pai-workbench-<version>.tar.gz (+ .sha256)
 python3 -B tools/bundle_smoke.py dist/pai-workbench-<version>.tar.gz --work /abs/new/dir
 ```

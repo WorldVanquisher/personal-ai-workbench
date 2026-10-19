@@ -95,6 +95,44 @@ def make_fixture(root, label):
     return repo, vault
 
 
+def verify_concurrent_handoffs(paths, errs, inbox, expected_summaries):
+    """Problems with the outputs of concurrent `handoff new` runs ([] means all good).
+
+    Containment compares fully resolved paths (Path.resolve + is_relative_to), never
+    string prefixes. pai returns paths under the canonical inbox, and a fixture path
+    may reach the same directory through a symlink alias (macOS /var → /private/var).
+    """
+    problems = []
+    if errs:
+        problems.append(f"{len(errs)} writer(s) failed: {errs}")
+    if len(paths) != len(expected_summaries):
+        problems.append(f"{len(paths)} successful writers, expected {len(expected_summaries)}")
+    root = Path(inbox).resolve(strict=True)
+    resolved = []
+    for p in paths:
+        try:
+            rp = Path(p).resolve(strict=True)
+        except (OSError, RuntimeError):
+            problems.append(f"returned path does not exist: {p}")
+            continue
+        if not rp.is_file() or rp.name != "HANDOFF.md":
+            problems.append(f"not a HANDOFF.md file: {p}")
+        elif not rp.is_relative_to(root) or rp.parent.parent != root:
+            problems.append(f"not in its own directory directly under the inbox {root}: {p}")
+        resolved.append(rp)
+    if len(set(resolved)) != len(resolved):
+        problems.append("two writers returned the same file")
+    summaries = []
+    for rp in resolved:
+        text = rp.read_text(encoding="utf-8")
+        summaries.append(text.split("## Summary\n\n", 1)[1].split("\n", 1)[0] if "## Summary\n\n" in text else None)
+    for want in expected_summaries:
+        n = summaries.count(want)
+        if n != 1:
+            problems.append(f"summary {want!r} found {n} times (expected exactly once)")
+    return problems
+
+
 def init_args(repo, vault):
     return ["init", "demo", "--repo", repo, "--vault", vault, "--memory", "Agent Inbox/MEM-1",
             "--inbox", "Agent Inbox", "--markdown-root", "Projects", "--project-note", "Projects/Demo.md",
@@ -146,9 +184,9 @@ def location(archive, work, name, label, env, cwd):
     for t in ts:
         t.join()
     inbox = os.path.join(vault, "Agent Inbox")
-    check(f"[{label}] 6 concurrent handoffs → 6 distinct new files, none overwritten",
-          not errs and len(set(paths)) == 6 and all(p.startswith(inbox) and os.path.isfile(p) for p in paths),
-          errs or paths)
+    problems = verify_concurrent_handoffs(paths, errs, inbox, [f"writer {i}" for i in range(6)])
+    check(f"[{label}] 6 concurrent handoffs → 6 distinct new files in the inbox, none overwritten",
+          not problems, problems or paths)
     texts = [Path(p).read_text() for p in paths if os.path.isfile(p)]
     check(f"[{label}] handoff states UNKNOWN by default, draft and unapproved",
           texts and all("| Commit | UNKNOWN" in t and "approved: false" in t for t in texts))

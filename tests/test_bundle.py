@@ -225,6 +225,81 @@ class BuildTests(unittest.TestCase):
         self.assertGreaterEqual(report["pass"], 30)
 
 
+class AliasPathTests(unittest.TestCase):
+    """Regression for macOS CI: /var is a symlink to /private/var, so a fixture path and the
+    canonical path pai returns differ as strings. This reproduces that with a symlink alias."""
+
+    def setUp(self):
+        self._t = tempfile.TemporaryDirectory()
+        real = Path(self._t.name) / "real root"
+        real.mkdir()
+        self.alias = Path(self._t.name) / "alias root"
+        os.symlink(real, self.alias)
+        self.repo, self.vault = make_data(self.alias)  # every fixture path goes through the alias
+        self.cfg = self.alias / "pai.toml"
+        run_cli(*init_args(self.cfg, self.repo, self.vault, "--write"))
+        self.inbox = str(self.vault / "Agent Inbox")
+
+    def tearDown(self):
+        self._t.cleanup()
+
+    def concurrent(self, n=6):
+        import threading
+        project = config.load("demo", str(self.cfg))
+        paths, errs = [], []
+
+        def make(i):
+            try:
+                paths.append(handoff.create(project, "ALIAS-1", summary=f"writer {i}"))
+            except Exception as e:  # pragma: no cover
+                errs.append(repr(e))
+
+        ts = [threading.Thread(target=make, args=(i,)) for i in range(n)]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join()
+        return paths, errs
+
+    def test_alias_paths_pass_resolved_containment(self):
+        import bundle_smoke
+        paths, errs = self.concurrent()
+        # The alias case is really exercised: the old string-prefix check rejects these paths.
+        self.assertTrue(paths and not any(p.startswith(self.inbox) for p in paths), paths)
+        self.assertEqual(bundle_smoke.verify_concurrent_handoffs(paths, errs, self.inbox,
+                                                                 [f"writer {i}" for i in range(6)]), [])
+
+    def test_resolved_containment_still_rejects_real_problems(self):
+        import bundle_smoke
+        want = [f"writer {i}" for i in range(6)]
+        paths, errs = self.concurrent()
+        v = bundle_smoke.verify_concurrent_handoffs
+        self.assertTrue(any("writer(s) failed" in x for x in v(paths, ["boom"], self.inbox, want)))
+        self.assertTrue(any("successful writers" in x for x in v(paths[:5], [], self.inbox, want)))
+        self.assertTrue(any("same file" in x for x in v(paths[:5] + paths[:1], [], self.inbox, want)))
+        outside = Path(self._t.name) / "elsewhere" / "X-1" / "HANDOFF.md"
+        outside.parent.mkdir(parents=True)
+        outside.write_text(Path(paths[0]).read_text())
+        self.assertTrue(any("directly under the inbox" in x for x in v(paths[1:] + [str(outside)], [], self.inbox, want)))
+        nested = Path(self.inbox) / "deep" / "X-2" / "HANDOFF.md"
+        nested.parent.mkdir(parents=True)
+        nested.write_text(Path(paths[0]).read_text())
+        self.assertTrue(any("directly under the inbox" in x for x in v(paths[1:] + [str(nested)], [], self.inbox, want)))
+        Path(paths[1]).write_text(Path(paths[0]).read_text())  # writer 0's summary twice, writer 1's lost
+        problems = v(paths, [], self.inbox, want)
+        self.assertTrue(any("'writer 0' found 2 times" in x for x in problems), problems)
+        self.assertTrue(any("'writer 1' found 0 times" in x for x in problems), problems)
+
+    def test_bundle_smoke_through_symlinked_work_dir(self):
+        archive, *_ = build_bundle.build(str(ROOT), str(Path(self._t.name) / "dist"), 0)
+        work = self.alias / "smoke work"
+        p = subprocess.run([sys.executable, "-B", str(ROOT / "tools" / "bundle_smoke.py"), archive, "--work", str(work)],
+                           capture_output=True, text=True, timeout=300)
+        self.assertEqual(p.returncode, 0, p.stdout[-3000:] + p.stderr[-2000:])
+        report = json.loads((work / "smoke-results.json").read_text())
+        self.assertEqual(report["fail"], 0)
+
+
 class CompatTests(unittest.TestCase):
     @unittest.skipIf(sys.version_info < (3, 12), "tokenizer check needs 3.12+; on 3.11 the import itself is the test")
     def test_fstrings_are_python311_compatible(self):
