@@ -1,0 +1,33 @@
+# Example pai configuration. Copy to pai.local.toml (git-ignored) and replace the
+# placeholder paths with absolute paths on your machine. Every file pai reads is
+# named here, or sits directly in the memory-package directory (*.md only).
+
+[projects.flh]
+name = "French Learning Hub"
+
+# Repository root (absolute). instructions and repo_docs are relative to it.
+repo = "/ABSOLUTE/PATH/TO/french-learning-hub"
+instructions = ["AGENTS.md"]
+repo_docs = [
+  "docs/PUBLIC_DEMO.md",
+  "docs/validation/FLH-081-integrated-release-candidate.md",
+  "docs/plans/FLH-081-public-demo-deployment.md",
+]
+# Instruction sections always included, matched by heading substring.
+instruction_always = ["working rules", "scope discipline", "human-owned git workflow"]
+
+# Obsidian vault root (absolute). Everything below is relative to it.
+vault = "/ABSOLUTE/PATH/TO/ObsidianVault"
+memory = "Agent Inbox/PAI-001-EXAMPLE"   # memory-package directory, read non-recursively
+inbox = "Agent Inbox"                     # where `handoff new` creates draft directories
+markdown_roots = ["30 Projects"]          # project_notes must resolve inside these
+project_notes = ["30 Projects/French Learning Hub.md"]
+
+# Memory files whose sections are always shown as UNAPPROVED proposals.
+proposal_files = ["knowledge-proposals.md"]
+# Extra file-name exclusions (glob); secrets, dotfiles, *.env, keys are always excluded.
+exclude = []
+
+budget_chars = 24000
+max_section_chars = 2500
+required_section_chars = 1500   # cap per required section (truncation is marked)
