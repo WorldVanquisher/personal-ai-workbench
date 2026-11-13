@@ -189,4 +189,5 @@ The runtime package `pai/` imports no `subprocess`, `socket`, `urllib` or
 | `LICENSE`, `README.md`, `INSTALL.md`, `RELEASE_NOTES.md`, `SESSION_START.md`, `pai.example.toml` | yes | License, documentation and examples |
 | `MANIFEST.json`, `SHA256SUMS` | generated | Bundle contents and checksums |
 | `tests/`, `tools/`, `release/allowlist.txt`, `.github/`, `.gitattributes` | no | Development, release tooling and CI |
+| `swarm/` | no | pai-swarm: parallel Claude Code workers (headless and Remote Control), git task preparation, review checks, owner-opened PRs and the publication check. It calls `pai` as a separate program and runs Git, tmux and `gh`; see `swarm/RC.md` |
 | `pai.local.toml`, `trial-evidence/`, `dist/` | no (git-ignored) | Local configuration, PAI-002 trial outputs, build output |
