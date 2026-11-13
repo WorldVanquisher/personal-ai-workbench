@@ -1,0 +1,41 @@
+--- open-overnight-prs.sh
++++ open-overnight-prs.sh (with the publication check)
+@@ -41,6 +41,7 @@
+ WANT_SHA=""
+ REPO=""
+ KEEP=0
++ALLOW_AI=()
+ GIT=${GIT:-git}
+ GH=${GH:-gh}
+ die() { echo "open-overnight-prs: $*" >&2; exit 1; }
+@@ -54,6 +55,7 @@
+     --manifest-sha256) WANT_SHA=${2:?}; shift 2 ;;
+     --repo) REPO=${2:?}; shift 2 ;;
+     --keep-temp) KEEP=1; shift ;;
++    --allow-ai-attribution) ALLOW_AI=(--allow-ai-attribution); shift ;;
+     -h|--help) usage ;;
+     *) echo "unknown option: $1" >&2; usage ;;
+   esac
+@@ -301,6 +303,22 @@
+ print(f"tested result: {len(want)} paths match byte for byte")
+ PY
+ 
++# --- publication check: the commits that would be pushed, exact PR titles and bodies ---
++PUBCHECK=${PAI_PUBLISH_CHECK:?set PAI_PUBLISH_CHECK to the path of pai-swarm publish_check.py}
++pc=()
++for row in "${LANES[@]}"; do
++  IFS=$'\t' read -r order lane _ <<< "$row"
++  pc+=(--range "${PARENT_OF[$lane]}..${HEAD_OF[$lane]}")
++  while IFS= read -r line; do pc+=("$line"); done < <(python3 -I - "$MANIFEST" "$lane" "$MDIR" <<'PY'
++import json, sys
++l = next(x for x in json.load(open(sys.argv[1]))["lanes"] if x["lane"] == sys.argv[2])
++print("--pr-title"); print(l["pr_title"]); print("--pr-body-file"); print(sys.argv[3] + "/" + l["pr_body_file"])
++PY
++)
++done
++python3 -I "$PUBCHECK" --repo "$CLONE" "${pc[@]}" "${ALLOW_AI[@]}" ||
++  die "publication check failed: nothing was pushed or opened"
++
+ BLOCKED=$(m blocked)
+ echo
+ echo "Merge order (do not merge out of order; nothing is merged by this script):"

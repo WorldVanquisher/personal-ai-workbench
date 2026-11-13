@@ -1,0 +1,112 @@
+# PROPOSAL, NOT ACTIVE. GitHub runs only workflows under .github/workflows/, so this copy
+# does nothing where it is. To adopt it, the owner copies it to
+# .github/workflows/swarm-tests.yml in a PR of its own and decides whether the job becomes a
+# required check (with the path filter below, a required check would stay pending on PRs that
+# do not touch swarm/; drop the filter first if it is made required).
+#
+# What it runs: the pai-swarm fixture suites (swarm/tests with unittest, and the headless
+# shell suite) on ubuntu-latest with a real git and tmux. Claude, gh and Jev are the fakes in
+# swarm/tests. As a tripwire, `claude` and `gh` on PATH are replaced by scripts that log the
+# call and exit 97, and the last step fails the job if either was called: a test that reaches
+# for the real tools cannot pass. The runner image ships a real gh; the tripwire hides it.
+#
+# Nothing is published or written back: the token is read-only, checkout does not keep it,
+# no secret, cache or artifact is used, and the trigger is pull_request (never
+# pull_request_target), so fork PRs run without access to anything.
+name: swarm tests
+
+on:
+  pull_request:
+    paths:
+      - "swarm/**"
+      - ".github/workflows/swarm-tests.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "swarm/**"
+      - ".github/workflows/swarm-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  swarm:
+    name: swarm / Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9 is the minimum swarm/ states. If setup-python stops offering 3.9 for
+        # ubuntu-latest, pin that leg to an older runner image or run it in the
+        # python:3.9-slim container the way PAI-006-HANDOFF.md records it.
+        python: ["3.9", "3.13"]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install tmux
+        timeout-minutes: 3
+        run: |
+          if ! command -v tmux > /dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends tmux > /dev/null
+          fi
+          python --version
+          /usr/bin/python3 --version
+          git --version
+          tmux -V
+
+      - name: Isolate state and put tripwires in front of claude and gh
+        run: |
+          mkdir -p "$RUNNER_TEMP/tripwire" "$RUNNER_TEMP/pai-swarm-home" "$RUNNER_TEMP/claude-config" "$RUNNER_TEMP/gh-config"
+          for tool in claude gh; do
+            printf '#!/bin/sh\necho "tripwire: the real %s was called" >> %s\nexit 97\n' \
+              "$tool" "'$RUNNER_TEMP/tripwire.log'" > "$RUNNER_TEMP/tripwire/$tool"
+            chmod +x "$RUNNER_TEMP/tripwire/$tool"
+          done
+          echo "$RUNNER_TEMP/tripwire" >> "$GITHUB_PATH"
+          # PAI itself needs Python 3.11+; the tests that call it use PAI_PYTHON, here the
+          # runner's system python3 (3.12 on ubuntu-24.04), also on the 3.9 leg.
+          {
+            echo "PAI_SWARM_HOME=$RUNNER_TEMP/pai-swarm-home"
+            echo "CLAUDE_CONFIG_DIR=$RUNNER_TEMP/claude-config"
+            echo "GH_CONFIG_DIR=$RUNNER_TEMP/gh-config"
+            echo "PAI_PYTHON=/usr/bin/python3"
+          } >> "$GITHUB_ENV"
+
+      - name: Fixture tests (fake Claude and gh, disposable repos, private tmux socket)
+        timeout-minutes: 10
+        run: python -B -W error::ResourceWarning -m unittest discover -s swarm/tests -v
+
+      - name: Headless end-to-end checks (fake claude)
+        timeout-minutes: 8
+        env:
+          PAI_REPO: ${{ github.workspace }}
+        run: bash swarm/tests/run_tests.sh
+
+      - name: Neither tripwire was touched
+        if: ${{ always() }}
+        run: |
+          command -v claude gh || true
+          if [ -s "$RUNNER_TEMP/tripwire.log" ]; then
+            cat "$RUNNER_TEMP/tripwire.log"
+            exit 1
+          fi
+          echo "no test called the real claude or gh"

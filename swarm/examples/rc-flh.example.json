@@ -1,0 +1,27 @@
+{
+  "schema": "pai_rc_manifest_v1",
+  "run_id": "20261113-night",
+  "repository": {
+    "path": "~/workspace/french-learning-app",
+    "remote": "origin",
+    "base_branch": "main",
+    "github": "WorldVanquisher/french-learning-hub"
+  },
+  "worktree_root": "~/workspace/flh-workers",
+  "tmux": { "session": "flh-{run_id}" },
+  "command": ["claude", "--remote-control", "--name", "{name}"],
+  "tasks": "~/Vault/PAI/Swarm",
+  "count": 4,
+  "workers": [
+    { "lane": "release",      "branch": "overnight/{run_id}/release-readiness", "name": "FLH {run_id} release" },
+    { "lane": "extraction",   "branch": "overnight/{run_id}/extractor-quality", "name": "FLH {run_id} extraction" },
+    { "lane": "demo-refresh", "branch": "overnight/{run_id}/demo-ux",           "name": "FLH {run_id} demo-refresh" },
+    { "lane": "workbooks",    "branch": "overnight/{run_id}/workbook-study",    "name": "FLH {run_id} workbooks",
+      "task": "FLH-workbook-answer-overview" }
+  ],
+  "review": {
+    "required_checks": ["verify"],
+    "checks": { "verify": ["make", "verify"] },
+    "check_timeout_min": 45
+  }
+}
