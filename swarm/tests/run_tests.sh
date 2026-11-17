@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end tests with a fake `claude`. No Claude usage, no network.
 set -euo pipefail
+export PAI_JEV_CREDENTIAL_STORE=none  # never the operator's real credential store
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$HERE")"
 T="$(mktemp -d)"

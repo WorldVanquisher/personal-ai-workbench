@@ -271,6 +271,14 @@ def pr_text(ctx, data, title=None, body_file=None):
     return str(title), body + "\n"
 
 
+def push_auth(ctx):
+    """[] when the push URL can be reached without a prompt (or is not SSH); otherwise the
+    refusal lines with the exact ssh-agent steps."""
+    res = gitprep.remote_auth(ctx.wt, ctx.rec["repo"]["remote"], "refs/heads/" + ctx.branch, push=True)
+    log("ssh       %s (push URL): %s" % (ctx.rec["repo"]["remote"], res["detail"]))
+    return [] if res["ok"] else gitprep.auth_lines(res, "Nothing was run, pushed or opened.")
+
+
 def remote_state(ctx, head):
     """(action, blocker) for the branch on the remote: push it, reuse it, or stop."""
     sha, err = gitprep.ls_remote(ctx.wt, ctx.rec["repo"]["remote"], ctx.branch)
@@ -361,6 +369,11 @@ def cmd_plan(ctx, a):
                 blockers.append("publication check rejected %d item(s)" % len(found))
         except publish_check.CannotInspect as e:
             blockers.append("publication check could not inspect: %s" % e)
+        auth = push_auth(ctx)
+        if auth:
+            blockers.append(auth[0])
+            for line in auth[1:]:
+                log(line)
         action, why = remote_state(ctx, head)
         log("remote    %s" % ({"push": "branch is not on the remote: `pr open` would push it (never forced)",
                                "reuse": "branch is already on the remote at this commit: reused"}.get(action) or "STOP"))
@@ -388,6 +401,11 @@ def cmd_open(ctx, a):
     head = gitprep.rev(ctx.wt, "HEAD") or ""
     slug = action = paction = pr = None
     if not problems:
+        auth = push_auth(ctx)
+        if auth:
+            for line in auth:
+                log(line if line.startswith(("    ", "Run ")) else "BLOCKED   %s" % line)
+            return 1
         try:
             slug = rc.slug_of(ctx.m, ctx.rec)
             rc.gh("auth", "status")
@@ -421,7 +439,11 @@ def cmd_open(ctx, a):
         return 1
     remote = ctx.rec["repo"]["remote"]
     if action == "push":
-        p = gitprep.git(ctx.wt, "push", remote, "%s:refs/heads/%s" % (head, ctx.branch), timeout=300)
+        try:
+            p = gitprep.git_net(ctx.wt, "push", remote, "%s:refs/heads/%s" % (head, ctx.branch), timeout=300)
+        except subprocess.TimeoutExpired:
+            log("pr open: push timed out after 300s. Nothing was forced; rerun to continue.")
+            return 1
         if p.returncode != 0:
             log("pr open: push failed (%s). Nothing was forced; rerun to continue." % gitprep.redact_url(p.stderr.strip()[-300:]))
             return 1
@@ -431,7 +453,8 @@ def cmd_open(ctx, a):
     if paction == "create":
         try:
             url = rc.gh("pr", "create", "--repo", slug, "--base", ctx.rec["repo"]["base_branch"], "--head", ctx.branch,
-                        "--title=" + title, "--body-file", body_path).strip().splitlines()[-1]
+                        "--title=" + title, "--body-file", body_path, *(["--draft"] if getattr(a, "draft", False) else [])
+                        ).strip().splitlines()[-1]
         except (RuntimeError, IndexError, subprocess.TimeoutExpired) as e:
             log("pr open: the branch is pushed but the PR was not opened (%s). Rerun: the branch is reused." % e)
             return 1
@@ -465,6 +488,8 @@ def main(argv):
             p.add_argument("--body-file", help="PR description file (default: the note's `## PR` section)")
             p.add_argument("--allow-ai-attribution", action="store_true",
                            help="deliberate opt-in for this run: publish despite Claude attribution findings")
+        if name == "open":
+            p.add_argument("--draft", action="store_true", help="open the PR as a draft")
     a = ap.parse_args(argv)
     try:
         if getattr(a, "body_file", None) and not os.path.isfile(a.body_file):

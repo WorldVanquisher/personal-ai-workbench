@@ -99,15 +99,17 @@ class Doctor(unittest.TestCase):
             return [json.loads(l) for l in f]
 
     def test_everything_present_and_logged_in(self):
-        self.have("git", "tmux", "claude", "gh")
+        self.have("git", "tmux", "ps", "claude", "gh")
         rows, code = self.rows()
         self.assertEqual(code, 0)
-        self.assertEqual(set(rows.values()), {"ok"})
-        self.assertEqual(sorted(rows), ["claude", "claude login", "claude remote control", "gh", "gh login", "git", "tmux"])
+        self.assertEqual(set(rows.values()), {"ok", "info"})
+        self.assertEqual(rows["platform"], "info")
+        self.assertEqual(sorted(rows), ["claude", "claude login", "claude remote control", "gh", "gh login", "git",
+                                        "platform", "ps", "tmux"])
         self.assertIn("doctor changed nothing", self.run_cli("doctor").stdout)
 
     def test_missing_binaries_are_not_confused_with_missing_logins(self):
-        self.have("git", "claude", "gh")
+        self.have("git", "ps", "claude", "gh")
         self.set_state(gh_auth=False)
         rows, code = self.rows()
         self.assertEqual(code, 1)
@@ -118,7 +120,7 @@ class Doctor(unittest.TestCase):
         self.assertIn("-> gh auth login", out)
 
     def test_claude_login_and_remote_control_readiness_are_separate(self):
-        self.have("git", "tmux", "claude", "gh")
+        self.have("git", "tmux", "ps", "claude", "gh")
         self.set_state(claude_auth={"loggedIn": False})
         rows, _ = self.rows()
         self.assertEqual((rows["claude"], rows["claude login"], rows["claude remote control"]), ("ok", "not-logged-in", "rc-not-ready"))
@@ -131,7 +133,7 @@ class Doctor(unittest.TestCase):
         self.assertEqual((rows["claude login"], rows["claude remote control"]), ("ok", "rc-not-ready"))
 
     def test_setup_without_the_flag_installs_nothing(self):
-        self.have("git", "claude")
+        self.have("git", "ps", "claude")
         self.have("sudo", "pacman", installer=True)
         p = self.run_cli("setup")
         self.assertEqual(p.returncode, 1)
@@ -142,7 +144,7 @@ class Doctor(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.bin, "tmux")))
 
     def test_install_missing_installs_only_what_is_missing(self):
-        self.have("git")
+        self.have("git", "ps")
         self.have("sudo", "pacman", "curl", "bash", installer=True)
         self.set_state(gh_auth=False)
         p = self.run_cli("setup", "--install-missing")
@@ -163,19 +165,21 @@ class Doctor(unittest.TestCase):
         self.assertEqual(len(self.installs()), len(calls), "a second run finds nothing to install")
 
     def test_package_names_follow_the_platform(self):
-        self.have("git", "claude")
+        self.have("git", "ps", "claude")
         self.os_release("ubuntu", "debian")
         self.have("sudo", "apt-get", installer=True)
         self.assertIn("apt-get install -y tmux gh", self.run_cli("setup").stdout)
         self.os_release("rocky", "rhel centos fedora")
         self.have("dnf", installer=True)
-        self.assertIn("dnf install -y tmux gh", self.run_cli("setup").stdout)
+        out = self.run_cli("setup").stdout  # gh is not in the RHEL family's own repositories: not guessed
+        self.assertIn("dnf install -y tmux\n", out)
+        self.assertIn("cannot install gh automatically: gh is not in rocky's own repositories", out)
         self.os_release("alpine")
         self.have("apk", installer=True)
         self.assertIn("apk add tmux github-cli", self.run_cli("setup").stdout)
 
     def test_unsupported_platform_or_failed_install_is_reported_not_guessed(self):
-        self.have("git", "claude", "gh")
+        self.have("git", "ps", "claude", "gh")
         self.os_release("plan9")
         p = self.run_cli("setup", "--install-missing")
         self.assertEqual(p.returncode, 1)

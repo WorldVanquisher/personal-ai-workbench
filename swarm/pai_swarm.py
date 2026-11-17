@@ -587,6 +587,12 @@ class Runner:
             print("\n" + gitprep.render_plan(pl))
             print("\n--dry-run: nothing was fetched, switched or started.%s" % (" Blocked: see REFUSED." if pl.blocked else ""))
             return 1 if pl.blocked else 0
+        if gitprep.plan(spec, probe=False).path == "new":  # the fetch must not stop at a passphrase prompt
+            auth = gitprep.remote_auth(self.repo, a.remote, "refs/heads/" + a.base_branch)
+            if not auth["ok"]:
+                for line in gitprep.auth_lines(auth, "No worker was started."):
+                    print(line)
+                return 1
         try:
             pl, self.git_task = gitprep.apply(spec, expect_base=a.expect_base, log=log)
         except gitprep.Blocked as e:

@@ -1,5 +1,5 @@
-"""Remote Control launcher: one tmux session, and per worker one window, one worktree, one
-task branch and one `claude --remote-control` process.
+"""Agent launcher: one tmux session, and per worker one window, one worktree, one task branch
+and one agent process (Claude Code with or without Remote Control, or Codex; see agents.py).
 
     pai_swarm.py rc plan    MANIFEST   read-only: what `up` would do, and every refusal
     pai_swarm.py rc up      MANIFEST   new run: fetch once, pin one base, new branches, start
@@ -7,11 +7,14 @@ task branch and one `claude --remote-control` process.
     pai_swarm.py rc status  MANIFEST   per worker: git task, lock, Claude process, RC connectivity
     pai_swarm.py rc next    MANIFEST   after GitHub reports a worker's PR merged: next queued task
     pai_swarm.py rc release MANIFEST   give the worktree locks back (never while Claude runs)
+    pai_swarm.py rc cleanup MANIFEST   preview, or with --apply close exited workers' windows by
+                                       their recorded tmux ids and release their locks
 
 Preparation (fetch, pin, branch, refusals, resume record) is gitprep.py; the worktree lock
 is wtlock.py; both are the ones the headless runner uses. This file adds the manifest, tmux
-and the status evidence. It never kills a window, never restarts a running Claude and
-never touches a worktree's contents.
+and the status evidence. Only `rc cleanup --apply` closes a window (an exited worker's, or a
+live one with --stop-running too); nothing restarts a running agent or touches a worktree's
+contents.
 """
 import hashlib
 import json
@@ -19,10 +22,13 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
 
+import agents
+import dispatch
 import gitprep
 import jev
 import notes
@@ -32,6 +38,8 @@ SCHEMA = "pai_rc_manifest_v1"
 RUN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,23}")
 DEFAULT_COMMAND = ["claude", "--remote-control", "--name", "{name}"]
 DISCONNECT_NOTICE = "remote control disconnected"
+OWN_SCHEMA = "pai_rc_run_v1"
+STARTING_GRACE = 120  # seconds a process may take before it counts as running without readiness evidence
 
 
 class ManifestError(Exception):
@@ -49,6 +57,34 @@ class Worker:
         self.lane, self.worktree, self.branch, self.name = lane, worktree, branch, name
         self.task, self.branch_source = task, branch_source
         self.note = None  # notes.Task once assigned
+        self.agent, self.mode, self.model, self.effort = "claude", "rc", None, None
+        self.agent_source = self.mode_source = "default"
+
+    @property
+    def adapter(self):
+        return agents.get(self.agent)
+
+    def describe_agent(self):
+        return "%s (%s%s%s)" % (self.agent, self.mode, ", model %s" % self.model if self.model else "",
+                                ", effort %s" % self.effort if self.effort else "")
+
+
+def _lane_values(items, what, lanes):
+    """--agent/--mode/--model: LANE=VALUE for one lane, or a bare VALUE for every lane."""
+    res = {}
+    for item in items or []:
+        k, sep, v = item.partition("=")
+        if sep and k in lanes:
+            res[k] = v
+        elif sep:
+            raise ManifestError("%s names lane %r, which the manifest does not have" % (what, k))
+        elif "*" in res:
+            raise ManifestError("%s without a lane may be given once (it applies to every lane)" % what)
+        else:
+            res["*"] = item
+        if not (v if sep else item):
+            raise ManifestError("%s needs a value, not %r" % (what, item))
+    return res
 
 
 def _pairs(items, what):
@@ -62,17 +98,24 @@ def _pairs(items, what):
 
 
 class Manifest:
-    """The manifest file plus command-line overrides (--workers, --assign, --branch)."""
+    """The manifest file plus command-line overrides (--workers, --assign, --branch, --agent,
+    --mode, --model). `data` takes the place of the file's contents (`pai run --dry-run`
+    builds its manifest in memory and writes nothing)."""
 
-    def __init__(self, path, workers=None, assign=None, branch=None, socket=None):
+    def __init__(self, path, workers=None, assign=None, branch=None, socket=None, agent=None, mode=None,
+                 model=None, data=None, effort=None):
         self.path = os.path.abspath(os.path.expanduser(path))
-        try:
-            with open(self.path, encoding="utf-8") as f:
-                d = json.load(f)
-        except (OSError, ValueError) as e:
-            raise ManifestError("cannot read manifest %s: %s" % (self.path, e))
+        if data is not None:
+            d = data
+        else:
+            try:
+                with open(self.path, encoding="utf-8") as f:
+                    d = json.load(f)
+            except (OSError, ValueError) as e:
+                raise ManifestError("cannot read manifest %s: %s" % (self.path, e))
         if not isinstance(d, dict) or d.get("schema") != SCHEMA:
             raise ManifestError("manifest schema must be %s" % SCHEMA)
+        self.data = d
         self.run_id = str(d.get("run_id") or "")
         if not RUN_RE.fullmatch(self.run_id):
             raise ManifestError("run_id %r must match %s" % (self.run_id, RUN_RE.pattern))
@@ -96,14 +139,30 @@ class Manifest:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", self.session):
             raise ManifestError("tmux session name %r may only use letters, digits, - and _" % self.session)
         self.socket = socket or t.get("socket")
-        self.command = d.get("command") or list(DEFAULT_COMMAND)
-        if not (isinstance(self.command, list) and self.command and all(isinstance(x, str) for x in self.command)):
+        # `command` is the original Claude-only launch line. It still works exactly as before;
+        # a manifest without it chooses an agent per lane instead.
+        self.command = d.get("command")
+        if self.command is not None and not (isinstance(self.command, list) and self.command
+                                             and all(isinstance(x, str) for x in self.command)):
             raise ManifestError("command must be a list of strings (an argv, not a shell line)")
+        programs = d.get("agents") or {}
+        if not isinstance(programs, dict):
+            raise ManifestError("agents must map an agent name to {\"command\": [program, ...]}")
+        self.programs = {}
+        for name, cfg in programs.items():
+            if not agents.get(name):
+                raise ManifestError("agents names %r; the known agents are %s" % (name, ", ".join(agents.names())))
+            prog = (cfg or {}).get("command") if isinstance(cfg, dict) else None
+            if prog is not None:
+                if not (isinstance(prog, list) and prog and all(isinstance(x, str) for x in prog)):
+                    raise ManifestError("agents.%s.command must be a list of strings (the program, an argv)" % name)
+                self.programs[name] = prog
         self.env = d.get("env") or {}
         if not all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k) and isinstance(v, str) for k, v in self.env.items()):
             raise ManifestError("env must map variable names to strings")
         self.tasks_dir = absolute(d["tasks"]) if d.get("tasks") else None
         self.review = d.get("review") or {}
+        self.dispatch = bool(d.get("dispatch"))
 
         raw, count = d.get("workers"), workers if workers is not None else d.get("count")
         if raw is None:
@@ -120,6 +179,8 @@ class Manifest:
             for k in given:
                 if k not in lanes:
                     raise ManifestError("%s names lane %r, which the manifest does not have" % (flag, k))
+        cli = {"agent": _lane_values(agent, "--agent", lanes), "mode": _lane_values(mode, "--mode", lanes),
+               "model": _lane_values(model, "--model", lanes), "effort": _lane_values(effort, "--effort", lanes)}
         self.workers = []
         for w in raw:
             lane = str(w.get("lane") or "")
@@ -132,9 +193,56 @@ class Manifest:
                 b, src = self._fmt(w["branch"], vals), "manifest"
             else:
                 b, src = self._fmt(d.get("branch_template") or "rc/{run_id}/{lane}", vals), "default"
-            self.workers.append(Worker(lane, absolute(w.get("worktree") or lane, self.root), b,
-                                       self._fmt(w.get("name") or "{run_id} {lane}", vals),
-                                       assign.get(lane) or w.get("task"), src))
+            wk = Worker(lane, absolute(w.get("worktree") or lane, self.root), b,
+                        self._fmt(w.get("name") or "{run_id} {lane}", vals), assign.get(lane) or w.get("task"), src)
+            self._choose_agent(wk, w, d, cli)
+            self.workers.append(wk)
+
+    def _choose_agent(self, wk, w, d, cli):
+        """Agent, launch mode and model for one lane. Precedence: --x LANE=V, --x V, the
+        worker's field, the manifest's top-level field, the default. Agent and model are
+        separate choices: a model never selects an agent."""
+        def pick(key, default):
+            for src, v in (("command line", cli[key].get(wk.lane)), ("command line", cli[key].get("*")),
+                           ("manifest", w.get(key)), ("manifest", d.get(key))):
+                if v is not None:
+                    return str(v), src
+            return default, "default"
+
+        wk.agent, wk.agent_source = pick("agent", "claude")
+        ad = agents.get(wk.agent)
+        if not ad:
+            raise ManifestError("lane %s: unknown agent %r (known: %s)" % (wk.lane, wk.agent, ", ".join(agents.names())))
+        if self.command is not None:
+            if wk.agent != "claude":
+                raise ManifestError("lane %s: `command` is the Claude-only launch line; to run %s, remove `command` and "
+                                    "name the program in agents.<name>.command" % (wk.lane, wk.agent))
+            default_mode = "rc" if "--remote-control" in self.command else "local"
+        else:
+            default_mode = ad.default_mode()
+        wk.mode, wk.mode_source = pick("mode", default_mode)
+        if wk.mode not in ad.modes:
+            raise ManifestError("lane %s: %s has no launch mode %r (it supports: %s). An unsupported mode is refused, "
+                                "never replaced by another" % (wk.lane, wk.agent, wk.mode, ", ".join(ad.modes)))
+        if self.command is not None and wk.mode != default_mode:
+            raise ManifestError("lane %s: mode %s does not match the manifest's `command`, which %s --remote-control"
+                                % (wk.lane, wk.mode, "has" if default_mode == "rc" else "lacks"))
+        wk.model, msrc = pick("model", None)
+        if wk.model is not None:
+            if self.command is not None:
+                raise ManifestError("lane %s: a model cannot be added to the fixed `command` launch line; put "
+                                    "--model in `command`, or drop `command` and use agent/model" % wk.lane)
+            problem = ad.model_problem(wk.model)
+            if problem:
+                raise ManifestError("lane %s: %s" % (wk.lane, problem))
+        wk.effort, _ = pick("effort", None)
+        if wk.effort is not None:
+            if self.command is not None:
+                raise ManifestError("lane %s: a reasoning effort cannot be added to the fixed `command` launch line"
+                                    % wk.lane)
+            problem = ad.effort_problem(wk.effort)
+            if problem:
+                raise ManifestError("lane %s: %s" % (wk.lane, problem))
 
     def _fmt(self, template, vals):
         try:
@@ -148,20 +256,43 @@ class Manifest:
                 return w
         raise ManifestError("the manifest has no lane %r" % lane)
 
+    def program(self, w):
+        """The lane's program argv (before mode and model options)."""
+        if self.command is not None:
+            return self.command[:1]
+        return self.programs.get(w.agent) or [w.adapter.program]
+
+    def argv_program(self, w):
+        """The executable the lane will start (unformatted placeholders aside)."""
+        return self.program(w)[0]
+
     def argv(self, w, rec, rl):
         vals = {"name": w.name, "lane": w.lane, "worktree": w.worktree, "branch": rl["branch"],
                 "base_sha": rec["base_sha"], "task": rl.get("note") or "",
                 "task_path": os.path.join(self.tasks_dir, rl["note"] + ".md") if self.tasks_dir and rl.get("note") else ""}
-        argv = [self._fmt(x, vals) for x in self.command]
+        if self.command is not None:
+            argv = [self._fmt(x, vals) for x in self.command]
+        else:
+            argv = w.adapter.argv([self._fmt(x, vals) for x in self.program(w)], w.mode, w.name, w.model, w.effort)
         # tmux starts the pane with its server's PATH, not this shell's: pin the program now.
         return [shutil.which(argv[0]) or argv[0]] + argv[1:]
 
     def pane_env(self, w, rec, rl):
+        """(variables to set, variables to remove) for the lane's process. SSH_AUTH_SOCK is
+        this shell's, so a tmux server started earlier from another login cannot hand the
+        worker a stale agent socket; when this shell has none, the server's is removed too."""
         env = dict(self.env)
         env.update(PAI_RC_RUN=self.run_id, PAI_RC_LANE=w.lane, PAI_TASK_ID=rec["task_id"],
                    PAI_TASK_REMOTE=rec["repo"]["remote"], PAI_TASK_BASE_SHA=rec["base_sha"],
-                   PAI_TASK_BRANCH=rl["branch"], PAI_TASK_WORKTREE=w.worktree, PAI_TASK_NOTE=rl.get("note") or "")
-        return env
+                   PAI_TASK_BRANCH=rl["branch"], PAI_TASK_WORKTREE=w.worktree, PAI_TASK_NOTE=rl.get("note") or "",
+                   PAI_AGENT=w.agent)
+        unset = []
+        if "SSH_AUTH_SOCK" not in self.env:
+            if os.environ.get("SSH_AUTH_SOCK"):
+                env["SSH_AUTH_SOCK"] = os.environ["SSH_AUTH_SOCK"]
+            else:
+                unset.append("SSH_AUTH_SOCK")
+        return env, unset
 
     def sessions_dir(self):
         cfg = self.env.get("CLAUDE_CONFIG_DIR") or os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join("~", ".claude")
@@ -181,6 +312,24 @@ def current_lanes(cdir, run_id):
             if rl["state"] != "retired" and (lane not in res or meta.get("gen", 1) > res[lane][0]["meta"].get("gen", 1)):
                 res[lane] = (rec, rl)
     return res
+
+
+def agent_fields(w):
+    return {"agent": w.agent, "mode": w.mode, "model": w.model, "effort": w.effort}
+
+
+def agent_mismatch(w, rl):
+    """A resume keeps the lane's recorded agent, mode and model. A record written before
+    agents could be chosen is a Claude lane."""
+    have = (rl.get("agent") or "claude", rl.get("mode") or w.mode if not rl.get("agent") else rl.get("mode"),
+            rl.get("model") if rl.get("agent") else w.model, rl.get("effort") if rl.get("agent") else w.effort)
+    want = (w.agent, w.mode, w.model, w.effort)
+    if have == want:
+        return []
+    return ["lane %s was started with %s (%s%s%s); a resume never changes the agent, mode, model or effort (asked for "
+            "%s). Use a new run_id for a different agent" % (
+                w.lane, have[0], have[1], ", model %s" % have[2] if have[2] else "", ", effort %s" % have[3] if have[3] else "",
+                w.describe_agent())]
 
 
 def ask_branches(workers, input_fn=input, out=sys.stderr):
@@ -261,7 +410,8 @@ def build_specs(m, want=None, interactive=False, input_fn=input):
         problems = assign_tasks(m)
         if interactive and not problems:
             ask_branches(m.workers, input_fn)
-        lanes = [gitprep.Lane(w.lane, w.branch, w.worktree, {"stem": w.branch, "note": w.task}) for w in m.workers]
+        lanes = [gitprep.Lane(w.lane, w.branch, w.worktree, dict({"stem": w.branch, "note": w.task}, **agent_fields(w)))
+                 for w in m.workers]
         return [gitprep.Spec(m.run_id, lanes=lanes, want="new", meta={"run": m.run_id, "gen": 1}, **common)], problems
     if want == "new":
         return [], ["run %s was already started; rerun without --new to resume it, or use a new run_id" % m.run_id]
@@ -276,6 +426,7 @@ def build_specs(m, want=None, interactive=False, input_fn=input):
         rec, rl = cur[w.lane]
         if w.branch_source in ("command line", "prompt") and w.branch != rl["branch"]:
             problems.append("lane %s is recorded on branch %s; a resume never renames it" % (w.lane, rl["branch"]))
+        problems += agent_mismatch(w, rl)
         w.branch, w.task = rl["branch"], rl.get("note")
         groups.setdefault(rec["task_id"], (rec, []))[1].append(gitprep.Lane(w.lane, rl["branch"], w.worktree))
     specs = [gitprep.Spec(tid, lanes=lanes, want="resume", meta=rec.get("meta"), **common)
@@ -286,14 +437,20 @@ def build_specs(m, want=None, interactive=False, input_fn=input):
 # ---------------------------------------------------------------- tmux and processes
 
 class Tmux:
-    FIELDS = ("window_id", "window_name", "pane_dead", "pane_dead_status", "pane_pid", "pane_id", "pane_current_command")
+    FIELDS = ("window_id", "window_name", "pane_dead", "pane_dead_status", "pane_pid", "pane_id", "pane_current_command",
+              "session_id", "session_name", "window_panes", "pid", "socket_path")
 
     def __init__(self, socket=None):
         self.bin = os.environ.get("PAI_SWARM_TMUX") or shutil.which("tmux")
-        self.base = [self.bin or "tmux"]
-        if socket:
-            self.base += ["-S", socket] if os.sep in socket else ["-L", socket]
+        self.socket = socket
+        self.base = [self.bin or "tmux"] + self.socket_args(socket)
         self.env = {k: v for k, v in os.environ.items() if k not in ("TMUX", "TMUX_PANE")}
+
+    @staticmethod
+    def socket_args(socket):
+        if not socket:
+            return []
+        return ["-S", socket] if os.sep in socket else ["-L", socket]
 
     def run(self, *args):
         return subprocess.run(self.base + list(args), capture_output=True, text=True, env=self.env,
@@ -302,42 +459,63 @@ class Tmux:
     def has_session(self, session):
         return bool(self.bin) and self.run("has-session", "-t", "=" + session).returncode == 0
 
+    def _rows(self, *args):
+        if not self.bin:
+            return []
+        p = self.run(*(list(args) + ["-F", "\t".join("#{%s}" % f for f in self.FIELDS)]))
+        return [dict(zip(self.FIELDS, line.split("\t"))) for line in p.stdout.splitlines()] if p.returncode == 0 else []
+
     def windows(self, session):
         """{window name: [window dict, ...]}; empty when the session or server does not exist."""
-        if not self.bin:
-            return {}
-        p = self.run("list-windows", "-t", "=" + session, "-F", "\t".join("#{%s}" % f for f in self.FIELDS))
         res = {}
-        for line in p.stdout.splitlines() if p.returncode == 0 else []:
-            w = dict(zip(self.FIELDS, line.split("\t")))
+        for w in self._rows("list-windows", "-t", "=" + session):
             res.setdefault(w["window_name"], []).append(w)
         return res
 
-    @staticmethod
-    def shell_line(argv, env):
-        # One shell word list run by tmux through `sh -c`; `exec` makes Claude the pane process.
-        return "exec env " + " ".join(shlex.quote("%s=%s" % kv) for kv in sorted(env.items())) + " " + \
-            " ".join(shlex.quote(a) for a in argv)
+    def panes(self):
+        """Every pane on this server (all sessions), with its window and session ids."""
+        return self._rows("list-panes", "-a")
 
-    def start(self, session, lane, cwd, argv, env):
+    def command(self, *args):
+        """The exact tmux command line an operator can paste, for this socket."""
+        return " ".join(shlex.quote(x) for x in ["tmux"] + self.socket_args(self.socket) + list(args))
+
+    @staticmethod
+    def shell_line(argv, env, unset=()):
+        # One shell word list run by tmux through `sh -c`; `exec` makes the agent the pane process.
+        return "exec env " + "".join("-u %s " % shlex.quote(u) for u in unset) + \
+            " ".join(shlex.quote("%s=%s" % kv) for kv in sorted(env.items())) + " " + " ".join(shlex.quote(a) for a in argv)
+
+    IDS = "#{session_id}\t#{window_id}\t#{pane_id}\t#{pane_pid}\t#{pid}\t#{socket_path}"
+
+    def start(self, session, lane, cwd, argv, env, unset=()):
+        """(ok, error, ids): ids are the new window's stable tmux ids and its server."""
         target = "=%s:%s" % (session, lane)
         if self.has_session(session):
-            first = ["new-window", "-d", "-t", "=%s:" % session, "-n", lane, "-c", cwd]
+            first = ["new-window", "-d", "-P", "-F", self.IDS, "-t", "=%s:" % session, "-n", lane, "-c", cwd]
         else:
-            first = ["new-session", "-d", "-s", session, "-n", lane, "-c", cwd, "-x", "200", "-y", "50"]
+            first = ["new-session", "-d", "-P", "-F", self.IDS, "-s", session, "-n", lane, "-c", cwd, "-x", "200", "-y", "50"]
         # Same tmux invocation, so the window keeps its pane (and exit status) even if the
         # command exits at once.
-        p = self.run(*(first + [self.shell_line(argv, env), ";", "set-option", "-w", "-t", target, "remain-on-exit", "on"]))
-        return p.returncode == 0, p.stderr.strip()
+        p = self.run(*(first + [self.shell_line(argv, env, unset), ";", "set-option", "-w", "-t", target,
+                                "remain-on-exit", "on"]))
+        ids = dict(zip(("session_id", "window_id", "pane_id", "pane_pid", "server_pid", "socket_path"),
+                       (p.stdout.strip().splitlines() or [""])[0].split("\t")))
+        return p.returncode == 0, p.stderr.strip(), ids
 
-    def respawn(self, pane_id, cwd, argv, env):
+    def respawn(self, pane_id, cwd, argv, env, unset=()):
         # No -k: tmux refuses unless the pane's process has already exited.
-        p = self.run("respawn-pane", "-t", pane_id, "-c", cwd, self.shell_line(argv, env))
+        p = self.run("respawn-pane", "-t", pane_id, "-c", cwd, self.shell_line(argv, env, unset))
         return p.returncode == 0, p.stderr.strip()
 
-    def capture(self, pane_id):
-        p = self.run("capture-pane", "-p", "-t", pane_id)
+    def capture(self, pane_id, history=False):
+        """The visible screen, or with history=True the whole scrollback as well."""
+        p = self.run("capture-pane", "-p", "-J", *(["-S", "-"] if history else []), "-t", pane_id)
         return p.stdout if p.returncode == 0 else ""
+
+    def pane_pid(self, pane_id):
+        p = self.run("display-message", "-p", "-t", pane_id, "#{pane_pid}")
+        return p.stdout.strip() if p.returncode == 0 else ""
 
 
 def process_table():
@@ -354,8 +532,9 @@ def process_table():
 
 
 def find_claude(pane_pid, command, sessions_dir, table):
-    """Pid of the Claude process in a pane (the pane's process or a descendant), or None."""
-    want = os.path.basename(command[0])
+    """Pid of the agent process in a pane (the pane's process or a descendant), or None.
+    `command` is the lane's program argv; Claude is also recognised by its session record."""
+    want = agents.process_names(command)
     queue, seen = [pane_pid], set()
     while queue:
         pid = queue.pop(0)
@@ -363,23 +542,39 @@ def find_claude(pane_pid, command, sessions_dir, table):
             continue
         seen.add(pid)
         args = table[pid][1].split()
-        if (args and os.path.basename(args[0]) == want) or os.path.isfile(os.path.join(sessions_dir, "%d.json" % pid)):
+        if (args and (os.path.basename(args[0]) in want or (len(args) > 1 and os.path.basename(args[1]) in want))) or (
+                sessions_dir and os.path.isfile(
+                os.path.join(sessions_dir, "%d.json" % pid))):
             return pid
         queue += [c for c, (pp, _) in table.items() if pp == pid]
     return None
 
 
+def stale_seconds():
+    try:
+        return max(1, int(os.environ.get("PAI_RC_STALE_SECONDS") or 900))
+    except ValueError:
+        return 900
+
+
+def _notice_path(pid, start):
+    return os.path.join(wtlock.home(), "rc-notices", "%s-%s.json" % (pid, start or "x"))
+
+
 def rc_evidence(pid, worktree, sessions_dir, pane_text):
-    """(state, evidence). `verified` needs positive evidence from Claude Code's own session
-    record for this exact process and directory; a running process alone proves nothing."""
+    """(state, evidence). `verified` needs positive, current evidence from Claude Code's own
+    session record for this exact process and directory; a running process alone proves
+    nothing. A record not updated for PAI_RC_STALE_SECONDS (900 s) is inconclusive, and so is
+    a record whose bridge session has not changed since a disconnect notice was seen in this
+    pane (the notice may have scrolled off or been cleared since)."""
     notice = DISCONNECT_NOTICE in pane_text.lower()
+    start = wtlock.proc_start(pid)
     try:
         with open(os.path.join(sessions_dir, "%d.json" % pid), encoding="utf-8") as f:
             rec = json.load(f)
     except (OSError, ValueError):
         return ("disconnected", "pane shows a Remote Control disconnect notice") if notice else \
             ("unverified", "Claude wrote no session record for pid %d" % pid)
-    start = wtlock.proc_start(pid)
     if rec.get("pid") != pid:
         return "unverified", "the session record belongs to another process"
     if start is not None:  # where the start time is known, the record must carry the same one
@@ -389,45 +584,174 @@ def rc_evidence(pid, worktree, sessions_dir, pane_text):
             return "unverified", "the session record belongs to an earlier process with the same pid"
     if gitprep.canon(str(rec.get("cwd") or "")) != worktree:
         return "unverified", "the session record is for another directory"
-    if not rec.get("bridgeSessionId"):
+    bridge = rec.get("bridgeSessionId")
+    if notice:
+        try:  # remember it: a notice that later disappears is not evidence of a reconnect
+            os.makedirs(os.path.dirname(_notice_path(pid, start)), exist_ok=True)
+            with open(_notice_path(pid, start), "w", encoding="utf-8") as f:
+                json.dump({"bridge": bridge, "seen": time.time()}, f)
+        except OSError:
+            pass
+    if not bridge:
         return ("disconnected" if notice else "not-connected",
                 "Claude's session record has no Remote Control bridge session" + (
                     "; pane shows a disconnect notice" if notice else ""))
     if notice:
         return "unverified", "bridge session recorded, but the pane shows a disconnect notice"
-    age = ""
-    if isinstance(rec.get("updatedAt"), (int, float)):
-        age = ", record updated %ds ago" % max(0, int(time.time() - rec["updatedAt"] / 1000))
-    return "verified", "bridge session recorded by Claude for this process and worktree" + age
+    try:
+        with open(_notice_path(pid, start), encoding="utf-8") as f:
+            seen = json.load(f)
+        if seen.get("bridge") == bridge:
+            return "unverified", ("a disconnect notice was seen in this pane and the bridge session recorded since is "
+                                  "the same one; inconclusive until Claude records a new bridge session")
+    except (OSError, ValueError):
+        pass
+    if not isinstance(rec.get("updatedAt"), (int, float)):
+        return "unverified", "the session record has no update time, so its bridge session may be stale"
+    age = max(0, int(time.time() - rec["updatedAt"] / 1000))
+    if age > stale_seconds():
+        return "unverified", ("bridge session recorded, but the record was last updated %ds ago (stale after %ds); "
+                              "inconclusive" % (age, stale_seconds()))
+    return "verified", "bridge session recorded by Claude for this process and worktree, record updated %ds ago" % age
 
 
-def lane_process(m, tmux, w, wins=None, table=None):
-    """{'state': no-window|ambiguous|exited|running|no-claude, 'pid', 'exit', 'window'}"""
+# ---------------------------------------------------------------- run ownership (stable tmux ids)
+
+def own_path(m, cdir=None):
+    cdir = cdir or gitprep.common_dir(m.repo) or m.repo
+    return os.path.join(wtlock.home(), "rc", "%s-%s.json" % (hashlib.sha256(cdir.encode()).hexdigest()[:12], m.run_id))
+
+
+def load_own(m, cdir=None):
+    """The run's ownership record: which tmux server, session, window and pane each lane's
+    worker was started in. {} when there is none (a run started before it existed)."""
+    try:
+        with open(own_path(m, cdir), encoding="utf-8") as f:
+            own = json.load(f)
+        return own if own.get("schema") == OWN_SCHEMA and own.get("run_id") == m.run_id else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_own(m, own, cdir=None):
+    path = own_path(m, cdir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    own.update(schema=OWN_SCHEMA, run_id=m.run_id, session=m.session, socket=m.socket, repo=m.repo)
+    tmp = "%s.%d.tmp" % (path, os.getpid())
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(own, f, indent=1, sort_keys=True)
+    os.replace(tmp, path)
+
+
+def record_window(m, w, ids, task_id):
+    own = load_own(m)
+    lanes = own.setdefault("lanes", {})
+    pid = int(ids.get("pane_pid") or 0)
+    lanes[w.lane] = {"session_id": ids.get("session_id"), "window_id": ids.get("window_id"),
+                     "pane_id": ids.get("pane_id"), "pane_pid": pid, "pane_start": wtlock.proc_start(pid) if pid else None,
+                     "server_pid": ids.get("server_pid"), "server_start": wtlock.proc_start(int(ids["server_pid"]))
+                     if (ids.get("server_pid") or "").isdigit() else None, "socket_path": ids.get("socket_path"),
+                     "agent": w.agent, "mode": w.mode, "model": w.model, "task_id": task_id, "started_at": gitprep.now()}
+    save_own(m, own)
+
+
+def same_server(rec_lane, win):
+    """True when the window listing comes from the server the lane's window was started on."""
+    return bool(rec_lane) and str(rec_lane.get("server_pid") or "") == str(win.get("pid") or "") and (
+        rec_lane.get("server_start") is None or str(rec_lane["server_start"]) == str(wtlock.proc_start(int(win["pid"]))
+                                                                                     if str(win.get("pid")).isdigit() else ""))
+
+
+def lane_process(m, tmux, w, wins=None, table=None, own=None):
+    """{'state': no-window|ambiguous|mismatched|exited|running|no-claude, 'pid', 'exit', 'window'}"""
     wins = tmux.windows(m.session) if wins is None else wins
+    own = load_own(m) if own is None else own
+    rec = (own.get("lanes") or {}).get(w.lane) or {}
+    by_id = {x["window_id"]: x for ws in wins.values() for x in ws}
     mine = wins.get(w.lane) or []
-    if not mine:
-        return {"state": "no-window"}
     if len(mine) > 1:
         return {"state": "ambiguous", "detail": "%d windows are named %s" % (len(mine), w.lane)}
+    recorded = rec.get("window_id") if rec.get("window_id") and any(same_server(rec, x) for x in by_id.values()) else None
+    if not mine:
+        if recorded and recorded in by_id:
+            return {"state": "mismatched", "window": by_id[recorded],
+                    "detail": "this run's window %s is now named %s" % (recorded, by_id[recorded]["window_name"])}
+        return {"state": "no-window"}
     win = mine[0]
     if win["pane_dead"] == "1":
-        return {"state": "exited", "exit": win["pane_dead_status"] or "?", "window": win}
-    pid = find_claude(int(win["pane_pid"] or 0), m.command, m.sessions_dir(), process_table() if table is None else table)
-    if pid is None:
-        return {"state": "no-claude", "window": win, "detail": "pane runs %s" % win["pane_current_command"]}
-    return {"state": "running", "pid": pid, "window": win}
+        res = {"state": "exited", "exit": win["pane_dead_status"] or "?", "window": win}
+    else:
+        pid = find_claude(int(win["pane_pid"] or 0), m.program(w), m.sessions_dir() if w.agent == "claude" else None,
+                          process_table() if table is None else table)
+        if pid is None:
+            return {"state": "no-claude", "window": win, "detail": "pane runs %s" % win["pane_current_command"]}
+        res = {"state": "running", "pid": pid, "window": win}
+    if recorded and recorded != win["window_id"]:
+        return {"state": "mismatched", "window": win,
+                "detail": "the window named %s is %s, but this run started %s" % (w.lane, win["window_id"], recorded)}
+    return res
+
+
+def proc_age(pid):
+    """Seconds since the process started (Linux), or None."""
+    start = wtlock.proc_start(pid)
+    try:
+        with open("/proc/uptime") as f:
+            up = float(f.read().split()[0])
+        return up - int(start) / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, TypeError, IndexError):
+        return None
+
+
+PHASES = {"no-window": "no window", "exited": "exited", "no-claude": "window without the agent",
+          "ambiguous": "ambiguous", "mismatched": "mismatched", "starting": "starting",
+          "waiting-for-trust": "waiting for folder trust", "running": "running"}
+
+
+def lane_phase(m, w, proc, screen):
+    """(phase, input_ready). The process state refined by what the agent shows: its
+    folder-trust prompt, its idle input box, or (while it is young) no sign of life yet."""
+    if proc["state"] != "running":
+        return proc["state"], False
+    ad = w.adapter
+    if ad.waiting_for_trust(screen):
+        return "waiting-for-trust", False
+    if ad.ready(screen):
+        return "running", True
+    if w.agent == "claude" and ad.has_rc(w.mode):
+        alive = os.path.isfile(os.path.join(m.sessions_dir(), "%d.json" % proc["pid"]))
+    else:
+        alive = bool(screen.strip())
+    age = proc_age(proc["pid"])
+    return ("starting" if not alive and age is not None and age < STARTING_GRACE else "running"), False
 
 
 # ---------------------------------------------------------------- plan / up
+
+def agent_problems(m):
+    """Every lane's program must exist and support its launch mode, checked before anything
+    is fetched, locked or started."""
+    problems, cache = [], {}
+    for w in m.workers:
+        exe = m.argv_program(w)
+        path = shutil.which(exe) or (exe if os.path.isabs(exe) and os.access(exe, os.X_OK) else None)
+        if not path:
+            problems.append("lane %s: %s is not installed or not on PATH (agent %s; `pai doctor` / "
+                            "`pai setup --install-missing`)" % (w.lane, exe, w.agent))
+            continue
+        if m.command is None and len(m.program(w)) == 1:  # the agent's own CLI, not a wrapper
+            why = w.adapter.probe(path, w.mode, cache)
+            if why:
+                problems.append("lane %s: %s" % (w.lane, why))
+    return problems
+
 
 def preflight(m, tmux, new):
     """Launcher-level refusals, checked before anything is fetched or switched."""
     problems = []
     if not tmux.bin:
         problems.append("tmux is not installed (run `pai_swarm.py doctor`)")
-    exe = m.command[0]
-    if not (shutil.which(exe) or (os.path.isabs(exe) and os.access(exe, os.X_OK))):
-        problems.append("%s is not on PATH (run `pai_swarm.py doctor`)" % exe)
+    problems += agent_problems(m)
     wins = tmux.windows(m.session)
     for w in m.workers:
         n = len(wins.get(w.lane) or [])
@@ -439,21 +763,32 @@ def preflight(m, tmux, new):
     return problems
 
 
+def ssh_preflight(m, nothing="Nothing was locked, fetched, created or started."):
+    """Problems (with the exact ssh-agent steps) when the remote cannot be reached without a
+    prompt; [] when it can, or when it is not an SSH remote."""
+    res = gitprep.remote_auth(m.repo, m.remote, "refs/heads/" + m.base_branch)
+    log("ssh       %s: %s" % (m.remote, res["detail"]))
+    return [] if res["ok"] else gitprep.auth_lines(res, nothing)
+
+
 def show_plan(m, specs, plans, problems, tmux):
     log("manifest  %s" % m.path)
     log("run       %s   tmux session %s%s" % (m.run_id, m.session, "  (socket %s)" % m.socket if m.socket else ""))
-    wins, table = tmux.windows(m.session), process_table()
+    wins, table, own = tmux.windows(m.session), process_table(), load_own(m)
     for pl in plans:
         log(gitprep.render_plan(pl))
         for ln in pl.spec.lanes:
             if ln.problems:
                 continue
             w = m.worker(ln.lane)
-            proc = lane_process(m, tmux, w, wins, table)
-            what = {"no-window": "start a window and Claude", "exited": "restart Claude in its window (it exited)",
-                    "running": "keep (Claude is running)", "no-claude": "leave alone (window without Claude)",
-                    "ambiguous": "REFUSED"}[proc["state"]]
+            proc = lane_process(m, tmux, w, wins, table, own)
+            n = w.adapter.display
+            what = {"no-window": "start a window and %s" % n, "exited": "restart %s in its window (it exited)" % n,
+                    "running": "keep (%s is running)" % n, "no-claude": "leave alone (window without %s)" % n,
+                    "ambiguous": "REFUSED", "mismatched": "REFUSED (%s)" % proc.get("detail")}[proc["state"]]
             log("lane      %-14s worker: %s%s" % (ln.lane, what, "; task note %s" % w.task if w.task else ""))
+            log("          %-14s agent:  %s, program %s%s" % ("", w.describe_agent(), m.argv_program(w),
+                                                            "" if w.adapter.has_rc(w.mode) else "; Remote Control: not supported"))
     for p in problems:
         log("REFUSED   %s" % p)
 
@@ -477,7 +812,7 @@ def ensure_workers(m, tmux, lanes):
     """Start what is missing; keep what runs. `lanes` is [(worker, record, lane record)].
     Returns the number of lanes that could not be started."""
     failed = 0
-    wins, table = tmux.windows(m.session), process_table()
+    wins, table, own = tmux.windows(m.session), process_table(), load_own(m)
     for w, rec, rl in lanes:
         gate = gitprep.verify_ready(w.worktree, rl["branch"], rec["base_sha"])
         lock = wtlock.read(w.worktree)
@@ -487,16 +822,20 @@ def ensure_workers(m, tmux, lanes):
             log("NOT STARTED %-12s %s" % (w.lane, "; ".join(gate)))
             failed += 1
             continue
-        proc = lane_process(m, tmux, w, wins, table)
-        argv, env = m.argv(w, rec, rl), m.pane_env(w, rec, rl)
+        proc = lane_process(m, tmux, w, wins, table, own)
+        argv, (env, unset) = m.argv(w, rec, rl), m.pane_env(w, rec, rl)
         if proc["state"] == "no-window":
-            ok, err = tmux.start(m.session, w.lane, w.worktree, argv, env)
+            ok, err, ids = tmux.start(m.session, w.lane, w.worktree, argv, env, unset)
             verb = "started"
         elif proc["state"] == "exited":
-            ok, err = tmux.respawn(proc["window"]["pane_id"], w.worktree, argv, env)
-            verb = "restarted (Claude had exited with status %s)" % proc["exit"]
+            ok, err = tmux.respawn(proc["window"]["pane_id"], w.worktree, argv, env, unset)
+            win = proc["window"]
+            ids = {"session_id": win["session_id"], "window_id": win["window_id"], "pane_id": win["pane_id"],
+                   "pane_pid": tmux.pane_pid(win["pane_id"]) if ok else "", "server_pid": win["pid"],
+                   "socket_path": win["socket_path"]}
+            verb = "restarted (the agent had exited with status %s)" % proc["exit"]
         elif proc["state"] == "running":
-            log("kept        %-12s Claude is running (pid %d); session and edits untouched" % (w.lane, proc["pid"]))
+            log("kept        %-12s %s is running (pid %d); session and edits untouched" % (w.lane, w.adapter.display, proc["pid"]))
             continue
         else:
             log("LEFT ALONE  %-12s %s; nothing was changed. Close the window yourself, then rerun."
@@ -504,9 +843,11 @@ def ensure_workers(m, tmux, lanes):
             failed += 1
             continue
         if ok:
+            record_window(m, w, ids, rec["task_id"])
             rl["state"], rl["started_at"] = "started", gitprep.now()
             gitprep.save_record(rec)
-            log("%-11s %-12s window %s:%s, branch %s" % (verb.split(" ")[0], w.lane, m.session, w.lane, rl["branch"]))
+            log("%-11s %-12s window %s:%s (%s), %s, branch %s" % (verb.split(" ")[0], w.lane, m.session, w.lane,
+                                                                   ids.get("window_id") or "?", w.describe_agent(), rl["branch"]))
         else:
             log("FAILED      %-12s tmux: %s" % (w.lane, err))
             failed += 1
@@ -544,6 +885,12 @@ def cmd_up(m, a):
         show_plan(m, specs, plans, problems, tmux)
         log("\nrc up: REFUSED. Nothing was fetched, created, switched or started.")
         return 1
+    if new:  # the fetch below must not stop at a passphrase prompt
+        bad = ssh_preflight(m)
+        if bad:
+            for line in bad:
+                log("REFUSED   %s" % line if not line.startswith("    ") and not line.startswith("Run ") else line)
+            return 1
     started = []
     for spec in specs:
         try:
@@ -560,20 +907,85 @@ def cmd_up(m, a):
             if a.jev_triage:
                 jev_intake(m, write=True)
         started += [(m.worker(l.lane), rec, rec["lanes"][l.lane]) for l in spec.lanes]
-    failed = ensure_workers(m, tmux, started)
-    time.sleep(a.settle)
+    only = set(getattr(a, "lane", None) or [])
+    failed = ensure_workers(m, tmux, [x for x in started if not only or x[0].lane in only])
+    rows = watch_startup(m, tmux, a.settle, dispatch=m.dispatch and not getattr(a, "no_dispatch", False))
+    report_startup(m, tmux, rows, pai=getattr(a, "pai", False))
     log()
-    code = cmd_status(m, a, quiet_exit=True)
+    code = cmd_status(m, a, quiet_exit=True, pai=getattr(a, "pai", False))
     return 1 if failed else code
+
+
+def watch_startup(m, tmux, seconds, dispatch=False, lanes=None):
+    """Each lane on its own: poll until no lane is still `starting` (and, with dispatch, every
+    ready lane has its task) or `seconds` have passed. A lane waiting for folder trust or one
+    that exited never holds up the others. Returns the final status rows."""
+    end = time.time() + max(0.0, seconds)
+    while True:
+        rows, cur = collect_status(m, tmux)
+        rows = [r for r in rows if not lanes or r["lane"] in lanes]
+        if dispatch:
+            for r in rows:
+                if r["phase"] == "running" and r["input_ready"] and r["dispatch"]["state"] == "pending":
+                    r["dispatch"] = dispatch_lane(m, tmux, m.worker(r["lane"]), *cur[r["lane"]])
+        # A window whose agent is not found yet may still be between `sh -c` and the agent's exec.
+        waiting = [r for r in rows if r["phase"] in ("starting", "no-claude") or (
+            dispatch and r["phase"] == "running" and r["dispatch"]["state"] == "pending")]
+        if not waiting or time.time() >= end:
+            return rows
+        time.sleep(0.25)
+
+
+def dispatch_lane(m, tmux, w, rec, rl, force=False):
+    wins, table, own = tmux.windows(m.session), process_table(), load_own(m)
+    proc = lane_process(m, tmux, w, wins, table, own)
+    if proc["state"] != "running":
+        return dispatch.state(m, w, rl, proc, "")
+    pane = proc["window"]["pane_id"]
+    note = None
+    if m.tasks_dir and rl.get("note") and os.path.isfile(os.path.join(m.tasks_dir, rl["note"] + ".md")):
+        note = notes.Task(os.path.join(m.tasks_dir, rl["note"] + ".md"))
+    return dispatch.deliver(m, tmux, w, rec, rl, proc, note, lambda: tmux.capture(pane),
+                            lambda: tmux.capture(pane, history=True), force=force)
+
+
+def attach_hint(m, tmux, r, pai=False):
+    if pai:
+        return "pai attach %s%s" % (r["lane"], " --run %s" % m.run_id)
+    return tmux.command("attach-session", "-t", "=%s:%s" % (m.session, r["tmux"]["window_id"] or r["lane"]))
+
+
+def report_startup(m, tmux, rows, pai=False):
+    log("\nstartup   each lane on its own; a lane that waits does not hold up the others")
+    for r in rows:
+        p = r["process"]
+        what = PHASES.get(r["phase"], r["phase"])
+        if r["phase"] == "running":
+            what += " (pid %s)" % p.get("pid")
+        elif r["phase"] == "exited":
+            what += " (status %s)" % p.get("exit")
+        log("  %-12s %-24s %-28s task: %-10s rc: %s" % (r["lane"], "%s/%s" % (r["agent"]["name"], r["agent"]["mode"]), what,
+                                                         r["dispatch"]["state"], r["rc"]["state"]))
+    for r in rows:
+        if r["phase"] == "waiting-for-trust":
+            ad = agents.get(r["agent"]["name"])
+            log("TRUST     lane %s: %s is asking whether to trust %s. Its task waits until you answer." % (
+                r["lane"], r["agent"]["name"], r["worktree"]))
+            log("          Open the prompt, %s:" % ad.trust_hint)
+            log("            %s" % attach_hint(m, tmux, r, pai))
+            log("          then %s to deliver its task." % ("`pai resume`" if pai else "rerun `rc up`"))
+        elif r["dispatch"]["state"] == "unknown":
+            log("DISPATCH  lane %s: %s" % (r["lane"], r["dispatch"]["detail"]))
 
 
 # ---------------------------------------------------------------- status
 
-def lane_status(m, tmux, w, rec, rl, wins, table):
+def lane_status(m, tmux, w, rec, rl, wins, table, own=None, disp=None):
     st = {"lane": w.lane, "task_id": rec["task_id"], "generation": (rec.get("meta") or {}).get("gen", 1),
           "note": rl.get("note"), "remote": rec["repo"]["remote"], "remote_url": rec["repo"]["remote_url"],
           "base_branch": rec["repo"]["base_branch"], "base_sha": rec["base_sha"], "fetched_at": rec["fetched_at"],
-          "branch": rl["branch"], "worktree": w.worktree, "prepared": rl["state"]}
+          "branch": rl["branch"], "worktree": w.worktree, "prepared": rl["state"],
+          "agent": {"name": w.agent, "mode": w.mode, "model": w.model, "program": m.argv_program(w)}}
     if os.path.isdir(w.worktree):
         st["on_branch"] = gitprep.current_branch(w.worktree)
         st["head"] = gitprep.rev(w.worktree, "HEAD")
@@ -583,39 +995,61 @@ def lane_status(m, tmux, w, rec, rl, wins, table):
     lock = wtlock.read(w.worktree)
     st["lock"] = "this run" if wtlock.owned(lock, "rc", m.run_id, w.lane) else (
         "NOT HELD" if not lock else "held by " + wtlock.describe(lock))
-    proc = lane_process(m, tmux, w, wins, table)
+    own = load_own(m) if own is None else own
+    proc = lane_process(m, tmux, w, wins, table, own)
     st["process"] = {k: v for k, v in proc.items() if k != "window"}
+    win = proc.get("window") or {}
+    st["tmux"] = {"socket": m.socket, "session": m.session, "window_id": win.get("window_id"),
+                  "pane_id": win.get("pane_id")}
+    screen = history = ""
     if proc["state"] == "running":
-        state, evidence = rc_evidence(proc["pid"], w.worktree, m.sessions_dir(), tmux.capture(proc["window"]["pane_id"]))
+        screen, history = tmux.capture(win["pane_id"]), tmux.capture(win["pane_id"], history=True)
+    st["phase"], st["input_ready"] = lane_phase(m, w, proc, screen)
+    if not w.adapter.has_rc(w.mode):
+        state, evidence = "not-supported", w.adapter.rc_unsupported(w.mode)
+    elif st["phase"] == "waiting-for-trust":
+        state, evidence = "not-connected", "the folder-trust prompt is open; Remote Control starts only after it is answered"
+    elif proc["state"] == "running":
+        state, evidence = rc_evidence(proc["pid"], w.worktree, m.sessions_dir(), history)
     else:
-        state, evidence = "not-running", "no Claude process to be connected"
+        state, evidence = "not-running", "no agent process to be connected"
     st["rc"] = {"state": state, "evidence": evidence}
+    st["dispatch"] = dispatch.state(m, w, rl, proc, history, disp)
     return st
 
 
 def collect_status(m, tmux):
     cdir = gitprep.common_dir(m.repo)
     cur = current_lanes(cdir, m.run_id) if cdir else {}
-    wins, table = tmux.windows(m.session), process_table()
-    return [lane_status(m, tmux, w, *cur[w.lane], wins, table) for w in m.workers if w.lane in cur], cur
+    wins, table, own, disp = tmux.windows(m.session), process_table(), load_own(m), dispatch.load(m)
+    return [lane_status(m, tmux, w, *cur[w.lane], wins, table, own, disp) for w in m.workers if w.lane in cur], cur
 
 
-def cmd_status(m, a, quiet_exit=False):
+def lane_ok(m, r):
+    return (r["process"]["state"] == "running" and r["phase"] == "running"
+            and r["rc"]["state"] in ("verified", "not-supported")
+            and (not m.dispatch or r["dispatch"]["state"] in ("delivered", "none")))
+
+
+def cmd_status(m, a, quiet_exit=False, pai=False):
     tmux = Tmux(m.socket)
     rows, cur = collect_status(m, tmux)
-    ok = bool(rows) and len(rows) == len(m.workers) and all(
-        r["process"]["state"] == "running" and r["rc"]["state"] == "verified" for r in rows)
+    ok = bool(rows) and len(rows) == len(m.workers) and all(lane_ok(m, r) for r in rows)
     if getattr(a, "json", False):
-        json.dump({"run_id": m.run_id, "session": m.session, "ok": ok, "lanes": rows}, sys.stdout, indent=1)
+        json.dump({"run_id": m.run_id, "session": m.session, "socket": m.socket, "ok": ok, "lanes": rows},
+                  sys.stdout, indent=1)
         print()
         return 0 if ok else 1
-    log("run       %s   tmux session %s (%s)" % (m.run_id, m.session, "exists" if tmux.has_session(m.session) else "absent"))
+    log("run       %s   tmux session %s (%s)%s" % (m.run_id, m.session, "exists" if tmux.has_session(m.session) else "absent",
+                                                   "  socket %s" % m.socket if m.socket else ""))
     if not rows:
-        log("No task has been started for this run. `rc plan` shows what `rc up` would do.")
+        log("No task has been started for this run. `%s` shows what would happen." % ("pai run --dry-run" if pai else "rc plan"))
         return 1
     for r in rows:
         p, branch_now = r["process"], r.get("on_branch")
         log("lane %s" % r["lane"])
+        log("  agent     %s%s" % (m.worker(r["lane"]).describe_agent(), "  window %s pane %s" % (
+            r["tmux"]["window_id"], r["tmux"]["pane_id"]) if r["tmux"]["window_id"] else ""))
         log("  task      %s%s" % (r["task_id"], "  note %s" % r["note"] if r["note"] else ""))
         log("  remote    %s %s" % (r["remote"], r["remote_url"]))
         log("  base      %s @ %s (fetched %s)" % (r["base_branch"], r["base_sha"], r["fetched_at"]))
@@ -625,15 +1059,21 @@ def cmd_status(m, a, quiet_exit=False):
                                       "" if branch_now == r["branch"] else "  WORKTREE IS ON %s" % (branch_now or "a detached HEAD"))))
         log("  worktree  %s%s" % (r["worktree"], "" if "head" in r else "  MISSING"))
         log("  lock      %s" % r["lock"])
-        log("  claude    %s" % {"running": "running (pid %s)" % p.get("pid"), "exited": "exited (status %s)" % p.get("exit"),
-                                "no-window": "no window", "no-claude": "window without a Claude process (%s)" % p.get("detail"),
-                                "ambiguous": "ambiguous: %s" % p.get("detail")}[p["state"]])
+        log("  state     %s%s" % (PHASES.get(r["phase"], r["phase"]), "" if r["phase"] != "waiting-for-trust" else
+                                  ": %s" % attach_hint(m, tmux, r, pai)))
+        log("  dispatch  %s: %s" % (r["dispatch"]["state"], r["dispatch"]["detail"]))
+        log("  %-9s %s" % (r["agent"]["name"], {
+            "running": "running (pid %s)" % p.get("pid"), "exited": "exited (status %s)" % p.get("exit"),
+            "no-window": "no window", "no-claude": "window without the agent process (%s)" % p.get("detail"),
+            "ambiguous": "ambiguous: %s" % p.get("detail"), "mismatched": "mismatched: %s" % p.get("detail")}[p["state"]]))
         log("  rc        %s: %s" % (r["rc"]["state"], r["rc"]["evidence"]))
     missing = [w.lane for w in m.workers if w.lane not in cur]
     if missing:
         log("not started: %s" % ", ".join(missing))
     if not ok and not quiet_exit:
-        log("\nNot every worker is running with verified Remote Control. `rc up` restarts only missing workers.")
+        log("\nNot every worker is running and ready (Remote Control verified where it was requested%s). "
+            "`%s` restarts only missing workers." % (", task delivered" if m.dispatch else "",
+                                                     "pai resume" if pai else "rc up"))
     return 0 if ok else 1
 
 
@@ -651,7 +1091,7 @@ def cmd_release(m, a):
             log("%-14s not locked by this run (%s)" % (w.lane, wtlock.describe(lock)))
             continue
         proc = lane_process(m, tmux, w, wins, table)
-        if proc["state"] in ("running", "no-claude", "ambiguous"):
+        if proc["state"] in ("running", "no-claude", "ambiguous", "mismatched"):
             log("%-14s KEPT: its tmux window is still live (%s). Stop that session yourself first."
                 % (w.lane, proc["state"]))
             code = 1
@@ -659,6 +1099,202 @@ def cmd_release(m, a):
         wtlock.release(w.worktree, "rc", m.run_id, w.lane)
         log("%-14s lock released; branch, worktree and edits are untouched" % w.lane)
     return code
+
+
+# ---------------------------------------------------------------- cleanup
+
+def leftover_processes(m, w):
+    """Pids of processes that still carry this lane's markers (PAI_RC_RUN, PAI_RC_LANE and
+    PAI_TASK_WORKTREE, set on the worker and inherited by what it started). None where /proc
+    cannot be read."""
+    if not os.path.isdir("/proc"):
+        return None
+    want = {("PAI_RC_RUN=%s" % m.run_id).encode(), ("PAI_RC_LANE=%s" % w.lane).encode(),
+            ("PAI_TASK_WORKTREE=%s" % w.worktree).encode()}
+    found = []
+    for d in os.listdir("/proc"):
+        if not d.isdigit() or int(d) == os.getpid():
+            continue
+        try:
+            with open("/proc/%s/environ" % d, "rb") as f:
+                env = set(f.read().split(b"\0"))
+        except OSError:
+            continue
+        if want <= env:
+            found.append(int(d))
+    return found
+
+
+def cleanup_target(m, tmux, w, own, panes, table):
+    """What cleanup may do for one lane, from the run's ownership record and the live tmux
+    state. kind: exited | live | gone | closed | mismatched | no-record."""
+    rec = (own.get("lanes") or {}).get(w.lane) or {}
+    t = {"lane": w.lane, "worker": w, "rec": rec, "lock": wtlock.read(w.worktree), "window": None}
+    if not rec.get("window_id"):
+        if rec.get("closed_at"):
+            return dict(t, kind="closed", detail="window %s was closed by cleanup at %s" % (rec.get("closed_window"),
+                                                                                           rec["closed_at"]))
+        return dict(t, kind="no-record", detail="no recorded tmux ids for this lane (started by an older pai-swarm?); "
+                    "check its window yourself, close it, then run cleanup again")
+    if not panes or not same_server(rec, panes[0]):
+        return dict(t, kind="gone", detail="the tmux server window %s was started on is no longer running"
+                    % rec["window_id"])
+    mine = [p for p in panes if p["window_id"] == rec["window_id"]]
+    if not mine:
+        return dict(t, kind="gone", detail="window %s is already closed" % rec["window_id"])
+    pane = mine[0]
+    t["window"] = pane
+    bad = []
+    if len(mine) != 1:
+        bad.append("window %s has %d panes; only the worker's pane %s was recorded" % (rec["window_id"], len(mine),
+                                                                                     rec.get("pane_id")))
+    for field, label in (("pane_id", "pane"), ("session_id", "session")):
+        if pane[field] != rec.get(field):
+            bad.append("the window's %s is %s, the record says %s" % (label, pane[field], rec.get(field)))
+    if pane["session_name"] != m.session:
+        bad.append("the window is in session %s, not %s" % (pane["session_name"], m.session))
+    if pane["window_name"] != w.lane:
+        bad.append("the window is named %s, not %s" % (pane["window_name"], w.lane))
+    if pane["pane_dead"] != "1" and not bad:
+        pid = int(pane["pane_pid"] or 0)
+        now = wtlock.proc_start(pid)
+        if pid == rec.get("pane_pid") and now is None:  # gone, and tmux has not marked the pane dead yet
+            return dict(t, kind="exiting", detail="pid %s is exiting" % pid)
+        if pid != rec.get("pane_pid") or (rec.get("pane_start") and str(now) != str(rec["pane_start"])):
+            bad.append("the pane runs pid %s, not the recorded worker pid %s" % (pid, rec.get("pane_pid")))
+    if bad:
+        return dict(t, kind="mismatched", detail="; ".join(bad))
+    if pane["pane_dead"] == "1":
+        return dict(t, kind="exited", detail="exited (status %s)" % (pane["pane_dead_status"] or "?"))
+    screen = tmux.capture(pane["pane_id"])
+    phase = "waiting-for-trust" if w.adapter.waiting_for_trust(screen) else "running"
+    return dict(t, kind="live", pid=int(pane["pane_pid"]), detail="%s (pid %s)" % (PHASES[phase], pane["pane_pid"]))
+
+
+def close_window(tmux, t):
+    """Close the recorded window only if, at that moment inside tmux, its pane is still dead
+    and still in that window. Returns True when the window is gone afterwards."""
+    win, pane = t["rec"]["window_id"], t["rec"]["pane_id"]
+    cond = "#{?pane_dead,#{?#{==:#{window_id},%s},1,0},0}" % win
+    tmux.run("if-shell", "-F", "-t", pane, cond, "kill-window -t %s" % win, "display-message -p pai-skip")
+    return not any(p["window_id"] == win for p in tmux.panes())
+
+
+def finish_lane(m, w, t, apply):
+    """After the worker has exited: release this run's lock unless something the worker
+    started still runs, and record the window as closed. Returns (released, message)."""
+    lock = wtlock.read(w.worktree)
+    if not wtlock.owned(lock, "rc", m.run_id, w.lane):
+        return False, "lock: %s (not this run's; left as it is)" % wtlock.describe(lock)
+    left = leftover_processes(m, w)
+    if left:
+        return False, "lock KEPT: %d process(es) the worker started still run (pid %s)" % (
+            len(left), ", ".join(map(str, left[:5])))
+    if not apply:
+        return False, "would release the lock%s" % (" (leftover processes not checked: no /proc)" if left is None else "")
+    wtlock.release(w.worktree, "rc", m.run_id, w.lane)
+    return True, "lock released%s" % (" (leftover processes not checked: no /proc)" if left is None else "")
+
+
+def cmd_cleanup(m, a):
+    tmux = Tmux(m.socket)
+    cdir = gitprep.common_dir(m.repo)
+    cur = current_lanes(cdir, m.run_id) if cdir else {}
+    own = load_own(m, cdir)
+    for lane in a.lane or []:
+        m.worker(lane)
+    panes, table = tmux.panes(), process_table()
+    server = panes[0] if panes else None
+    stop = a.apply and a.stop_running
+    log("cleanup   run %s   socket %s%s   session %s" % (
+        m.run_id, (server or {}).get("socket_path") or m.socket or "(default tmux server)",
+        " (server pid %s)" % server["pid"] if server else " (no server running)", m.session))
+    targets = [cleanup_target(m, tmux, w, own, panes, table) for w in m.workers
+               if (not a.lane or w.lane in a.lane) and (w.lane in cur or w.lane in (own.get("lanes") or {}))]
+    if not targets:
+        log("nothing recorded for this run%s" % (" and lane(s) %s" % ", ".join(a.lane) if a.lane else ""))
+        return 0
+    code = 0
+    for t in targets:
+        w = t["worker"]
+        rec = t["rec"]
+        lock = wtlock.read(w.worktree)
+        lockdesc = "this run" if wtlock.owned(lock, "rc", m.run_id, w.lane) else ("none" if not lock else wtlock.describe(lock))
+        log("  %-10s window %-5s pane %-5s %-18s %-34s lock %s" % (
+            w.lane, rec.get("window_id") or rec.get("closed_window") or "-", rec.get("pane_id") or "-",
+            "%s/%s" % (w.agent, w.mode), t["kind"] + ": " + t["detail"] if t["kind"] in ("mismatched", "no-record", "gone",
+                                                                                         "closed") else t["detail"], lockdesc))
+        if t["kind"] in ("mismatched", "no-record"):
+            log("             REFUSED: nothing is closed, stopped or released for this lane")
+            code = 1
+            continue
+        if t["kind"] == "exiting":
+            log("             keep: the worker is exiting right now; run cleanup again in a moment")
+            continue
+        if t["kind"] == "live" and not stop:
+            log("             keep: the worker is live. To stop it and close its window:")
+            log("               %s" % stop_command(m, a, w))
+            code = 1 if a.apply else code
+            continue
+        if not a.apply:
+            verb = {"exited": "would close window %s" % rec.get("window_id"),
+                    "live": "would stop pid %s (SIGTERM), then close window %s" % (t.get("pid"), rec.get("window_id")),
+                    "gone": "window already gone", "closed": "already cleaned"}[t["kind"]]
+            log("             %s; %s" % (verb, finish_lane(m, w, t, False)[1]))
+            continue
+        if t["kind"] == "live":
+            again = cleanup_target(m, tmux, w, load_own(m, cdir), tmux.panes(), process_table())
+            if again["kind"] != "live" or again.get("pid") != t.get("pid"):
+                log("             REFUSED: the lane changed since it was inspected (%s: %s)" % (again["kind"], again["detail"]))
+                code = 1
+                continue
+            os.kill(t["pid"], signal.SIGTERM)
+            end = time.time() + float(getattr(a, "stop_timeout", 15))
+            while time.time() < end:
+                t = cleanup_target(m, tmux, w, load_own(m, cdir), tmux.panes(), process_table())
+                if t["kind"] not in ("live", "exiting"):
+                    break
+                time.sleep(0.2)
+            if t["kind"] != "exited":
+                log("             NOT STOPPED: still %s after SIGTERM; window and lock kept" % t["detail"])
+                code = 1
+                continue
+            log("             stopped: the worker exited (%s)" % t["detail"])
+        if t["kind"] == "exited":  # recheck under the mutex, right before closing
+            t = cleanup_target(m, tmux, w, load_own(m, cdir), tmux.panes(), process_table())
+            if t["kind"] != "exited" or not close_window(tmux, t):
+                log("             NOT CLOSED: the lane changed (%s: %s); nothing was closed" % (t["kind"], t["detail"]))
+                code = 1
+                continue
+            log("             closed window %s" % t["rec"]["window_id"])
+        if t["kind"] in ("closed", "gone") and not wtlock.owned(wtlock.read(w.worktree), "rc", m.run_id, w.lane):
+            log("             already cleaned: nothing to do")
+            continue
+        released, msg = finish_lane(m, w, t, True)
+        log("             %s" % msg)
+        if not released and "KEPT" in msg:
+            code = 1
+        o = load_own(m, cdir)
+        lr = (o.get("lanes") or {}).get(w.lane)
+        if lr and lr.get("window_id"):
+            lr.update(closed_at=gitprep.now(), closed_window=lr["window_id"], window_id=None, pane_id=None)
+            save_own(m, o, cdir)
+    others = [p for p in panes if p["session_name"] == m.session and p["window_id"] not in
+              {(t["rec"] or {}).get("window_id") for t in targets}]
+    for p in others:
+        log("  %-10s window %-5s %r is not one of these targets: never touched" % ("other", p["window_id"], p["window_name"]))
+    if not a.apply:
+        log("\nPREVIEW: nothing was closed, stopped or released. Worktrees, branches, edits, task notes and review "
+            "records are never touched. Add --apply to do what the lines above say.")
+    else:
+        log("\nWorktrees, branches, uncommitted edits, task notes and review records were left as they are. "
+            "To start the closed workers again on the same branches: `rc up MANIFEST --resume` (or `pai resume`).")
+    return code
+
+
+def stop_command(m, a, w):
+    return getattr(a, "stop_hint", None) or "python3 %s rc cleanup %s --lane %s --apply --stop-running" % (
+        shlex.quote(os.path.join(os.path.dirname(os.path.abspath(__file__)), "pai_swarm.py")), shlex.quote(m.path), w.lane)
 
 
 # ---------------------------------------------------------------- next task after a merged PR
@@ -720,6 +1356,11 @@ def cmd_next(m, a, input_fn=input):
         log("rc next: run %s has not been started" % m.run_id)
         return 1
     override = _pairs(a.branch, "--branch")
+    bad = ssh_preflight(m, "No lane was rolled over.")
+    if bad:
+        for line in bad:
+            log(line)
+        return 1
     queue = []
     if m.tasks_dir and os.path.isdir(m.tasks_dir):
         queue = sorted((t for t in notes.load_tasks(m.tasks_dir) if t.status == "todo"), key=lambda t: (-t.priority, t.name))
@@ -732,6 +1373,11 @@ def cmd_next(m, a, input_fn=input):
         if (a.lane and w.lane not in a.lane) or w.lane not in cur:
             continue
         rec, rl = cur[w.lane]
+        mismatch = agent_mismatch(w, rl)
+        if mismatch:
+            log("%-14s NOT ROLLED OVER: %s" % (w.lane, mismatch[0]))
+            code = 1
+            continue
         tip = gitprep.branch_sha(m.repo, rl["branch"])
         try:
             pr, why = merged_pr(prs_for(slug_of(m, rec), rl["branch"]), tip or "", rec["repo"]["base_branch"])
@@ -774,7 +1420,8 @@ def cmd_next(m, a, input_fn=input):
         spec = gitprep.Spec("%s.%s.%d" % (m.run_id, w.lane, gen), mode="rc", repo=m.repo, remote=m.remote,
                             base_branch=m.base_branch, github=m.github, url=m.url, worktree_root=m.root,
                             want="new", meta={"run": m.run_id, "gen": gen}, lock_owner=m.run_id,
-                            lanes=[gitprep.Lane(w.lane, branch, w.worktree, {"stem": stem, "note": note.name})])
+                            lanes=[gitprep.Lane(w.lane, branch, w.worktree,
+                                                dict({"stem": stem, "note": note.name}, **agent_fields(w)))])
         if a.plan:
             pl = gitprep.plan(spec)
             log("%-14s PR %s is merged; next task %s" % (w.lane, pr["url"], note.name))
@@ -801,15 +1448,19 @@ def cmd_next(m, a, input_fn=input):
         return code
     if rolled:
         code = max(code, 1 if ensure_workers(m, tmux, rolled) else 0)
-        log("A kept Claude session is now on the new branch: give it the new task from claude.ai/code.")
+        if m.dispatch and not getattr(a, "no_dispatch", False):
+            rows = watch_startup(m, tmux, getattr(a, "settle", 5.0), dispatch=True, lanes={w.lane for w, _, _ in rolled})
+            report_startup(m, tmux, rows, pai=getattr(a, "pai", False))
+        else:
+            log("A kept agent session is now on the new branch: give it the new task (claude.ai/code, or attach).")
     return code
 
 
 # ---------------------------------------------------------------- handoff facts
 
 def session_mutex(m):
-    """Non-blocking mutex for one tmux session: `rc up`, `rc next` and `rc release` never
-    interleave, so two of them cannot both start a worker in the same lane."""
+    """Non-blocking mutex for one tmux session: `rc up`, `rc next`, `rc release` and `rc cleanup
+    --apply` never interleave, so two of them cannot both start a worker in the same lane."""
     key = hashlib.sha256(("%s\0%s" % (m.socket or "", m.session)).encode()).hexdigest()[:16]
     return wtlock.mutex("tmux-" + key, blocking=False)
 
@@ -817,7 +1468,7 @@ def session_mutex(m):
 def exclusive(m, fn, *args):
     with session_mutex(m) as got:
         if not got:
-            log("rc: another `rc up`, `rc next` or `rc release` for tmux session %s is running; nothing was "
+            log("rc: another `rc up`, `rc next` or `rc release` for tmux session %s is running (or `rc cleanup --apply`); nothing was "
                 "changed. Run this again when it has finished." % m.session)
             return 1
         return fn(m, *args)
@@ -861,13 +1512,24 @@ def main(argv, pai_cls=None):
             g.add_argument("--resume", dest="want", action="store_const", const="resume", help="refuse if the run has no record")
             p.add_argument("--jev-triage", action="store_true",
                            help="also ask Jev whether each assigned note is ready (needs TYPESAFE_API_KEY; advisory)")
+            p.add_argument("--agent", action="append", metavar="[LANE=]AGENT",
+                           help="agent for one lane, or for every lane (%s; default claude)" % ", ".join(agents.names()))
+            p.add_argument("--mode", action="append", metavar="[LANE=]MODE",
+                           help="launch mode (claude: rc or local; codex: local). An unsupported mode is refused")
+            p.add_argument("--model", action="append", metavar="[LANE=]MODEL",
+                           help="model for one lane or every lane; separate from --agent")
+            p.add_argument("--effort", action="append", metavar="[LANE=]LEVEL",
+                           help="reasoning effort (claude: low..max; codex: minimal..high); unsupported values are refused")
         return p
 
     parser("plan", "read-only: show what `up` would do", overrides=True)
     u = parser("up", "prepare worktrees and start missing workers", overrides=True)
     u.add_argument("--expect-base", metavar="SHA", help="refuse unless the pinned base is exactly this commit")
     u.add_argument("--no-input", action="store_true", help="never prompt for branch names")
-    u.add_argument("--settle", type=float, default=2.0, help="seconds to wait before the closing status (default 2)")
+    u.add_argument("--settle", type=float, default=2.0, help="seconds to wait for lanes to come up (and, with "
+                   "dispatch, take their task) before the closing status (default 2)")
+    u.add_argument("--lane", action="append", help="on a rerun, start only these missing lanes")
+    u.add_argument("--no-dispatch", action="store_true", help="do not send tasks even if the manifest has dispatch on")
     s = parser("status", "git task, lock, Claude process and RC connectivity per worker")
     s.add_argument("--json", action="store_true")
     r = parser("release", "release this run's worktree locks (refused while a window is live)")
@@ -878,6 +1540,13 @@ def main(argv, pai_cls=None):
     n.add_argument("--branch", action="append", metavar="LANE=NAME", help="branch name instead of <stem>-<n>")
     n.add_argument("--plan", action="store_true", help="read-only: ask GitHub and show what would happen")
     n.add_argument("--no-input", action="store_true")
+    n.add_argument("--settle", type=float, default=5.0, help=argparse.SUPPRESS)
+    n.add_argument("--no-dispatch", action="store_true")
+    c = parser("cleanup", "preview (default) or --apply: close exited workers' windows, release their locks")
+    c.add_argument("--lane", action="append", help="only this lane (repeatable)")
+    c.add_argument("--apply", action="store_true", help="do it; without this nothing changes")
+    c.add_argument("--stop-running", action="store_true", help="with --apply: also stop live workers (SIGTERM), "
+                   "including ones waiting for folder trust")
     h = parser("handoff", "file one draft PAI handoff with the launcher's own observations")
     h.add_argument("--pai", required=True, metavar="PROJECT")
     h.add_argument("--pai-bin", default=os.environ.get("PAI_BIN", ""))
@@ -887,7 +1556,8 @@ def main(argv, pai_cls=None):
     try:
         first = a.rc_cmd in ("plan", "up")
         m = Manifest(a.manifest, workers=getattr(a, "workers", None), assign=getattr(a, "assign", None),
-                     branch=a.branch if first else None, socket=a.tmux_socket)
+                     branch=a.branch if first else None, socket=a.tmux_socket, agent=getattr(a, "agent", None),
+                     mode=getattr(a, "mode", None), model=getattr(a, "model", None), effort=getattr(a, "effort", None))
         if a.rc_cmd == "next":
             for lane in list(_pairs(a.branch, "--branch")) + list(a.lane or []):
                 m.worker(lane)
@@ -901,6 +1571,8 @@ def main(argv, pai_cls=None):
             return exclusive(m, cmd_release, a)
         if a.rc_cmd == "next":
             return exclusive(m, cmd_next, a)
+        if a.rc_cmd == "cleanup":
+            return exclusive(m, cmd_cleanup, a) if a.apply else cmd_cleanup(m, a)
         summary, evidence, commit = handoff_facts(m)
         if not evidence:
             log("rc handoff: run %s has not been started; nothing to report" % m.run_id)

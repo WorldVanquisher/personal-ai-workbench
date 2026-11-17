@@ -3,6 +3,8 @@
 # any entry that names local configuration, evidence, caches, secrets or VCS data.
 LICENSE
 README.md
+README.zh-CN.md
+REFERENCE.md
 INSTALL.md
 RELEASE_NOTES.md
 SESSION_START.md
