@@ -63,7 +63,7 @@ class Fixture(unittest.TestCase):
                        env=dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull))
         self.env = dict(os.environ, PAI_SWARM_HOME=self.home, GIT_CONFIG_GLOBAL=os.devnull,
                         GIT_CONFIG_SYSTEM=os.devnull, FAKE_GH_STATE=os.path.join(self.tmp, "gh.json"),
-                        FAKE_GH_REMOTE=self.origin, PAI_SWARM_GH=FAKE_GH, **HUMAN)
+                        FAKE_GH_REMOTE=self.origin, PAI_SWARM_GH=FAKE_GH, PAI_JEV_CREDENTIAL_STORE="none", **HUMAN)
         for k in ("TMUX", "TMUX_PANE", "TYPESAFE_API_KEY", "PAI_SWARM_GIT"):
             self.env.pop(k, None)
         self.socket = None

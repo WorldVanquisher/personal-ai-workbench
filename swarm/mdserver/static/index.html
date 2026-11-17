@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en" data-theme="endfield">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAI Markdown (experimental)</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<div class="app">
+  <header class="app-header">
+    <h1>PAI Markdown</h1>
+    <span class="tag signal" title="Experimental: keep backups of anything important">EXPERIMENTAL</span>
+    <span id="state" class="state" aria-live="polite"></span>
+  </header>
+  <div id="stale" class="banner error" role="alert" hidden>
+    <strong>The file changed on disk since you opened it.</strong> Nothing was written; your draft is kept here.
+    <button id="copy" type="button">Copy draft</button>
+    <button id="reload" type="button" class="ghost">Reload from disk (discards the draft)</button>
+  </div>
+  <div id="error" class="banner" role="alert" hidden></div>
+  <div class="layout">
+    <nav class="picker panel" aria-label="Markdown files">
+      <h2>FILES</h2>
+      <label for="root">Folder</label>
+      <select id="root"></select>
+      <input id="filter" type="search" placeholder="Filter" aria-label="Filter files">
+      <ul id="files"></ul>
+    </nav>
+    <section class="editor panel" aria-label="Editor">
+      <h2 id="path">NO FILE OPEN</h2>
+      <div class="view-tabs" role="group" aria-label="View">
+        <button type="button" id="show-edit" aria-pressed="true">Edit</button>
+        <button type="button" id="show-preview" aria-pressed="false">Preview</button>
+      </div>
+      <div class="panes">
+        <textarea id="text" spellcheck="false" aria-label="Markdown text" disabled></textarea>
+        <article id="preview" class="preview reading" aria-label="Rendered preview"></article>
+      </div>
+      <div class="actions">
+        <button id="save" class="primary" type="button" disabled>Review and save…</button>
+      </div>
+    </section>
+  </div>
+  <div id="dialog" class="dialog-backdrop" hidden>
+    <div class="dialog panel" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+      <h2 id="dialog-title">CONFIRM SAVE</h2>
+      <p>Write <code id="dialog-path"></code>? Lines marked <span class="del-sym">− removed</span> and
+        <span class="add-sym">+ added</span>:</p>
+      <pre id="diff" class="diff" tabindex="0"></pre>
+      <div class="actions">
+        <button id="confirm" class="primary" type="button">Save this revision</button>
+        <button id="cancel" class="ghost" type="button">Keep editing</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

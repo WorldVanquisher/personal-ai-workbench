@@ -22,7 +22,9 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
+import signal
 import subprocess
 import time
 
@@ -56,6 +58,56 @@ def git(cwd, *args, timeout=60):
     env.update(GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0", LC_ALL="C")
     return subprocess.run([git_bin(), "-C", cwd] + list(args), capture_output=True, text=True,
                           timeout=timeout, env=env, stdin=subprocess.DEVNULL)
+
+
+def git_net(cwd, *args, timeout=60, url=None):
+    """git for anything that talks to a remote (ls-remote, fetch, push): never interactive.
+    It runs in its own session with no controlling terminal, so neither ssh nor a credential
+    helper can ask for a passphrase or password on the terminal; ssh also gets BatchMode
+    (which refuses unknown host keys rather than accepting them) and a connect timeout.
+    SSH_AUTH_SOCK and the rest of the environment are kept. The whole process group is
+    killed when the time is up. Returns a CompletedProcess or raises TimeoutExpired."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR")}
+    env.update(GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0", LC_ALL="C", SSH_ASKPASS_REQUIRE="never",
+               GCM_INTERACTIVE="never")
+    ssh = ssh_command(cwd)
+    if ssh is not None:
+        env["GIT_SSH_COMMAND"] = ssh
+    p = subprocess.Popen([git_bin(), "-C", cwd] + list(args), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         stdin=subprocess.DEVNULL, text=True, env=env, start_new_session=True)
+    try:
+        o, e = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        p.communicate()
+        raise
+    return subprocess.CompletedProcess(p.args, p.returncode, o, e)
+
+
+SSH_OPTIONS = "-o BatchMode=yes -o ConnectTimeout=15"
+
+
+def ssh_command(cwd):
+    """The ssh command git would use, with BatchMode and a connect timeout added; None when
+    the operator chose a GIT_SSH program (that cannot take options; the detached session
+    still keeps it from prompting)."""
+    cmd = os.environ.get("GIT_SSH_COMMAND")
+    if not cmd:
+        cmd = out(cwd, "config", "--get", "core.sshCommand") if os.path.isdir(cwd) else None
+    if not cmd and os.environ.get("GIT_SSH"):
+        return None
+    cmd = cmd or "ssh"
+    try:  # our options go first after the program, so they win over later -o of the same name
+        words = shlex.split(cmd)
+    except ValueError:
+        return cmd + " " + SSH_OPTIONS
+    if len(words) == 1:
+        return cmd + " " + SSH_OPTIONS
+    return shlex.quote(words[0]) + " " + SSH_OPTIONS + " " + " ".join(shlex.quote(w) for w in words[1:])
 
 
 def out(cwd, *args):
@@ -181,13 +233,161 @@ def identity_problem(url, github=None, expect_url=None):
 def ls_remote(repo, remote, base_branch, timeout=30):
     """(sha, None) for the remote branch head, or (None, reason). Read-only."""
     try:
-        p = git(repo, "ls-remote", remote, "refs/heads/" + base_branch, timeout=timeout)
+        p = git_net(repo, "ls-remote", remote, "refs/heads/" + base_branch, timeout=timeout)
     except subprocess.TimeoutExpired:
         return None, "timed out after %ds" % timeout
+    except OSError as e:
+        return None, str(e)
     if p.returncode != 0:
         return None, redact_url(p.stderr.strip()[-300:]) or "exit %d" % p.returncode
     sha = p.stdout.split("\t")[0].strip()
     return (sha, None) if re.fullmatch(r"[0-9a-f]{40,64}", sha) else (None, "the remote has no branch " + base_branch)
+
+
+def transport(url):
+    """How git reaches `url`: ssh, https, http, git, file, local, ..."""
+    u = (url or "").strip()
+    m = re.match(r"^([A-Za-z][A-Za-z0-9+.-]*)://", u)
+    if m:
+        scheme = m.group(1).lower()
+        return "ssh" if scheme in ("ssh", "git+ssh", "ssh+git") else scheme
+    if re.match(r"^[A-Za-z]:[\\/]", u):
+        return "local"
+    return "ssh" if re.match(r"^[^/:]+:", u) else "local"  # scp-like: no slash before the first colon
+
+
+def ssh_target(url):
+    """(user, host, port) of an ssh URL; (None, None, None) when it is not one."""
+    m = re.match(r"^(?:ssh|git\+ssh|ssh\+git)://(?:([^@/]+)@)?(\[[^\]]+\]|[^:/]+)(?::(\d+))?/", url or "")
+    if m:
+        return m.group(1), m.group(2).strip("[]"), m.group(3)
+    m = re.match(r"^(?:([^@/:]+)@)?([^/:]+):", url or "")
+    return (m.group(1), m.group(2), None) if m else (None, None, None)
+
+
+def _quiet(argv, timeout=10):
+    """(exit code or None, stdout) of a local helper run without a terminal; output is not logged."""
+    try:
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL,
+                           start_new_session=True)
+        return p.returncode, p.stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None, ""
+
+
+def agent_state():
+    """no-agent | agent-empty | agent-has-keys | unknown, from `ssh-add -l`'s exit code only
+    (the key list itself is neither printed nor kept)."""
+    if not os.environ.get("SSH_AUTH_SOCK"):
+        return "no-agent"
+    code, _ = _quiet([os.environ.get("PAI_SWARM_SSH_ADD") or shutil.which("ssh-add") or "ssh-add", "-l"])
+    return {0: "agent-has-keys", 1: "agent-empty", 2: "no-agent"}.get(code, "unknown")
+
+
+def identity_files(user, host, port):
+    """Existing key files ssh would offer for this host, from `ssh -G` (prints the effective
+    configuration; connects to nothing)."""
+    argv = [os.environ.get("PAI_SWARM_SSH") or shutil.which("ssh") or "ssh", "-G"]
+    argv += (["-p", port] if port else []) + (["-l", user] if user else []) + [host]
+    code, text = _quiet(argv)
+    files = []
+    for line in text.splitlines() if code == 0 else []:
+        k, _, v = line.partition(" ")
+        if k.lower() == "identityfile":
+            path = os.path.expanduser(v.strip())
+            if os.path.isfile(path) and path not in files:
+                files.append(path)
+    return files
+
+
+def _home_short(path):
+    home = os.path.expanduser("~")
+    return "~" + path[len(home):] if home != "~" and path.startswith(home + os.sep) else path
+
+
+AUTH_WORDS = ("permission denied", "publickey", "authentication failed", "too many authentication failures",
+              "repository not found", "correct access rights", "could not read from remote repository")
+HOSTKEY_WORDS = ("host key verification failed", "remote host identification has changed",
+                 "no matching host key", "host key for")
+NET_WORDS = ("could not resolve hostname", "connection timed out", "connection refused", "network is unreachable",
+             "no route to host", "operation timed out", "connection closed by")
+
+
+def remote_auth(repo, remote, ref=None, push=False, timeout=30):
+    """Read-only, bounded, non-interactive check that this shell can reach the remote the way
+    git will: `git ls-remote` over the remote's actual fetch (or push) URL. A key that is
+    loaded but refused fails here. Non-SSH remotes are not probed and need no ssh-agent.
+    Returns {ok, state, transport, url, host, detail, steps}."""
+    url = out(repo, "remote", "get-url", *(["--push"] if push else []), remote)
+    res = {"ok": False, "state": "no-remote", "transport": None, "url": None, "host": None, "push": push,
+           "remote_name": remote,
+           "detail": "the repository has no remote named %s" % remote, "steps": []}
+    if not url:
+        return res
+    res.update(url=redact_url(url), transport=transport(url))
+    if res["transport"] != "ssh":
+        res.update(ok=True, state="not-ssh", detail="%s remote: no ssh-agent needed (not probed)" % res["transport"])
+        return res
+    user, host, port = ssh_target(url)
+    res["host"] = "%s@%s" % (user, host) if user else host
+    began = time.time()
+    try:
+        p = git_net(repo, "ls-remote", url, ref or "HEAD", timeout=timeout)
+        err = None if p.returncode == 0 else (p.stderr.strip() or "exit %d" % p.returncode)
+    except subprocess.TimeoutExpired:
+        err = "timed out after %ds" % timeout
+    except OSError as e:
+        err = str(e)
+    if err is None:
+        res.update(ok=True, state="ok", detail="ssh to %s answered `git ls-remote` without a prompt in %.1fs"
+                   % (res["host"], time.time() - began))
+        return res
+    low = " ".join(err.lower().split())
+    what = "push URL" if push else "fetch URL"
+    if any(w in low for w in HOSTKEY_WORDS):
+        res.update(state="host-key", detail="ssh could not verify the host key of %s (unknown or changed); "
+                   "nothing was accepted for you" % host)
+        res["steps"] = ["ssh %s-T %s   # compare the fingerprint with the one %s publishes; answer yes only if they match"
+                        % ("-p %s " % port if port else "", res["host"], host),
+                        "# then run the same pai command again in this shell"]
+        return res
+    if any(w in low for w in AUTH_WORDS):
+        agent = agent_state()
+        keys = identity_files(user, host, port)
+        add = "ssh-add %s" % shlex.quote(_home_short(keys[0])) if keys else "ssh-add"
+        state = {"no-agent": "no-agent", "agent-empty": "agent-empty"}.get(agent, "wrong-key")
+        res["state"] = state
+        res["detail"] = {
+            "no-agent": "%s refused the connection and no ssh-agent is reachable from this shell%s" % (
+                host, "" if os.environ.get("SSH_AUTH_SOCK") else " (SSH_AUTH_SOCK is not set)"),
+            "agent-empty": "%s refused the connection: the ssh-agent holds no key" % host,
+            "wrong-key": "%s refused the loaded key(s): ssh-agent has a key, but not one %s accepts for this repository"
+                         % (host, host)}[state]
+        probe = "git -C %s ls-remote %s" % (shlex.quote(_home_short(repo)), shlex.quote(url) if push else remote)
+        steps = ['eval "$(ssh-agent -s)"   # starts an agent for this shell only'] if state == "no-agent" else []
+        if state == "wrong-key":
+            steps.append("ssh-add -l   # the keys loaded now; the one %s accepts is not among them" % host)
+        steps += [add + "   # ssh-add asks for the passphrase itself, once; pai never sees it",
+                  "ssh-add -l   # the agent now lists that key",
+                  probe + "   # must answer without asking for anything",
+                  "# then run the same pai command again in this shell"]
+        res["steps"] = steps
+        return res
+    if any(w in low for w in NET_WORDS) or low.startswith("timed out"):
+        res.update(state="unreachable", detail="%s (%s) is not reachable: %s" % (host, what, redact_url(err)[-200:]))
+        return res
+    res.update(state="failed", detail="`git ls-remote` over the %s failed: %s" % (what, redact_url(err)[-200:]))
+    return res
+
+
+def auth_lines(res, nothing="Nothing was locked, fetched, created or started."):
+    """The refusal text for a failed remote_auth(): one line, then the exact steps."""
+    lines = ["SSH preflight for remote %s (%s, %s) failed: %s. %s" % (
+        res.get("remote_name", "?"), res["url"], "push URL" if res["push"] else "fetch URL", res["detail"], nothing)]
+    if res["steps"]:
+        lines.append("Run these once in this shell, then rerun:")
+        lines += ["    " + s for s in res["steps"]]
+    return lines
 
 
 def fetch_base(repo, remote, base_branch, timeout=180):
@@ -196,8 +396,8 @@ def fetch_base(repo, remote, base_branch, timeout=180):
     ref = "refs/remotes/%s/%s" % (remote, base_branch)
     before = rev(repo, ref)
     try:
-        p = git(repo, "fetch", "--no-tags", "--no-recurse-submodules", remote,
-                "+refs/heads/%s:%s" % (base_branch, ref), timeout=timeout)
+        p = git_net(repo, "fetch", "--no-tags", "--no-recurse-submodules", remote,
+                    "+refs/heads/%s:%s" % (base_branch, ref), timeout=timeout)
     except subprocess.TimeoutExpired:
         raise Blocked(["git fetch %s timed out after %ds; no worker was started" % (remote, timeout)])
     if p.returncode != 0:

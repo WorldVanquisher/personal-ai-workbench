@@ -1,5 +1,9 @@
 # pai-swarm operator workflow: RC workers, git tasks, review, PRs
 
+The everyday interface is now `pai` (`pai init`, `run`, `status`, `pr`, `next`, `cleanup`):
+see [WORKBENCH.md](WORKBENCH.md). This file documents the `rc` layer underneath, which keeps
+working with hand-written manifests.
+
 Everything here is `python3 swarm/pai_swarm.py <command>`. Standard library only, POSIX
 only (Linux for `/proc`-based checks), Python 3.9 or newer, with `git`, `tmux` and `ps`
 (procps; `rc status` finds each window's Claude with it, and without it reports none). The PAI CLI it calls for context and handoffs needs Python 3.11 or
@@ -11,8 +15,10 @@ SWARM=~/workspace/pai-workers/fable/swarm          # wherever this checkout live
 M=~/flh-runs/20261113-night.json                   # your manifest (copy of examples/rc-flh.example.json)
 ```
 
-What it never does: reset, clean, stash, force-push, delete a branch or worktree, kill a
-tmux window, restart a running Claude, merge a PR, or log you in anywhere.
+What it never does: reset, clean, stash, force-push, delete a branch or worktree, restart a
+running agent, answer an agent's folder-trust prompt, merge a PR, or log you in anywhere. A
+tmux window is closed only by `rc cleanup --apply` (section 11), and a live worker is
+stopped only with `--stop-running` as well.
 
 ## 1. First run
 
@@ -39,7 +45,10 @@ this NAS; apt-get, dnf, apk, Homebrew elsewhere) and, for Claude Code,
 | `repository.github` | `OWNER/REPO`. The remote URL must be that repository, and `gh` is asked about it. `repository.url` pins an exact URL instead (mirrors, non-GitHub hosts) |
 | `worktree_root` | Every worker worktree must be inside it |
 | `tmux.session` | Session name; `{run_id}` is filled in |
-| `command` | The argv started in each window. Placeholders: `{name} {lane} {branch} {worktree} {base_sha} {task} {task_path}` |
+| `command` | The original Claude-only launch argv, still honoured exactly. Placeholders: `{name} {lane} {branch} {worktree} {base_sha} {task} {task_path}`. Leave it out to choose agents instead |
+| `agent`, `mode`, `model`, `effort` | Top level (every lane) or per worker: `claude` (modes `rc`, `local`; effort `low`..`max`) or `codex` (mode `local`; effort `minimal`..`high`). An unsupported mode or effort is refused before anything starts, never replaced. Command line: `--agent [LANE=]A`, `--mode`, `--model`, `--effort` |
+| `agents` | `{"codex": {"command": ["/opt/codex/bin/codex"]}}`: the program for an agent, when it is not the one on PATH |
+| `dispatch` | `true`: send each lane its task note when its input box is ready (off for `rc` manifests unless set; `pai run` sets it) |
 | `workers[]` | `lane` (window and worktree name), optional `worktree`, `branch`, `name`, `task` (a task note's file name without `.md`) |
 | `count` | Must equal the number of workers; with no `workers` list it generates `worker-1..N` |
 | `tasks` | Obsidian folder of task notes. Workers without a named task take the next `status: todo` notes by priority |
@@ -265,10 +274,32 @@ D=$(mktemp -d) && python3 $SWARM/pai_swarm.py init --tasks "$D" \
 # expect one line: `todo  example-slugify  actionable=0.xx model=…`
 ```
 
-## 10. Tests
+## 10. Cleanup
 
 ```sh
-python3 -B -W error::ResourceWarning -m unittest discover -s swarm/tests -v   # 89 tests
+python3 $SWARM/pai_swarm.py rc cleanup $M                              # preview: socket, session, window, agent state, lock
+python3 $SWARM/pai_swarm.py rc cleanup $M --apply                      # close exited workers' windows, release their locks
+python3 $SWARM/pai_swarm.py rc cleanup $M --lane L --apply --stop-running   # also stop a live worker first
+python3 $SWARM/pai_swarm.py rc up $M --resume                          # afterwards: the same branches and edits
+```
+
+Targets come from the run's ownership record (`<home>/rc/`), written when each window is
+started: tmux server pid and start time, session, window and pane ids, the worker's pid
+and start time. A window is never chosen by name; a mismatch (renamed, moved, split,
+another process in the pane, a different server) is refused. Everything is rechecked under
+the session mutex, and the window is closed by a tmux-side condition that the pane is
+still dead and still in that window. A lock is released only when no process carrying the
+lane's `PAI_RC_*` markers remains. Worktrees, branches, edits, notes and review records are
+never touched; a second run is harmless.
+
+`rc up` and `rc next` also check SSH access first (WORKBENCH.md, section 7), and
+`rc status` reports a `state` (starting, waiting for folder trust, running, exited) and a
+`dispatch` line next to the process and `rc` lines.
+
+## 11. Tests
+
+```sh
+python3 -B -W error::ResourceWarning -m unittest discover -s swarm/tests -v   # 132 tests (the pai workbench ones need Python 3.11+)
 PAI_REPO=$PWD bash swarm/tests/run_tests.sh                                   # headless end to end, 23 checks
 # the same two with Python 3.9 (or any image's python3), as an unprivileged user in a throwaway container:
 docker run --rm -v "$PWD:/src:ro" python:3.9-slim-bookworm sh /src/swarm/tests/container_check.sh

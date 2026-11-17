@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en" data-theme="endfield">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAI Markdown (experimental)</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="app">
+  <header class="app-header"><h1>PAI Markdown</h1><span class="tag signal">EXPERIMENTAL</span></header>
+  <main class="login panel">
+    <h2>SIGN IN</h2>
+    <form method="post" action="/login">
+      <label for="token">Access token (from <code>pai server token</code> in your terminal)</label>
+      <input id="token" name="token" type="password" autocomplete="off" required autofocus>
+      <button class="primary" type="submit">Open</button>
+    </form>
+    <p class="hint">This server only listens on this machine. Reach it through an SSH tunnel or your private tailnet.</p>
+  </main>
+</div>
+</body>
+</html>

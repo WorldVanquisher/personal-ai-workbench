@@ -31,12 +31,14 @@ ENTER, CTRL_C, CTRL_D = b"\r", b"\x03", b"\x04"
 class Terminal:
     """One command line on a pseudo-terminal: expect() what it prints, send() keystrokes."""
 
-    def __init__(self, test, args, env):
-        argv = [sys.executable, "-B", CLI] + [str(a) for a in args]
+    def __init__(self, test, args, env, cli=CLI, cwd=None):
+        argv = [sys.executable, "-B", cli] + [str(a) for a in args]
         env = dict(env, TERM="dumb")
         pid, fd = pty.fork()
         if pid == 0:  # child: never return into the test runner
             try:
+                if cwd:
+                    os.chdir(cwd)
                 os.execve(argv[0], argv, env)
             finally:
                 os._exit(127)
