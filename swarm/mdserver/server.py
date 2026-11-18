@@ -20,6 +20,7 @@ import http.server
 import json
 import os
 import secrets
+import socket
 import stat
 import sys
 import urllib.parse
@@ -31,7 +32,9 @@ import render  # noqa: E402
 LOOPBACK = ("127.0.0.1", "::1")
 MAX_BYTES = 2 * 1024 * 1024
 STATIC = {"/static/app.css": ("app.css", "text/css; charset=utf-8"),
-          "/static/app.js": ("app.js", "text/javascript; charset=utf-8")}
+          "/static/app.js": ("app.js", "text/javascript; charset=utf-8"),
+          "/static/console.css": ("console.css", "text/css; charset=utf-8"),
+          "/static/console.js": ("console.js", "text/javascript; charset=utf-8")}
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'none'; "
        "form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 
@@ -47,11 +50,13 @@ def sha(data):
 
 
 class Docs:
-    """The approved roots and the only file operations the server has."""
+    """The approved roots and the only file operations the server has. With `single`, the
+    one file `pai edit` opened is the only one it lists, reads or writes."""
 
-    def __init__(self, roots, suffixes=(".md",)):
+    def __init__(self, roots, suffixes=(".md",), single=None):
         self.roots = [os.path.realpath(r) for r in roots]
         self.suffixes = tuple(suffixes)
+        self.single = single
 
     def resolve(self, root, rel):
         """Absolute path of an existing or new file inside root `root`; refuses traversal,
@@ -60,6 +65,8 @@ class Docs:
             raise Refused(404, "no such document root")
         if not isinstance(rel, str) or not rel or "\x00" in rel or os.path.isabs(rel) or "\\" in rel:
             raise Refused(400, "not a relative path")
+        if self.single is not None and (root, rel) != (0, self.single):
+            raise Refused(403, "this editor was opened for %s only" % self.single)
         parts = rel.split("/")
         if any(p in ("", ".", "..") or p.startswith(".") for p in parts):
             raise Refused(400, "path is outside the approved folder")
@@ -72,13 +79,15 @@ class Docs:
             if os.path.islink(cur):
                 raise Refused(403, "symbolic links are not followed")
         real = os.path.realpath(cur)
-        if not real.startswith(base + os.sep):
+        if not real.startswith(os.path.join(base, "")):  # base + one separator, also for a drive or / root
             raise Refused(403, "path is outside the approved folder")
         return cur
 
     def listing(self, root):
         if not 0 <= root < len(self.roots):
             raise Refused(404, "no such document root")
+        if self.single is not None:
+            return [self.single] if root == 0 else []
         base, found = self.roots[root], []
         for d, dirs, files in os.walk(base, followlinks=False):
             dirs[:] = sorted(x for x in dirs if not x.startswith(".") and not os.path.islink(os.path.join(d, x)))
@@ -143,30 +152,40 @@ class Docs:
         if len(data) > MAX_BYTES:
             raise Refused(413, "file would be larger than 2 MB")
         tmp = os.path.join(os.path.dirname(path), ".%s.%s.tmp" % (os.path.basename(path), secrets.token_hex(4)))
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IMODE(os.lstat(path).st_mode))
         try:
-            with os.fdopen(fd, "wb") as f:
-                f.write(data)
-                f.flush()
-                os.fsync(f.fileno())
-            now = self.current(root, rel)  # last look, right before the atomic replace
-            if now is None or sha(now) != base:
-                raise Refused(409, "the file changed on disk while saving; nothing was written and your draft is kept")
-            os.replace(tmp, path)
-        finally:
-            if os.path.exists(tmp):
-                os.remove(tmp)
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IMODE(os.lstat(path).st_mode))
+            try:
+                with os.fdopen(fd, "wb") as f:
+                    f.write(data)
+                    f.flush()
+                    os.fsync(f.fileno())
+                now = self.current(root, rel)  # last look, right before the atomic replace
+                if now is None or sha(now) != base:
+                    raise Refused(409, "the file changed on disk while saving; nothing was written and your draft is kept")
+                os.replace(tmp, path)
+            finally:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+        except OSError as e:  # read-only file or folder; on Windows also a file another program holds open
+            raise Refused(500, "could not write %s (%s); nothing was written and your draft is kept"
+                          % (rel, e.strerror or e))
         return {"path": rel, "base": sha(data)}
 
 
 class App:
     def __init__(self, cfg, token):
-        self.docs = Docs(cfg["roots"], cfg.get("suffixes") or (".md",))
+        self.docs = Docs(cfg["roots"], cfg.get("suffixes") or (".md",), cfg.get("single"))
+        self.one_time = bool(cfg.get("one_time_token"))  # `pai edit`: the link signs in once
         self.port = cfg["port"]
         self.hosts = {"127.0.0.1:%d" % self.port, "localhost:%d" % self.port, "[::1]:%d" % self.port}
         self.hosts |= set(cfg.get("allowed_hosts") or [])
         self.token = token
         self.sessions = {}  # session id -> csrf token
+        # Pages and API routes beyond the editor's own (`pai web` adds its console here). A GET
+        # route gets (query, session id); a POST route gets (parsed JSON body, session id). Both
+        # run only after sign-in, a POST only with the session's CSRF header and our Host/Origin.
+        self.pages = {"/": "index.html"}
+        self.get_routes, self.post_routes = {}, {}
 
 
 def make_handler(app):
@@ -195,6 +214,17 @@ def make_handler(app):
                     return v
             return None
 
+        def sign_in(self):
+            sid = secrets.token_urlsafe(32)
+            app.sessions[sid] = secrets.token_urlsafe(32)
+            self.send_response(303)
+            self.send_header("Location", "/")
+            self.send_header("Set-Cookie", "pai_md=%s; HttpOnly; SameSite=Strict; Path=/" % sid)
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
         def host_ok(self):
             if (self.headers.get("Host") or "") not in app.hosts:
                 return False
@@ -211,9 +241,16 @@ def make_handler(app):
                 fn, ctype = STATIC[url.path]
                 with open(os.path.join(HERE, "static", fn), "rb") as f:
                     return self.send(200, f.read(), ctype)
+            if url.path == "/open" and app.one_time and app.token:
+                given = urllib.parse.parse_qs(url.query).get("t", [""])[0]
+                if not hmac.compare_digest(given.encode(), app.token.encode()):
+                    return self.send(401, "This link was already used or is wrong. Run pai edit again.",
+                                     "text/plain; charset=utf-8")
+                app.token = None  # used up: a copied or logged link cannot sign in again
+                return self.sign_in()
             sid = self.session()
-            if url.path == "/":
-                with open(os.path.join(HERE, "static", "index.html" if sid else "login.html"), "rb") as f:
+            if url.path in app.pages:
+                with open(os.path.join(HERE, "static", app.pages[url.path] if sid else "login.html"), "rb") as f:
                     return self.send(200, f.read(), "text/html; charset=utf-8")
             if not sid:
                 return self.send(401, {"error": "log in first"})
@@ -221,13 +258,18 @@ def make_handler(app):
             try:
                 if url.path == "/api/session":
                     return self.send(200, {"csrf": app.sessions[sid], "roots": [os.path.basename(r) or r for r in app.docs.roots],
-                                           "experimental": True})
+                                           "experimental": True,
+                                           "single": {"root": 0, "path": app.docs.single} if app.docs.single else None})
                 if url.path == "/api/files":
                     return self.send(200, {"files": app.docs.listing(int(q.get("root", ["0"])[0]))})
                 if url.path == "/api/file":
                     return self.send(200, app.docs.read(int(q.get("root", ["0"])[0]), q.get("path", [""])[0]))
+                if url.path in app.get_routes:
+                    return self.send(200, app.get_routes[url.path](q, sid))
             except (Refused, ValueError) as e:
                 return self.send(getattr(e, "code", 400), {"error": str(e)})
+            except Exception as e:  # noqa: BLE001  a route's own failure (tmux timed out, ...): say so, keep serving
+                return self.send(500, {"error": "%s: %s" % (type(e).__name__, e)})
             return self.send(404, {"error": "not found"})
 
         def do_POST(self):
@@ -239,16 +281,11 @@ def make_handler(app):
             body = self.rfile.read(n)
             if self.path == "/login":
                 token = urllib.parse.parse_qs(body.decode("utf-8", "replace")).get("token", [""])[0].strip()
-                if not hmac.compare_digest(token.encode(), app.token.encode()):
+                if not app.token or not hmac.compare_digest(token.encode(), app.token.encode()):
                     return self.send(401, "Wrong token. <a href=\"/\">Back</a>", "text/html; charset=utf-8")
-                sid = secrets.token_urlsafe(32)
-                app.sessions[sid] = secrets.token_urlsafe(32)
-                self.send_response(303)
-                self.send_header("Location", "/")
-                self.send_header("Set-Cookie", "pai_md=%s; HttpOnly; SameSite=Strict; Path=/" % sid)
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
+                if app.one_time:
+                    app.token = None
+                return self.sign_in()
             sid = self.session()
             if not sid:
                 return self.send(401, {"error": "log in first"})
@@ -266,10 +303,16 @@ def make_handler(app):
                 if self.path == "/logout":
                     app.sessions.pop(sid, None)
                     return self.send(200, {"ok": True})
+                if self.path in app.post_routes:
+                    if not isinstance(d, dict):
+                        raise ValueError("a JSON object is expected")
+                    return self.send(200, app.post_routes[self.path](d, sid))
             except Refused as e:
                 return self.send(e.code, {"error": str(e)})
             except (ValueError, TypeError) as e:
                 return self.send(400, {"error": "bad request (%s)" % type(e).__name__})
+            except Exception as e:  # noqa: BLE001
+                return self.send(500, {"error": "%s: %s" % (type(e).__name__, e)})
             return self.send(404, {"error": "not found"})
 
     return H
@@ -277,6 +320,14 @@ def make_handler(app):
 
 class Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
+    # On Windows, SO_REUSEADDR (which http.server sets) would let another program bind the same
+    # port and receive requests meant for this server; take the port exclusively there instead.
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self):
+        if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
 
 def serve(cfg, token, ready=None):
@@ -285,7 +336,7 @@ def serve(cfg, token, ready=None):
                          "SSH tunnel or Tailscale Serve for remote access." % cfg.get("bind"))
     app = App(cfg, token)
     if cfg.get("bind") == "::1":
-        Server.address_family = __import__("socket").AF_INET6
+        Server.address_family = socket.AF_INET6
     httpd = Server((cfg.get("bind", "127.0.0.1"), cfg["port"]), make_handler(app))
     if cfg["port"] == 0:
         app.port = httpd.server_address[1]

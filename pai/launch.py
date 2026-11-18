@@ -7,6 +7,9 @@ Two ways in, one routing:
   - the `pai` console script of an installed package (`uv tool install ...`, pip); the
     workbench modules ship inside the package as pai/_workbench/.
 
+`pai edit FILE.md` (the one-file browser editor, swarm/mdserver/edit.py) needs neither tmux nor
+the task runner, so it is routed before anything else and runs on native Windows too.
+
 Kept importable on old Pythons: on anything older than 3.11, every command ends in the version
 message of pai/__main__.py.
 """
@@ -18,7 +21,7 @@ import sys
 # handoff, install) always stay with the pai package. The workbench needs tmux, so on native
 # Windows only PAI's own commands run.
 WORKBENCH = {"run", "status", "attach", "logs", "trust", "resume", "pr", "next", "cleanup", "setup", "config", "jev",
-             "server", "task"}
+             "server", "task", "paste", "web"}
 PACKAGE = os.path.dirname(os.path.abspath(__file__))
 NATIVE_WINDOWS = os.name == "nt"
 
@@ -30,11 +33,14 @@ Start here, inside your Git checkout:
   pai task new "TITLE"     preview a task note; add --write to save it
   pai run --dry-run        show what a run would do (changes nothing)
   pai run                  start the agents; then pai status, pai trust, pai attach LANE
+  pai web                  the run in your browser: every lane's screen, typing, pasting, notes
+  pai edit NOTE.md         one Markdown file in your browser, with a live preview
 
 All commands: pai --help.  Guide: %s"""
 WINDOWS_NOTE = """pai on native Windows: project context and handoffs (pai init PROJECT --vault ..., pai doctor --agents,
-pai context, pai handoff) run here. The workbench (pai run, status, task, ...) needs tmux: install
-pai inside WSL (Ubuntu) and run it there, in a checkout under the Linux file system."""
+pai context, pai handoff) and the browser editor (pai edit NOTE.md) run here. The workbench
+(pai run, status, task, web, ...) needs tmux: install pai inside WSL (Ubuntu) and run it there, in
+a checkout under the Linux file system."""
 
 
 def workbench_dir():
@@ -44,6 +50,13 @@ def workbench_dir():
         if os.path.isfile(os.path.join(d, "workbench.py")):
             return d
     return None
+
+
+def editor():
+    """edit.py of the one-file browser editor (the workbench's mdserver/), or None."""
+    d = workbench_dir()
+    path = os.path.join(d, "mdserver", "edit.py") if d else None
+    return path if path and os.path.isfile(path) else None
 
 
 def guide():
@@ -78,6 +91,16 @@ def main(argv=None):
     args = sys.argv[1:]
     if sys.version_info < (3, 11):
         return _core()
+    if args[:1] == ["edit"]:
+        path = editor()
+        if not path:
+            sys.stderr.write("pai edit is part of the pai workbench (swarm/mdserver/), which is not in this folder; "
+                             "install pai 0.4.0 or later, or run it from a checkout.\n")
+            return 2
+        sys.path.insert(0, os.path.dirname(path))
+        import edit
+
+        return edit.main(args[1:])
     swarm = workbench_dir()
     cmd = workbench_command(args)
     if cmd:
@@ -105,7 +128,9 @@ def main(argv=None):
             return _core()
         finally:
             print("\nworkbench commands (`pai COMMAND --help`):\n"
-                  "  doctor, init, task, run, status, attach, logs, trust, resume, pr, next, cleanup, setup, config, jev\n"
+                  "  doctor, init, task, run, status, attach, logs, trust, resume, pr, next, cleanup, setup, config, jev,\n"
+                  "  paste (text into a lane in one piece), web (the run in your browser),\n"
+                  "  edit (one Markdown file in your browser; also on native Windows)\n"
                   "  (`pai init PROJECT --vault ...`, `pai doctor PROJECT` and `pai doctor --agents` are PAI's own\n"
                   "  context and handoff commands, listed above)")
     if args in (["-h"], ["--help"]) and NATIVE_WINDOWS:

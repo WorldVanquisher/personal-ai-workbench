@@ -186,6 +186,45 @@ $PAI jev check                    # one request; answer y
 
 Record the result line and the `usage` it printed. Never paste the key into a chat.
 
+## 9a. `pai web` and `pai paste` with the real agents (nothing billed beyond the session)
+
+Do this while lanes from section 3 or 6 are running, before teardown.
+
+```sh
+$PAI web                                   # your browser opens the run's console
+printf 'First line of a pasted note.\nSecond line: do not act on this yet.\n' > "$S/paste.md"
+$PAI paste a "$S/paste.md"                 # Claude lane: both lines in its input box, nothing submitted
+```
+
+Expect: every lane's screen with its colours; clicking the screen and typing reaches the
+agent (try Esc, an arrow key, and your input method if you use one); Ctrl-V of a multi-line
+text and the Message box each show up in the agent's input box as one paste, unsubmitted,
+until "Paste and Enter" or Enter; `pai paste a` shows the same in the lane. Clear the input
+box afterwards (Ctrl-C or Ctrl-U in the agent). Open a shell for one lane, run `git status`,
+close it. If a lane shows its folder-trust prompt: the page says so, Paste is refused, and you
+answer the prompt by typing. Record whether Codex behaves the same.
+
+## 9b. `pai edit` in your own browser (no agent, nothing billed)
+
+```sh
+printf '# Smoke\n\nfirst line\n' > "$S/edit-smoke.md"
+$PAI edit "$S/edit-smoke.md"       # your browser opens on the editor
+```
+
+Expect: the editor opens on that file with the EXPERIMENTAL label; typing updates the preview
+and `cat "$S/edit-smoke.md"` is unchanged; "Review and save…" shows the diff with + and −
+marks; saving writes it. Then type more, and in another terminal
+`echo "outside" >> "$S/edit-smoke.md"`; Save must show the stale-file warning, keep your
+draft, and leave "outside" in the file. Ctrl-C stops it. On a Windows PC (no WSL needed),
+repeat with `pai edit` from the uv-installed `pai.exe`.
+
+## 9c. WSL (its own manual smoke; Windows CI does not cover it)
+
+In Windows Terminal: `wsl --install -d Ubuntu` (if needed), then inside Ubuntu, in the Linux
+file system (`~`, not `/mnt/c`): install Python 3.11+, git, tmux and uv, and follow
+QUICKSTART.md exactly. Record each step that differs from the text, and whether `pai web`
+and `pai edit` open your Windows browser (they print the link when they cannot).
+
 ## 10. Teardown
 
 ```sh
@@ -207,3 +246,6 @@ rm -r -- "$S"                     # check the path first
 | 7 cleanup, resume | | |
 | 8 config editor | | |
 | 9 JEV check (result, usage) | | |
+| 9a pai web and pai paste with real agents | | |
+| 9b pai edit in a real browser (and on Windows) | | |
+| 9c WSL quickstart | | |

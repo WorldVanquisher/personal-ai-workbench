@@ -1,11 +1,40 @@
-# PAI Markdown server (EXPERIMENTAL, optional)
+# PAI in the browser: `pai edit`, `pai web`, and the Markdown server (EXPERIMENTAL)
 
 A remote Nano with a Markdown preview: a file picker for the Markdown folders you approve,
 a plain-text editor, a rendered preview, and a save that shows the exact path and diff and
-needs your confirmation for that revision. Nothing else: no task dashboard, chat, agent
-controls, shell, Git or PR operations. PAI's CLI and SSH workflow do not need it.
+needs your confirmation for that revision. `pai edit` opens it for one file. `pai web` adds the
+run console (`static/console.*`, served by `../console.py`): each lane's screen, typing,
+one-piece pasting and a shell per lane; see WORKBENCH.md section 4. The editor itself has no
+dashboard, chat, agent controls, shell, Git or PR operations. PAI's CLI and SSH workflow need
+none of this.
 
-## Install, start, stop, remove
+Every installation carries this folder for `pai edit` and `pai web`, which run in the
+foreground and need no setup. The longer-running server (below) is for a checkout only.
+
+## One file, one command: `pai edit`
+
+```sh
+pai edit notes/plan.md                         # opens your browser on the editor for this file
+pai edit notes/plan.md --no-browser --port 8765   # on a server: print the link, then tunnel the port
+```
+
+It starts a private editor for exactly that file on 127.0.0.1 (a free port unless you give
+`--port`), prints a link that signs in **once**, and opens it in your browser when this machine
+has a desktop; otherwise, or if the browser cannot start, the link is all you need. Typing
+updates the preview immediately and writes nothing; Save shows the diff and writes only that
+confirmed revision; if anything else changed the file meanwhile, nothing is written and your
+draft stays in the tab. Ctrl-C stops it; nothing is stored or installed, and it needs no
+`pai setup`, tmux or task runner (it also works on native Windows). It is a separate tool from
+`pai run`.
+
+Checked in a real browser for PAI-009 (headless Chromium 156 in a throwaway Debian 12
+container, driven over the DevTools protocol): link to editor in one step, live preview
+without writes, confirmation diff before a write, a newer file on disk refused with the draft
+kept, keyboard focus ring, and no horizontal scrolling at phone width. See RELEASE_NOTES.md
+for the release in hand.
+
+## A longer-running server for several folders (checkout only)
+
 
 ```sh
 pai setup --experimental server --root ~/Vault/Tasks --dry-run      # what it would do; writes nothing
@@ -92,6 +121,5 @@ checkout. Diff lines carry `+` and `−` symbols as well as colour; the EXPERIME
 "Unsaved changes" and the stale-file warning stay visible. Below 760 px the file list
 stacks above the editor, with Edit/Preview tabs.
 
-Screenshots: not included. This development host has no browser (no Chromium, Firefox or
-Playwright) and installing one was out of scope; take them with `pai server start` on a
-machine that has one.
+Screenshots of `pai edit` (editor, save confirmation, stale-file warning at phone width) were
+taken in the real-browser smoke and are kept with its handoff, not in this folder.

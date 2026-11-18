@@ -253,5 +253,118 @@ class Pack(Base):
         self.assertTrue(os.path.isfile(self.note))
 
 
+
+@needs_linux
+class Edit(Base):
+    """`pai edit FILE.md` through the real launcher: one file, one-time link, loopback."""
+
+    def start(self, *extra):
+        env = dict(os.environ, PAI_WORKBENCH_HOME=os.path.join(self.tmp, "config"),
+                   PAI_SWARM_HOME=os.path.join(self.tmp, "home"))
+        env.pop("DISPLAY", None)
+        env.pop("WAYLAND_DISPLAY", None)
+        p = subprocess.Popen([sys.executable, "-B", PAI, "edit", self.note] + list(extra), cwd=self.tmp, env=env,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: (p.poll() is None and p.kill(), p.wait(), p.stdout.close(), p.stderr.close()))
+        lines = []
+        while not any("open:" in l for l in lines):
+            line = p.stdout.readline()
+            if not line:  # read stderr only once stdout has ended (it blocks until the child exits)
+                self.fail("pai edit printed no link: %s" % p.stderr.read())
+            lines.append(line)
+        url = [l for l in lines if "open:" in l][0].split("open:")[1].strip()
+        self.port = int(url.split(":")[2].split("/")[0])
+        return p, url, lines
+
+    def read_note(self):
+        with open(self.note, "rb") as f:
+            return f.read()
+
+    def get(self, path, cookie=None):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        c.request("GET", path, headers=dict({"Host": "127.0.0.1:%d" % self.port}, **({"Cookie": cookie} if cookie else {})))
+        r = c.getresponse()
+        data = r.read()
+        c.close()
+        return r.status, dict(r.getheaders()), data
+
+    def post(self, path, body, cookie, csrf):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        c.request("POST", path, body=json.dumps(body), headers={"Host": "127.0.0.1:%d" % self.port, "Cookie": cookie,
+                                                                "X-PAI-CSRF": csrf, "Content-Type": "application/json"})
+        r = c.getresponse()
+        data = json.loads(r.read() or b"{}")
+        c.close()
+        return r.status, data
+
+    def test_one_command_opens_exactly_that_file_with_a_one_time_link(self):
+        with open(os.path.join(self.docs, "other.md"), "w") as f:
+            f.write("# not this one\n")
+        p, url, lines = self.start()
+        self.assertTrue(url.startswith("http://127.0.0.1:%d/open?t=" % self.port))
+        rest = [p.stdout.readline() for _ in range(4)]
+        self.assertIn("  could not open a browser here: open the link above yourself\n", rest)
+        st, hdrs, _ = self.get(url.split(str(self.port), 1)[1])
+        self.assertEqual(st, 303)
+        cookie = hdrs["Set-Cookie"].split(";")[0]
+        self.assertEqual(self.get(url.split(str(self.port), 1)[1])[0], 401, "the link signs in once")
+        st, _, page = self.get("/", cookie)
+        self.assertIn(b'id="text"', page)
+        session = json.loads(self.get("/api/session", cookie)[2])
+        self.assertEqual(session["single"], {"root": 0, "path": "note.md"})
+        self.assertEqual(json.loads(self.get("/api/files?root=0", cookie)[2])["files"], ["note.md"])
+        self.assertEqual(self.get("/api/file?root=0&path=other.md", cookie)[0], 403, "only the one file")
+        csrf = session["csrf"]
+        doc = json.loads(self.get("/api/file?root=0&path=note.md", cookie)[2])
+        before = self.read_note()
+        st, prev = self.post("/api/preview", {"text": doc["text"] + "\n**typed**\n"}, cookie, csrf)
+        self.assertIn("<strong>typed</strong>", prev["html"])
+        self.assertEqual(self.read_note(), before, "the preview wrote nothing")
+        new = doc["text"] + "typed\n"
+        st, d = self.post("/api/diff", {"root": 0, "path": "note.md", "text": new, "base": doc["base"]}, cookie, csrf)
+        self.assertEqual(self.post("/api/save", {"root": 0, "path": "note.md", "text": new, "base": doc["base"],
+                                                 "crlf": True}, cookie, csrf)[0], 400, "no confirmation, no write")
+        with open(self.note, "ab") as f:
+            f.write(b"external edit\r\n")
+        st, body = self.post("/api/save", {"root": 0, "path": "note.md", "text": new, "base": doc["base"],
+                                           "confirm": d["proposed"], "crlf": True}, cookie, csrf)
+        self.assertEqual(st, 409)
+        self.assertTrue(self.read_note().endswith(b"external edit\r\n"), "the newer file was kept")
+        p.send_signal(2)
+        self.assertEqual(p.wait(timeout=10), 0)
+        self.assertIn("stopped", p.stdout.read())
+
+    def test_listening_is_loopback_only_and_bad_input_is_refused(self):
+        p, url, _ = self.start()
+        with open("/proc/net/tcp") as f:
+            rows = [r.split() for r in f.read().splitlines()[1:]]
+        mine = [r[1] for r in rows if int(r[1].rsplit(":", 1)[1], 16) == self.port and r[3] == "0A"]
+        self.assertEqual([m.split(":")[0] for m in mine], ["0100007F"])
+        p.send_signal(2)
+        p.wait(timeout=10)
+        for bad, why in ((os.path.join(self.docs, "missing.md"), "does not exist"), (self.outside[:-3] + ".txt", ".md files"),
+                         (os.path.join(self.docs, "sub"), ".md files")):
+            r = subprocess.run([sys.executable, "-B", PAI, "edit", bad], capture_output=True, text=True, timeout=30)
+            self.assertEqual(r.returncode, 2)
+            self.assertIn(why, r.stderr)
+        os.symlink(self.note, os.path.join(self.docs, "link.md"))
+        r = subprocess.run([sys.executable, "-B", PAI, "edit", os.path.join(self.docs, "link.md")], capture_output=True,
+                           text=True, timeout=30)
+        self.assertIn("symbolic link", r.stderr)
+
+    def test_a_failing_browser_only_means_the_link_is_printed(self):
+        import edit
+
+        def broken(url):
+            raise RuntimeError("no browser")
+        old = edit.gui_available
+        edit.gui_available = lambda: True
+        try:
+            self.assertFalse(edit.open_browser("http://127.0.0.1:1/open?t=x", broken))
+            self.assertTrue(edit.open_browser("http://127.0.0.1:1/open?t=x", lambda u: True))
+        finally:
+            edit.gui_available = old
+
+
 if __name__ == "__main__":
     unittest.main()

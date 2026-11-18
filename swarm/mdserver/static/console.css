@@ -1,0 +1,42 @@
+/* PAI Web: the console page. Builds on app.css (same theme); terminal colours are the
+   xterm defaults so agents look as they do in a terminal. */
+.layout.console { grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); }
+.layout.console > * { min-width: 0; }
+.run { font-family: var(--ef-mono); color: var(--muted); overflow-wrap: anywhere; }
+.button-link { font-family: var(--ef-ui); font-weight: 700; color: var(--text); text-decoration: none;
+  box-shadow: inset 0 0 0 1px var(--border-strong); padding: 4px 12px; }
+.button-link:hover { background: var(--chip); }
+.lanes ul { list-style: none; margin: 0; padding: 0; }
+.lanes li button { width: 100%; text-align: left; margin: 2px 0; display: grid; gap: 2px; }
+.lanes li button[aria-current="true"] { background: linear-gradient(-45deg, transparent var(--cut), var(--signal) 0); }
+.lanes .meta { font-family: var(--ef-text); font-weight: 400; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.badge { display: inline-block; font-size: 11px; letter-spacing: 0.06em; padding: 0 6px; margin-left: 6px;
+  box-shadow: inset 0 0 0 1px var(--text); font-weight: 700; }
+.badge.warn { background: var(--signal); }
+.badge.off { color: var(--muted); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.lane-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.lane-head h2 { margin-right: auto; }
+.view-tabs.always { display: flex; }
+.term-wrap { position: relative; }
+.term { margin: 0; min-height: 45vh; max-height: 65vh; overflow: auto; padding: 10px 12px; background: #161616; color: #e8e8e3;
+  font-family: var(--ef-mono); font-size: 13.5px; line-height: 1.35; white-space: pre; tab-size: 8; cursor: text; }
+.term.live { box-shadow: 0 0 0 3px var(--signal), inset 0 0 0 1px #fffa00; }
+.term .cur { background: #e8e8e3; color: #161616; }
+.term .cur.idle { background: transparent; color: inherit; box-shadow: inset 0 0 0 1px #e8e8e3; }
+.term .b { font-weight: 700; } .term .d { opacity: 0.65; } .term .i { font-style: italic; } .term .u { text-decoration: underline; }
+.term .s { text-decoration: line-through; }
+/* the textarea that receives live typing: on top of the screen, invisible, so input methods work */
+.kbd { position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; min-height: 0; padding: 0; border: 0; opacity: 0;
+  resize: none; overflow: hidden; }
+.keys { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 14px; }
+.keys button { padding: 6px 12px 6px 10px; font-size: 13px; }
+.keys button[aria-pressed="true"] { background: linear-gradient(-45deg, transparent var(--cut), var(--signal) 0);
+  box-shadow: none; }
+.compose-label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.compose { min-height: 110px; height: 140px; font-size: 14px; }
+.empty { border: 1px dashed var(--border-strong); padding: 14px; margin-bottom: 10px; }
+@media (max-width: 760px) {
+  /* minmax(0, ...): the screen's long unwrapped lines must scroll inside it, never widen the page */
+  .layout.console { grid-template-columns: minmax(0, 1fr); }
+  .term { font-size: 11px; min-height: 40vh; }
+}

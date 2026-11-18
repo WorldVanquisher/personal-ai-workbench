@@ -61,6 +61,8 @@ async function review() {
   $("confirm").textContent = "Save revision " + r.data.proposed.slice(0, 8);
   $("dialog").hidden = false; $("confirm").focus();
 }
+window.addEventListener("unhandledrejection", () =>
+  showError("The editor could not reach pai (stopped?). Your draft is still here: copy it before closing the tab."));
 async function save() {
   const text = $("text").value;
   const r = await api("POST", "/api/save", { root: cur.root, path: cur.path, text, base: cur.base,
@@ -81,6 +83,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   if (r.status !== 200) { location.reload(); return; }
   csrf = r.data.csrf;
   r.data.roots.forEach((name, i) => { const o = document.createElement("option"); o.value = i; o.textContent = name; $("root").appendChild(o); });
+  const single = r.data.single;  // `pai edit FILE.md`: straight into that one file, no file list
   $("root").addEventListener("change", loadFiles);
   $("filter").addEventListener("input", loadFiles);
   $("text").addEventListener("input", () => { setDirty($("text").value !== cur.text); clearTimeout(timer); timer = setTimeout(preview, 400); });
@@ -96,5 +99,19 @@ window.addEventListener("DOMContentLoaded", async () => {
   $("show-edit").addEventListener("click", () => view("edit"));
   $("show-preview").addEventListener("click", () => view("preview"));
   window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
-  view("edit"); loadFiles();
+  view("edit");
+  if (single) {
+    document.querySelector(".layout").classList.add("single");
+    document.querySelector(".picker").hidden = true;
+    openFile(single.path);
+  } else {
+    // pai web links a lane's task note as /notes#open=ROOT:PATH
+    const m = /^#open=(\d+):(.+)$/.exec(location.hash);
+    if (m && $("root").querySelector('option[value="' + m[1] + '"]')) {
+      $("root").value = m[1];
+      openFile(decodeURIComponent(m[2]));
+    } else {
+      loadFiles();
+    }
+  }
 });

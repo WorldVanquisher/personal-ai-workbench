@@ -167,6 +167,49 @@ keep running meanwhile. Lane worktrees are reused for the same project and lane,
 is normally asked once per lane directory; a new or replaced directory is flagged in the
 plan as a new trust decision.
 
+### In your browser: `pai web`, `pai paste`, `pai edit` (experimental)
+
+```sh
+pai web                       # this run in your browser; Ctrl-C stops it (--run ID, --port, --no-browser)
+pai paste a message.md        # a message into lane a in one piece; --enter submits it
+pai edit notes/plan.md        # one Markdown file: live preview, confirmed save (also native Windows)
+```
+
+`pai web` serves one page on 127.0.0.1 with a sign-in link that works once, for as long as it
+runs in your terminal; it stores nothing. Per lane: the agent's screen with its colours
+(refreshed about once a second; select text to copy it), **live typing** (click the screen:
+keys, Ctrl and Alt combinations, arrows and your input method go to the pane), **paste** from
+your clipboard or the Message box as one piece, a **shell** in the lane's worktree (a window
+named after the lane in the tmux session `<run session>-shell`, on the run's tmux server; it
+stays until you close it), and the task folder plus every lane worktree in the Markdown
+editor (`/notes`).
+
+Why pasting needs help: a long or multi-line prompt typed into a terminal (over SSH, from a
+phone, into tmux) can arrive in pieces, a newline can submit half of it, and tmux's own paste
+buffer is not your clipboard. `pai paste` and `pai web` load the text into a tmux buffer
+through stdin (no file, no shell) and paste it with `paste-buffer -p`: a **bracketed paste**,
+so the agent takes it as one paste and nothing is submitted. Enter is pressed only when you
+ask (`--enter`, "Paste and Enter"), and checked again just before. More rules:
+
+- A paste is **refused while the agent's folder-trust prompt is on screen**; you answer that
+  prompt yourself (typing in `pai web` is you at the keyboard, as with `pai attach`).
+- Escape and other control characters are removed from pasted text (tabs and newlines stay),
+  so a paste cannot end the bracketed paste early and turn into keystrokes. A file's final
+  newline is dropped: it must not act as Enter.
+- Several lines go only to a program that tmux says asked for bracketed paste
+  (`#{bracket_paste_flag}`; tmux 3.8 reports it, 3.5a cannot tell). Otherwise each line could
+  be entered on its own, so the paste is refused until you accept that: `--allow-unbracketed`,
+  or the confirmation in the browser. Claude Code and Codex normally ask for bracketed paste,
+  and tmux still sends the markers whenever the program did.
+- At most 1 MB per paste. A pane in copy mode is refused (press `q` there first).
+- The browser names a lane, never a tmux pane: pai looks the pane up itself, so only this
+  run's lanes and their shells are reachable. Every write needs the session's CSRF header,
+  the Host and Origin must be this server, and the page's Content-Security-Policy allows no
+  other origin.
+
+From another computer: `pai web --no-browser --port 8766` on the server and
+`ssh -N -L 8766:127.0.0.1:8766 YOU@SERVER` on your laptop, then open the printed link.
+
 ## 5. Dispatch
 
 When a lane's input box has been ready, with no trust prompt on screen, for 3 seconds
@@ -336,10 +379,15 @@ Not verified against the real programs:
 - Remote Control connectivity from `rc status` for a real session;
 - real SSH, GitHub, merges, and installers on each listed OS (the planner is tested on
   simulated systems only);
-- a real JEV request.
+- a real JEV request;
+- `pai paste` and `pai web` with the real Claude Code and Codex (bracketed paste, typing and
+  the keys were checked byte for byte against a recording terminal program and the fake
+  agents), and `pai web` / `pai edit` in a desktop browser on macOS or Windows.
 
 [SMOKE.md](SMOKE.md) is the owner-run checklist for those.
 
-## 13. Experimental: the Markdown server
+## 13. Experimental: the Markdown server (checkout only)
 
-Optional, never installed or started by anything else: `pai setup --experimental server --root DIR --dry-run`, then `pai server start|status|stop|token|uninstall`. Loopback only; SSH tunnel or Tailscale Serve (never Funnel). See [mdserver/README.md](mdserver/README.md).
+`pai edit` and `pai web` above need no setup and come with every installation. The
+longer-running server for several folders is for a checkout only (an installed archive or uv
+package says so and changes nothing). Optional, never installed or started by anything else: `pai setup --experimental server --root DIR --dry-run`, then `pai server start|status|stop|token|uninstall`. Loopback only; SSH tunnel or Tailscale Serve (never Funnel). See [mdserver/README.md](mdserver/README.md).

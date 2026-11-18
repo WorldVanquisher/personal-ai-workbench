@@ -2,10 +2,12 @@
 
 English | [简体中文](README.zh-CN.md)
 
+**New here?** [QUICKSTART.md](QUICKSTART.md): install, first task, the browser console, upgrade, uninstall.
+
 **Install in one line** (Linux, macOS or WSL; needs [uv](https://docs.astral.sh/uv/) and git):
 
 ```sh
-uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.3.0
+uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.4.0
 ```
 
 If uv warns that its bin folder is not on your PATH, run the `export PATH=…` line it prints
@@ -13,7 +15,7 @@ If uv warns that its bin folder is not on your PATH, run the `export PATH=…` l
 `pai doctor` → `pai init` → `pai task new "TITLE" --write` → `pai run --dry-run`.
 Upgrade: the same line with the new version. Remove: `uv tool uninstall pai-workbench`
 (your configuration and task notes stay). No uv? Use the archives on the
-[v0.3.0 release page](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.3.0), as in the Quick start below.
+[v0.4.0 release page](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.4.0), as in the Quick start below.
 
 PAI keeps an AI-assisted project's working memory in plain Markdown files, and runs coding
 agents against it under your control.
@@ -26,6 +28,13 @@ agents against it under your control.
   same archive since 0.3.0, under `swarm/`): runs Claude Code and Codex in parallel lanes, one
   tmux window, Git worktree and branch each. Tasks come from Markdown notes; publishing goes
   through checks you approved and a PR you merge. Linux, macOS and WSL (it needs tmux).
+- **In your browser** (new in 0.4.0, experimental): `pai web` shows a run's lanes on
+  127.0.0.1: each agent's screen live, typing into it (Ctrl and arrow keys, input methods),
+  pasting from your clipboard as one piece, a shell in each lane's worktree, and the task notes
+  in a Markdown editor. `pai paste LANE FILE` sends a long or multi-line message from the
+  terminal the same way. `pai edit FILE.md` opens one Markdown file with a live preview and
+  confirmed saves; it also runs on native Windows. All three refuse to paste into an agent's
+  folder-trust prompt; you answer that yourself.
 
 ## Quick start: from the archive to a first task
 
@@ -33,9 +42,9 @@ Linux, macOS or WSL, with Python 3.11+, git and tmux. Nothing needs sudo, and no
 piped into a shell:
 
 ```sh
-sha256sum -c pai-workbench-0.3.0.tar.gz.sha256      # macOS: shasum -a 256 -c pai-workbench-0.3.0.tar.gz.sha256
-tar -xzf pai-workbench-0.3.0.tar.gz
-pai-workbench-0.3.0/bin/pai install                  # a verified copy in ~/.local/share/pai-workbench, `pai` in ~/.local/bin
+sha256sum -c pai-workbench-0.4.0.tar.gz.sha256      # macOS: shasum -a 256 -c pai-workbench-0.4.0.tar.gz.sha256
+tar -xzf pai-workbench-0.4.0.tar.gz
+pai-workbench-0.4.0/bin/pai install                  # a verified copy in ~/.local/share/pai-workbench, `pai` in ~/.local/bin
 ```
 
 If `install` says `~/.local/bin is not on PATH`, run the one line it prints for your shell
@@ -49,6 +58,7 @@ pai task new "Add a --json flag to export" --body "Done when: make test passes" 
 pai run --dry-run        # what would happen; changes nothing
 pai run                  # starts the agents, one tmux window each
 pai status               # per lane: process, trust prompt, input, task dispatch, Remote Control
+pai web                  # the same run in your browser (Ctrl-C stops it)
 ```
 
 `pai` alone prints this path again; `pai --help` lists every command. When a lane waits for
@@ -57,8 +67,8 @@ prompt for you to answer; the task follows. Upgrading is the same three lines wi
 archive: the previous version keeps working if anything fails, and your configuration and
 task notes are not touched.
 
-**Getting the archive.** Download `pai-workbench-0.3.0.tar.gz` and its `.sha256` from the
-[v0.3.0 release page](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.3.0) (the `.zip` is the same files, for Windows). The same archives
+**Getting the archive.** Download `pai-workbench-0.4.0.tar.gz` and its `.sha256` from the
+[v0.4.0 release page](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.4.0) (the `.zip` is the same files, for Windows). The same archives
 can be built from a checkout: `python3 -B tools/build_bundle.py --out dist`.
 
 From a remote repository, pai clones into a checkout it manages and starts no agent until
@@ -72,7 +82,7 @@ claude --agent codex`.
 | Linux (Debian/Ubuntu, Arch, Fedora/RHEL family, Amazon Linux) | yes | yes (tmux) |
 | macOS | yes | yes (tmux) |
 | WSL | yes | yes (tmux, inside the distribution) |
-| native Windows | yes (`pai context`, `pai handoff`, `pai doctor --agents`) | **no**: workers need tmux; install pai inside WSL |
+| native Windows | yes (`pai context`, `pai handoff`, `pai doctor --agents`, `pai edit`) | **no**: workers (and `pai web`) need tmux; install pai inside WSL |
 
 On native Windows, workbench commands stop with a message pointing to WSL. INSTALL.md has the
 Windows steps for the core.
@@ -90,9 +100,14 @@ Windows steps for the core.
 - **Optional:** JEV (TypeSafe) as an advisory signal for task triage and review; it never
   overrides a check. Tested against a mock endpoint; `pai jev check` sends the one real
   request when you choose to.
-- **Experimental, optional:** a loopback-only Markdown server (a remote Nano with a preview
-  and confirmed saves), installed only with `pai setup --experimental server`; see
-  `swarm/mdserver/README.md`. Reach it through an SSH tunnel or your private tailnet.
+- **Experimental:** `pai web` and `pai edit` listen on 127.0.0.1 only, behind a sign-in link
+  that works once; from another computer, use an SSH tunnel. Tested with fake agents and a
+  recording terminal program on Linux (exact bytes of every paste and keystroke, trust prompts
+  refused, the security checks); CI runs a `pai edit` session from the installed package on
+  Linux, macOS and native Windows (see RELEASE_NOTES.md for the runs). Not yet tried with a real
+  Claude Code or Codex, nor by hand in a desktop browser on macOS or Windows.
+- **Checkout only, experimental:** a longer-running Markdown server for several folders
+  (`pai setup --experimental server`); see `swarm/mdserver/README.md`.
 
 ## Documentation
 

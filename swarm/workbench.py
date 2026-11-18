@@ -1048,6 +1048,58 @@ def cmd_logs(a):
         return 0
 
 
+def cmd_paste(a):
+    """Text into a lane's agent in one piece: a bracketed paste through a tmux buffer, so a long
+    or multi-line prompt arrives whole and nothing is submitted unless you add --enter."""
+    import panes
+    if a.file in (None, "-"):
+        if a.file is None and sys.stdin.isatty():
+            raise Stop("pai paste: give a FILE, or pipe the text in: pai paste %s - < message.md" % a.lane, 2)
+        data = sys.stdin.buffer.read(panes.MAX_PASTE + 1)
+    else:
+        try:
+            with open(os.path.expanduser(a.file), "rb") as f:
+                data = f.read(panes.MAX_PASTE + 1)
+        except OSError as e:
+            raise Stop("pai paste: cannot read %s (%s)" % (a.file, e.strerror or e), 2)
+    if len(data) > panes.MAX_PASTE:
+        raise Stop("pai paste: the text is larger than %d bytes; nothing was sent" % panes.MAX_PASTE, 2)
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise Stop("pai paste: the text is not UTF-8; nothing was sent", 2)
+    m = select_run(a, current_project(a))
+    tmux, win, _ = lane_window(m, a.lane)
+    w = m.worker(a.lane)
+    try:
+        res = panes.paste(tmux, win["pane_id"], text, trust=w.adapter.waiting_for_trust, enter=a.enter,
+                          allow_unbracketed=a.allow_unbracketed)
+    except panes.Refused as e:
+        raise Stop("pai paste: lane %s: %s. Nothing was sent." % (a.lane, e), 1)
+    how = {True: "as one bracketed paste", False: "unbracketed (the program did not ask for bracketed paste)",
+           None: "bracketed if the program asked for it (this tmux cannot tell)"}[res["bracketed"]]
+    log("lane %s: pasted %d characters, %d line(s), %s; %s." % (
+        a.lane, res["pasted"], res["lines"], how, "Enter pressed" if res["enter"] else
+        "nothing submitted (review it in the lane, then press Enter there%s)" % ("" if a.enter else ", or add --enter")))
+    for n in res["notes"]:
+        log("  note: %s" % n)
+    return 0 if res["enter"] == bool(a.enter) else 1
+
+
+def cmd_web(a):
+    import console
+    proj = current_project(a)
+    m = None
+    if a.run or run_ids(proj["name"]):
+        m = select_run(a, proj)
+    roots = []
+    tasks = settings(proj).get("tasks")
+    for r in ([tasks] if tasks else []) + ([m.tasks_dir] if m and m.tasks_dir else []) + [w.worktree for w in (m.workers if m else [])]:
+        if r and os.path.isdir(r) and os.path.realpath(r) not in [os.path.realpath(x) for x in roots]:
+            roots.append(r)
+    return console.main(proj, m, roots, port=a.port or 0, no_browser=a.no_browser)
+
+
 def cmd_resume(a):
     m = select_run(a, current_project(a))
     if a.redispatch or a.mark_delivered:
@@ -1319,9 +1371,15 @@ def md_plan(a):
 
 
 def md_missing():
-    if not os.path.isfile(os.path.join(MD_DIR, "server.py")):
+    """The long-running server (`pai setup --experimental server`, `pai server`) is for a checkout
+    only. Installed copies (a release archive, `uv tool install`) carry swarm/mdserver/ for
+    `pai edit` and `pai web`, which run in the foreground and need no setup."""
+    from pai import config as core_config
+    installed = core_config.PACKAGED or os.path.isfile(os.path.join(os.path.dirname(HERE), "SHA256SUMS"))
+    if installed or not os.path.isfile(os.path.join(MD_DIR, "server.py")):
         raise Stop("pai: the experimental Markdown server is not part of this installation (it ships only in a "
-                   "checkout of personal-ai-workbench, swarm/mdserver/). Nothing was changed.", 2)
+                   "checkout of personal-ai-workbench, swarm/mdserver/). Nothing was changed. For one file, "
+                   "`pai edit FILE.md`; for a run's lanes and notes, `pai web`.", 2)
 
 
 def server_setup(a):
@@ -1644,6 +1702,14 @@ def parser():
     tn.add_argument("--name", help="file name without .md (default: from the title)")
     tn.add_argument("--write", action="store_true", help="save it (refuses an existing note)")
     tks.add_parser("list", help="the notes in the task folder, in the order `pai run` takes them")
+    pa = p("paste", "text into a lane's agent in one piece (bracketed paste; no Enter unless --enter)", lane=True)
+    pa.add_argument("file", nargs="?", help="a UTF-8 text file, or - (or nothing) to read stdin")
+    pa.add_argument("--enter", action="store_true", help="also press Enter (never while a folder-trust prompt shows)")
+    pa.add_argument("--allow-unbracketed", action="store_true", help="paste several lines even when the program did "
+                    "not ask for bracketed paste, or tmux cannot tell (each line may then be entered on its own)")
+    wb = p("web", "the run in your browser: lane screens, typing, pasting, shells, notes (127.0.0.1; Ctrl-C stops it)")
+    wb.add_argument("--port", type=int, help="loopback port (default: a free one)")
+    wb.add_argument("--no-browser", action="store_true", help="print the link only")
     st = p("status", "per lane: process, task dispatch, Remote Control evidence")
     st.add_argument("--json", action="store_true")
     at = p("attach", "open a lane's tmux window", lane=True)
@@ -1691,7 +1757,7 @@ def parser():
 COMMANDS = {"init": cmd_init, "doctor": cmd_doctor, "setup": cmd_setup, "run": cmd_run, "status": cmd_status,
             "attach": cmd_attach, "logs": cmd_logs, "trust": cmd_trust, "resume": cmd_resume, "pr": cmd_pr,
             "next": cmd_next, "cleanup": cmd_cleanup, "config": None, "jev": cmd_jev, "server": cmd_server,
-            "task": cmd_task}
+            "task": cmd_task, "paste": cmd_paste, "web": cmd_web}
 
 
 def main(argv=None):

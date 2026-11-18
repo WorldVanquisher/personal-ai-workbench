@@ -31,6 +31,7 @@ body { margin: 0; background: var(--bg); color: var(--text); line-height: 1.5; }
 .panel h2 { font-family: var(--ef-ui); font-size: 13px; font-weight: 700; letter-spacing: 0.12em; margin: 0 0 10px;
   overflow-wrap: anywhere; }
 .layout { display: grid; grid-template-columns: minmax(200px, 280px) 1fr; gap: 14px; align-items: start; }
+.layout.single { grid-template-columns: 1fr; }
 .picker select, .picker input { width: 100%; margin: 4px 0 8px; }
 .picker ul { list-style: none; margin: 0; padding: 0; max-height: 70vh; overflow: auto; }
 .picker li button { width: 100%; text-align: left; margin: 2px 0; font-weight: 600; overflow-wrap: anywhere; }
