@@ -1,0 +1,46 @@
+# The `pai` command as an installable package, for example:
+#   uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.3.0
+# Same code as the release archives (release/allowlist.txt): the pai package, plus the workbench
+# runtime (swarm/*.py and swarm/WORKBENCH.md) inside it as pai/_workbench. Not packaged: the
+# workbench's tests and examples, the experimental Markdown server, the archive launchers.
+# No runtime dependencies; the version comes from pai/__init__.py.
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pai-workbench"
+dynamic = ["version"]
+description = "Run Claude Code and Codex on your Git repository, one task note per lane; project context and draft handoffs for coding agents."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = []
+classifiers = [
+    "Environment :: Console",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+]
+
+[project.urls]
+Homepage = "https://github.com/WorldVanquisher/personal-ai-workbench"
+
+[project.scripts]
+pai = "pai.launch:main"
+
+[tool.setuptools]
+packages = ["pai", "pai._workbench"]
+include-package-data = false
+
+[tool.setuptools.package-dir]
+"pai._workbench" = "swarm"
+
+[tool.setuptools.package-data]
+pai = ["templates/handoff.md"]
+"pai._workbench" = ["WORKBENCH.md"]
+
+[tool.setuptools.dynamic]
+version = { attr = "pai.__version__" }

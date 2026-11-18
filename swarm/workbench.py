@@ -1173,36 +1173,56 @@ def cmd_cleanup(a):
 def self_rows(proj):
     """doctor rows about pai itself: this installation's files, whether a new terminal finds
     `pai`, and whether this directory is a configured checkout."""
-    from pai import __version__, doctor as core_doctor, install as core_install
+    from pai import __version__, config as core_config, doctor as core_doctor, install as core_install
     root = os.path.dirname(HERE)
-    me = os.path.join(root, "bin", "pai")
-    bundle = os.path.isfile(os.path.join(root, "SHA256SUMS"))
+    packaged = core_config.PACKAGED  # uv tool install / pip: the workbench is pai/_workbench
+    bundle = not packaged and os.path.isfile(os.path.join(root, "SHA256SUMS"))
+    if packaged:
+        me = os.path.join(sys.prefix, "Scripts" if os.name == "nt" else "bin", "pai.exe" if os.name == "nt" else "pai")
+        again = core_install.uv_command(force=True)
+    else:
+        me = os.path.join(root, "bin", "pai")
+        again = "extract a verified archive again, then run its bin/pai install"
     rows = []
-    if bundle:
+    if bundle or packaged:
         rep = core_doctor.Report()
-        core_doctor.check_bundle(rep, root)
+        if bundle:
+            core_doctor.check_bundle(rep, root)
+        else:
+            core_doctor.check_package(rep)
         rows.append({"tool": "pai", "used_by": "-", "state": "missing" if rep.problems else "ok",
                      "detail": " ".join(l.split(None, 1)[1] for l in rep.lines if l.strip() and not l.startswith(" ")),
-                     "fix": "extract a verified archive again, then run its bin/pai install" if rep.problems else None})
+                     "fix": again if rep.problems else None})
     else:
         rows.append({"tool": "pai", "used_by": "-", "state": "info", "fix": None,
                      "detail": "pai %s from a checkout (%s), not an installed bundle" % (__version__, root)})
     found = shutil.which("pai")
-    prefix, bin_dir = core_install.defaults()
-    receipt = _read_json(os.path.join(prefix, "receipt.json")) or {}
-    bin_dir = receipt.get("bin_dir") or bin_dir
-    launcher = os.path.join(bin_dir, "pai.cmd" if os.name == "nt" else "pai")
+    if packaged:  # where `uv tool install` puts its launchers
+        bin_dir = os.environ.get("UV_TOOL_BIN_DIR") or os.environ.get("XDG_BIN_HOME") or (
+            os.path.join(os.environ["XDG_DATA_HOME"], os.pardir, "bin") if os.environ.get("XDG_DATA_HOME")
+            else os.path.join(os.path.expanduser("~"), ".local", "bin"))
+        bin_dir = os.path.normpath(bin_dir)
+        launcher = os.path.join(bin_dir, "pai.exe" if os.name == "nt" else "pai")
+    else:
+        prefix, bin_dir = core_install.defaults()
+        receipt = _read_json(os.path.join(prefix, "receipt.json")) or {}
+        bin_dir = receipt.get("bin_dir") or bin_dir
+        launcher = os.path.join(bin_dir, "pai.cmd" if os.name == "nt" else "pai")
     if found and os.path.realpath(found) == os.path.realpath(me):
         rows.append({"tool": "pai on PATH", "used_by": "-", "state": "ok", "fix": None,
                      "detail": "%s runs this pai %s" % (found, __version__)})
     elif found:
         rows.append({"tool": "pai on PATH", "used_by": "-", "state": "info",
                      "detail": "a new terminal runs %s, not this pai (%s)" % (os.path.realpath(found), me),
-                     "fix": ("%s install   # to make this one the default" % me) if bundle else None})
+                     "fix": again if packaged else ("%s install   # to make this one the default" % me) if bundle else None})
     elif os.path.lexists(launcher):
         rows.append({"tool": "pai on PATH", "used_by": "-", "state": "missing",
                      "detail": "%s exists, but %s is not on PATH: a new terminal says `pai: command not found`"
                                % (launcher, bin_dir), "fix": core_install.path_fix(bin_dir)[0]})
+    elif packaged:
+        rows.append({"tool": "pai on PATH", "used_by": "-", "state": "missing",
+                     "detail": "no `pai` on PATH; this one is %s" % me,
+                     "fix": "uv tool update-shell   # then open a new terminal"})
     else:
         rows.append({"tool": "pai on PATH", "used_by": "-", "state": "missing" if bundle else "info",
                      "detail": "no `pai` on PATH; this one is %s" % me,

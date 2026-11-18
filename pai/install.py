@@ -29,6 +29,13 @@ import sys
 from pai import __version__, config
 
 MARK = "pai-workbench launcher"
+DIST = "pai-workbench"  # the Python package name (pyproject.toml)
+REPO = "https://github.com/WorldVanquisher/personal-ai-workbench"
+
+
+def uv_command(version=__version__, force=False):
+    """The one-line install (or, with force, reinstall/upgrade) of a tagged version with uv."""
+    return f"uv tool install{' --force' if force else ''} git+{REPO}@v{version}"
 
 
 class InstallError(Exception):
@@ -254,6 +261,11 @@ def install(src=None, prefix=None, bin_dir=None, dry_run=False, env=None, window
 
 
 def main(a):
+    if config.PACKAGED:
+        print(f"pai install: this pai {__version__} is an installed Python package ({config.WORKBENCH}), not an "
+              "extracted release archive, so there is nothing here for `pai install` to copy. Upgrade or reinstall "
+              f"it the way it was installed, for example: {uv_command('X.Y.Z', force=True)}", file=sys.stderr)
+        return 2
     try:
         return install(prefix=a.prefix, bin_dir=a.bin_dir, dry_run=a.dry_run)
     except InstallError as e:

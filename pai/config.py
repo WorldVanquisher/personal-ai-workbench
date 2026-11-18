@@ -21,7 +21,22 @@ import tomllib
 from dataclasses import dataclass, field
 
 WORKBENCH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_CONFIG = os.path.join(WORKBENCH, "pai.local.toml")
+# An installed package (`uv tool install ...`, pip) has no bin/pai.py beside the pai package, and
+# its folder is replaced on every upgrade: its default configuration lives in the user's
+# configuration folder instead of next to the code.
+PACKAGED = not os.path.isfile(os.path.join(WORKBENCH, "bin", "pai.py"))
+
+
+def user_config():
+    """~/.config/pai/config.toml (XDG_CONFIG_HOME), or %LOCALAPPDATA%\\pai\\config.toml on Windows."""
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Local")
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "pai", "config.toml")
+
+
+DEFAULT_CONFIG = user_config() if PACKAGED else os.path.join(WORKBENCH, "pai.local.toml")
 
 # Never read, whatever the configuration says.
 DENY_PATTERNS = (".*", "*.env", "*secret*", "*credential*", "*password*", "*token*",
@@ -144,8 +159,8 @@ def read(path=None):
         with open(path, "rb") as f:
             return path, tomllib.load(f)
     except FileNotFoundError:
-        raise ConfigError(f"no configuration at {path}; create one with `pai init …` "
-                          "(see `pai init --help`) or copy pai.example.toml")
+        raise ConfigError(f"no configuration at {path}; create one with `pai init …` (see `pai init --help`)"
+                          + ("" if PACKAGED else " or copy pai.example.toml"))
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"invalid TOML in {path}: {e}")
 

@@ -21,7 +21,8 @@ pai init only looks at the paths you give it; it never overwrites an existing co
 def _parser():
     p = argparse.ArgumentParser(prog="pai", description="Project context and draft handoffs for agent sessions "
                                 "(standard library; no network, model or command execution).")
-    p.add_argument("--config", help="configuration file (default: $PAI_CONFIG, else pai.local.toml in the pai directory)")
+    p.add_argument("--config", help="configuration file (default: $PAI_CONFIG, else %s)" % (
+        config.DEFAULT_CONFIG.replace("%", "%%") if config.PACKAGED else "pai.local.toml in the pai directory"))
     p.add_argument("--version", action="version", version=f"pai {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True, metavar="{init,doctor,check,context,handoff,install}")
 
