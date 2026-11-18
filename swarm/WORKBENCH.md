@@ -111,16 +111,32 @@ pai logs a --tail 100     # screen and scrollback; --follow keeps printing
 pai trust                 # every lane waiting for folder trust, one after another, from this terminal
 ```
 
-Three separate states per lane:
+Five separate kinds of evidence per lane; none stands in for another:
 
 - **process**: `running`, `exited (status N)`, `no window`, `mismatched` (the window is not
   the one this run started), plus the phase `starting` / `waiting for folder trust`.
-- **dispatch**: `pending`, `sent`, `delivered` (its tag is visible in the pane), or
-  `unknown` (see section 6).
+- **trust**: `prompt-visible` (the agent's folder-trust prompt is on the visible screen) or
+  `not-shown`. `not-shown` only means no prompt is visible now; it is not proof of trust.
+- **input**: whether the agent's idle input box is ready, and why. For Claude, its own
+  session record for exactly that process (pid, start time, worktree) saying `idle` with no
+  dialog waiting; otherwise the screen's idle marker (`? for shortcuts`, Codex also
+  `% context left`). Never ready while a trust prompt is visible.
+- **dispatch**: `pending`, `sent` (Enter pressed, evidence awaited), `delivered` (with the
+  evidence: the agent's own transcript records the prompt, or you marked it), or `unknown`
+  (with the steps to reconcile it; see section 6).
 - **rc**: `verified` only from Claude Code's own current session record for that exact
   process and worktree; a stale record (older than 15 minutes) or a bridge session
   unchanged since a disconnect notice was seen is `unverified`. Codex lanes, and Claude in
   `local` mode, report `not supported`.
+
+Policy for a stale record with a ready local Claude: the task is still sent, and `rc` stays
+`unverified`. Dispatch only needs local evidence (the process, no trust prompt, the input
+box), because the line goes through the local tmux pane, not through Remote Control. The
+record's age is evidence about the Remote Control bridge only; its `status` field is
+rewritten by Claude whenever its input state changes (Claude Code 2.1.326, read from the
+program and the records it wrote; not checked in a live dispatch), so an old `updatedAt` does
+not make an `idle` stale. Neither is ever used to upgrade the other: a delivered task says nothing about
+Remote Control, and `pai status` keeps exiting 1 until RC is verified.
 
 **Folder trust.** Both agents ask on first use of a directory, and pai never answers.
 
@@ -139,10 +155,22 @@ plan as a new trust decision.
 
 ## 5. Dispatch
 
-When a lane's input box is ready (`? for shortcuts`), pai pastes one line through a tmux
-buffer loaded from a 0600 file (no shell is involved) and presses Enter:
+When a lane's input box has been ready, with no trust prompt on screen, for 3 seconds
+(`PAI_DISPATCH_SETTLE`; so a trust prompt that appears after the agent's first frame is seen
+first), pai pastes one line through a tmux buffer loaded from a 0600 file (no shell is
+involved; control characters become spaces), reads the screen again, and presses Enter only
+if no trust prompt (and, for Claude, no dialog in its record) has appeared meanwhile:
 `[pai RUN/LANE/NOTE] Your task is the note PATH ("TITLE"). ...`. The note stays where it
-is. Each run, lane and task is sent at most once.
+is. Each run, lane and task is sent at most once; lanes are handled independently, so a
+ready lane never waits for one at a trust prompt.
+
+`delivered` needs evidence that the agent took the line as a prompt: its own transcript
+records a user message containing the tag, at or after the attempt (Claude:
+`<config>/projects/<dir>/<session>.jsonl`; Codex: `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl`).
+The tag being visible in the pane proves nothing: it may still sit in the input box. Without
+that evidence 20 seconds after Enter (`PAI_DISPATCH_CONFIRM_SECONDS`), the dispatch is
+`unknown`. Remote Control never gates a dispatch (the line goes through the local pane), and
+a dispatch never changes what the `rc` evidence says.
 
 ## 6. Resume
 
@@ -154,8 +182,21 @@ pai resume --lane b --mark-delivered  # only for dispatch `unknown`: record that
 ```
 
 A resume keeps the recorded base, branch, task, agent, model and effort, and never
-fetches or switches. If a process ended between sending a task and pai seeing it in the
-pane, the dispatch is `unknown` and nothing resends it until you choose.
+fetches or switches. A dispatch is `unknown` when its outcome cannot be shown: pai stopped
+between a keystroke and recording it, a trust prompt appeared after the paste (Enter is then
+not sent), the process ended or changed, or Enter was pressed but no transcript shows the
+prompt. Nothing resends it until you choose; `pai status` prints the steps:
+
+1. look at the lane: `pai logs LANE --tail 40` (or `pai attach LANE`);
+2. the agent is working on the task: `pai resume --lane LANE --mark-delivered`;
+3. the line still sits in the input box: press Enter there yourself (the next `pai status`
+   sees the prompt in the transcript), or clear it and `--redispatch`;
+4. nothing arrived: `pai resume --lane LANE --redispatch`.
+
+`--mark-delivered` and `--redispatch` run under the same lock as `pai resume`, `pai trust`
+and `pai next`; while one of those runs, they are refused and change nothing. A record from
+an earlier pai that says `delivered` only because the tag was visible is shown as `unknown`
+unless the transcript shows the prompt; it is never resent.
 
 ## 7. SSH remotes
 
@@ -271,6 +312,11 @@ Not verified against the real programs:
 - the trust prompts' and ready markers' exact on-screen text in a live tmux pane (read from
   the installed binaries' strings, not from a running session);
 - that pasting the dispatch line into the real Claude Code / Codex input box submits it;
+- the on-disk records used as evidence (Claude's per-process session record `status` and
+  its transcript; Codex's rollout files): their structure was read from files the installed
+  versions wrote on the development host, but no live dispatch has been checked against them;
+- how long after its first frame Codex can show its trust prompt (pai waits 3 seconds of
+  steady readiness; a prompt later than that is still caught before Enter, but after the paste);
 - Codex accepting `-c model_reasoning_effort=...` for every model, and which models take
   which levels;
 - Remote Control connectivity from `rc status` for a real session;

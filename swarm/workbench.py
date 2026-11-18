@@ -928,29 +928,32 @@ def cmd_resume(a):
 
 
 def resolve_dispatch(m, a):
-    import dispatch
+    """--mark-delivered / --redispatch for one lane, decided and done under the session mutex,
+    so a concurrent resume (or another resolution) can neither send nor overwrite meanwhile."""
     cur = rc.current_lanes(gitprep.common_dir(m.repo), m.run_id)
     if a.lane not in cur:
         raise Stop("pai resume: lane %s has no recorded task" % a.lane, 2)
-    rec, rl = cur[a.lane]
-    w = m.worker(a.lane)
-    tmux = rc.Tmux(m.socket)
+    return rc.exclusive(m, lambda m_, *_: _resolve(m_, a, rc.Tmux(m.socket), m.worker(a.lane), *cur[a.lane]))
+
+
+def _resolve(m, a, tmux, w, rec, rl):
+    import dispatch
     proc = rc.lane_process(m, tmux, w)
-    hist = tmux.capture(proc["window"]["pane_id"], history=True) if proc.get("window") else ""
-    st = dispatch.state(m, w, rl, proc, hist)
-    if st["state"] not in ("unknown", "sent"):
-        raise Stop("pai resume: lane %s's dispatch is %s, not unknown: %s" % (a.lane, st["state"], st["detail"]), 1)
+    st = dispatch.state(m, w, rl, proc, rc.evidence_fn(m, w, rl, rc.probe(m, w, proc)))
+    allowed = ("unknown", "sent") if a.mark_delivered else ("unknown",)
+    if st["state"] not in allowed:
+        raise Stop("pai resume: lane %s's dispatch is %s, not %s: %s" % (a.lane, st["state"], " or ".join(allowed),
+                                                                         st["detail"]), 1)
     if a.mark_delivered:
         dispatch.mark_delivered(m, w, rl, proc)
         log("lane %s: task %s recorded as delivered by you; it will not be sent." % (a.lane, rl["note"]))
         return 0
-    res = rc.exclusive(m, lambda m_, *_: _redispatch(m_, tmux, w, rec, rl))
-    return res
-
-
-def _redispatch(m, tmux, w, rec, rl):
-    st = rc.dispatch_lane(m, tmux, w, rec, rl, force=True)
-    log("lane %s: %s (%s)" % (w.lane, st["state"], st["detail"]))
+    rows = rc.watch_startup(m, tmux, a.wait, dispatch=True, lanes={w.lane}, force={w.lane})
+    st = rows[0]["dispatch"] if rows else st
+    log("lane %s: %s (%s)%s" % (w.lane, st["state"], st["detail"], "; evidence: %s" % st["evidence"]
+                                if st.get("evidence") else ""))
+    if st["state"] == "unknown" and st.get("reconcile"):
+        log("\n".join("  %d. %s" % (i, s) for i, s in enumerate(st["reconcile"], 1)))
     return 0 if st["state"] in ("delivered", "sent") else 1
 
 

@@ -57,6 +57,18 @@ exactly what each agent showed.
 
 ## 3. Trust from one terminal, then dispatch
 
+Before answering anything:
+
+```sh
+$PAI status
+$PAI logs b --tail 20
+```
+
+Expect for every lane whose agent shows a trust prompt: `trust     prompt-visible`,
+`input     not ready: its folder-trust prompt is on screen`, `dispatch  pending`, and no
+line starting `[pai ` in its pane (also not in `pai logs`). A lane without a prompt shows,
+3 seconds after its input box was ready, `dispatch  delivered` with an `evidence:` line.
+
 ```sh
 $PAI trust
 ```
@@ -64,16 +76,44 @@ $PAI trust
 Expect: it lists the repository and both worktree paths, opens each waiting prompt in
 turn and comes back by itself after you answer (in Claude, move to "Yes, I trust this
 folder"). Then each agent receives exactly one line starting `[pai <run>/<lane>/smoke-...]`
-in its input box and starts working. Record whether the line was submitted (not just typed)
-in each agent.
+in its input box, about 3 seconds after its input box is ready, and starts working. Record
+whether the line was submitted (not just typed) in each agent.
 
 ```sh
 $PAI status
+```
+
+Expect, lane a (Claude):
+
+```text
+  trust     not-shown: no folder-trust prompt on the visible screen (...)
+  input     ready: Claude's session record for this process says idle (no dialog waiting)
+  dispatch  delivered: task smoke-a delivered
+            evidence: Claude's own transcript for this worktree records the prompt (user message at ...)
+  rc        verified: ...
+```
+
+(`input` may say `not ready: Claude's session record for this process says busy` while it
+works.) Lane b (Codex): `input ready: the screen shows its idle input box (...)` or not
+ready while it works; `dispatch delivered` with `evidence: Codex's own rollout file for this
+worktree records the prompt (...)`; `rc not-supported`. Also record, for lane a, whether
+`? for shortcuts` is on screen when it is idle (`$PAI logs a --tail 5`): the previous run
+stayed `pending` here, and this tells which evidence made it ready.
+
+If a lane shows `dispatch sent`, run `$PAI status` again after 20 seconds. If it shows
+`unknown`, record the detail line, then follow the numbered steps it prints (look first;
+do not `--redispatch` while the line still sits in the input box).
+
+```sh
+for l in a b; do $PAI logs $l --tail 2000 | grep -c '\[pai '; done   # note both counts
 $PAI resume            # must not send either task again
+$PAI resume
+for l in a b; do $PAI logs $l --tail 2000 | grep -c '\[pai '; done   # the same counts
 ```
 
 Expect: lane a `rc verified` and the session visible in claude.ai/code; lane b
-`rc not-supported`; both `dispatch delivered`; `resume` sends nothing new.
+`rc not-supported`; both `dispatch delivered`; each `resume` prints `kept` for both lanes
+and sends nothing new (the counts are unchanged).
 
 ## 4. SSH (skip if your remote is HTTPS)
 

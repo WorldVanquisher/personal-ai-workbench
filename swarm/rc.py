@@ -29,6 +29,7 @@ import time
 
 import agents
 import dispatch
+import dispatch as dispatchmod  # watch_startup has a `dispatch` argument
 import gitprep
 import jev
 import notes
@@ -294,9 +295,15 @@ class Manifest:
                 unset.append("SSH_AUTH_SOCK")
         return env, unset
 
-    def sessions_dir(self):
+    def claude_dir(self):
         cfg = self.env.get("CLAUDE_CONFIG_DIR") or os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join("~", ".claude")
-        return os.path.join(os.path.expanduser(cfg), "sessions")
+        return os.path.expanduser(cfg)
+
+    def sessions_dir(self):
+        return os.path.join(self.claude_dir(), "sessions")
+
+    def codex_home(self):
+        return os.path.expanduser(self.env.get("CODEX_HOME") or os.environ.get("CODEX_HOME") or os.path.join("~", ".codex"))
 
 
 # ---------------------------------------------------------------- recorded state
@@ -550,6 +557,38 @@ def find_claude(pane_pid, command, sessions_dir, table):
     return None
 
 
+def own_record(pid, worktree, sessions_dir):
+    """Claude Code's session record for exactly this process (pid and start time) in this
+    worktree, or None. The same identity rules as rc_evidence; its age does not matter here:
+    `status` is rewritten whenever Claude's input state changes."""
+    if not pid or not sessions_dir:
+        return None
+    try:
+        with open(os.path.join(sessions_dir, "%d.json" % pid), encoding="utf-8") as f:
+            rec = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(rec, dict) or rec.get("pid") != pid:
+        return None
+    start = wtlock.proc_start(pid)
+    if start is not None and str(rec.get("procStart") or "") != str(start):
+        return None
+    return rec if gitprep.canon(str(rec.get("cwd") or "")) == worktree else None
+
+
+def probe(m, w, proc):
+    """agents.Probe for the lane: what its adapter may read about input state and submissions."""
+    pid = proc.get("pid") if proc.get("state") == "running" else None
+    claude = w.agent == "claude"
+    return agents.Probe(w.worktree, pid, own_record(pid, w.worktree, m.sessions_dir()) if claude and pid else None,
+                        m.claude_dir() if claude else None, m.codex_home() if w.agent == "codex" else None)
+
+
+def evidence_fn(m, w, rl, pr):
+    """entry -> the agent's own evidence that this task's prompt was submitted, or None."""
+    return lambda e: w.adapter.submitted(pr, e.get("tag") or dispatch.tag(m, w.lane, rl["note"]), dispatch.since(e))
+
+
 def stale_seconds():
     try:
         return max(1, int(os.environ.get("PAI_RC_STALE_SECONDS") or 900))
@@ -708,22 +747,24 @@ PHASES = {"no-window": "no window", "exited": "exited", "no-claude": "window wit
           "waiting-for-trust": "waiting for folder trust", "running": "running"}
 
 
-def lane_phase(m, w, proc, screen):
-    """(phase, input_ready). The process state refined by what the agent shows: its
-    folder-trust prompt, its idle input box, or (while it is young) no sign of life yet."""
+def lane_phase(m, w, proc, screen, pr=None):
+    """(phase, input_ready, why). The process state refined by what the agent shows: its
+    folder-trust prompt, its idle input box (agents.Adapter.input_state), or (while it is
+    young) no sign of life yet."""
     if proc["state"] != "running":
-        return proc["state"], False
+        return proc["state"], False, "no agent process"
     ad = w.adapter
     if ad.waiting_for_trust(screen):
-        return "waiting-for-trust", False
-    if ad.ready(screen):
-        return "running", True
+        return "waiting-for-trust", False, "its folder-trust prompt is on screen"
+    ready, why = ad.input_state(screen, pr)
+    if ready:
+        return "running", True, why
     if w.agent == "claude" and ad.has_rc(w.mode):
         alive = os.path.isfile(os.path.join(m.sessions_dir(), "%d.json" % proc["pid"]))
     else:
         alive = bool(screen.strip())
     age = proc_age(proc["pid"])
-    return ("starting" if not alive and age is not None and age < STARTING_GRACE else "running"), False
+    return ("starting" if not alive and age is not None and age < STARTING_GRACE else "running"), False, why
 
 
 # ---------------------------------------------------------------- plan / up
@@ -916,21 +957,36 @@ def cmd_up(m, a):
     return 1 if failed else code
 
 
-def watch_startup(m, tmux, seconds, dispatch=False, lanes=None):
+def watch_startup(m, tmux, seconds, dispatch=False, lanes=None, force=()):
     """Each lane on its own: poll until no lane is still `starting` (and, with dispatch, every
-    ready lane has its task) or `seconds` have passed. A lane waiting for folder trust or one
-    that exited never holds up the others. Returns the final status rows."""
+    ready lane has its task and its submission evidence) or `seconds` have passed. A lane is
+    sent its task only after it has been input-ready, with no trust prompt on screen, for
+    dispatch.settle_seconds(). A lane waiting for folder trust or one that exited never holds
+    up the others. `force`: lanes whose `unknown` dispatch the operator asked to send again.
+    Returns the final status rows."""
     end = time.time() + max(0.0, seconds)
+    settle, force, ready_since = dispatchmod.settle_seconds(), set(force), {}
     while True:
         rows, cur = collect_status(m, tmux)
         rows = [r for r in rows if not lanes or r["lane"] in lanes]
+        now = time.time()
         if dispatch:
             for r in rows:
-                if r["phase"] == "running" and r["input_ready"] and r["dispatch"]["state"] == "pending":
-                    r["dispatch"] = dispatch_lane(m, tmux, m.worker(r["lane"]), *cur[r["lane"]])
+                w, rl = m.worker(r["lane"]), cur[r["lane"]][1]
+                dispatchmod.record_delivered(m, w, rl, r["dispatch"])  # evidence found: keep it
+                k = (r["lane"], r["process"].get("pid"))
+                if not (r["phase"] == "running" and r["input_ready"]):
+                    ready_since.pop(k, None)
+                    continue
+                first = ready_since.setdefault(k, now)
+                want = r["dispatch"]["state"] == "pending" or (r["lane"] in force and r["dispatch"]["state"] == "unknown")
+                if want and now - first >= settle:
+                    r["dispatch"] = dispatch_lane(m, tmux, w, *cur[r["lane"]], force=r["lane"] in force)
+                    force.discard(r["lane"])
         # A window whose agent is not found yet may still be between `sh -c` and the agent's exec.
-        waiting = [r for r in rows if r["phase"] in ("starting", "no-claude") or (
-            dispatch and r["phase"] == "running" and r["dispatch"]["state"] == "pending")]
+        waiting = [r for r in rows if r["phase"] in ("starting", "no-claude") or (dispatch and (
+            (r["phase"] == "running" and r["dispatch"]["state"] == "pending") or r["dispatch"]["state"] == "sent"
+            or r["lane"] in force))]
         if not waiting or time.time() >= end:
             return rows
         time.sleep(0.25)
@@ -940,13 +996,16 @@ def dispatch_lane(m, tmux, w, rec, rl, force=False):
     wins, table, own = tmux.windows(m.session), process_table(), load_own(m)
     proc = lane_process(m, tmux, w, wins, table, own)
     if proc["state"] != "running":
-        return dispatch.state(m, w, rl, proc, "")
-    pane = proc["window"]["pane_id"]
+        return dispatch.state(m, w, rl, proc, evidence_fn(m, w, rl, probe(m, w, proc)))
+    pane, pid, start = proc["window"]["pane_id"], proc["pid"], wtlock.proc_start(proc["pid"])
     note = None
     if m.tasks_dir and rl.get("note") and os.path.isfile(os.path.join(m.tasks_dir, rl["note"] + ".md")):
         note = notes.Task(os.path.join(m.tasks_dir, rl["note"] + ".md"))
     return dispatch.deliver(m, tmux, w, rec, rl, proc, note, lambda: tmux.capture(pane),
-                            lambda: tmux.capture(pane, history=True), force=force)
+                            lambda screen: w.adapter.input_state(screen, probe(m, w, proc)),  # re-reads the record
+                            lambda screen: w.adapter.enter_blocked(screen, probe(m, w, proc)),
+                            lambda e: evidence_fn(m, w, rl, probe(m, w, proc))(e),
+                            lambda: wtlock.pid_alive(pid, start), force=force)
 
 
 def attach_hint(m, tmux, r, pai=False):
@@ -975,6 +1034,10 @@ def report_startup(m, tmux, rows, pai=False):
             log("            %s" % attach_hint(m, tmux, r, pai))
             log("          then %s to deliver its task." % ("`pai resume`" if pai else "rerun `rc up`"))
         elif r["dispatch"]["state"] == "unknown":
+            log("DISPATCH  lane %s: unknown: %s" % (r["lane"], r["dispatch"].get("cause") or r["dispatch"]["detail"]))
+            for i, step in enumerate(r["dispatch"].get("reconcile") or [], 1):
+                log("          %d. %s" % (i, step))
+        elif r["dispatch"]["state"] == "sent":
             log("DISPATCH  lane %s: %s" % (r["lane"], r["dispatch"]["detail"]))
 
 
@@ -1004,7 +1067,15 @@ def lane_status(m, tmux, w, rec, rl, wins, table, own=None, disp=None):
     screen = history = ""
     if proc["state"] == "running":
         screen, history = tmux.capture(win["pane_id"]), tmux.capture(win["pane_id"], history=True)
-    st["phase"], st["input_ready"] = lane_phase(m, w, proc, screen)
+    pr = probe(m, w, proc)
+    st["phase"], st["input_ready"], why = lane_phase(m, w, proc, screen, pr)
+    st["trust"] = ({"state": "prompt-visible", "evidence": "%s's folder-trust prompt is on the visible screen; pai never "
+                                                          "answers it" % w.adapter.display}
+                   if st["phase"] == "waiting-for-trust" else
+                   {"state": "not-shown", "evidence": "no folder-trust prompt on the visible screen (this alone does not "
+                                                      "prove the folder is trusted)"}
+                   if proc["state"] == "running" else {"state": "unknown", "evidence": "no agent process"})
+    st["input"] = {"ready": st["input_ready"], "evidence": why}
     if not w.adapter.has_rc(w.mode):
         state, evidence = "not-supported", w.adapter.rc_unsupported(w.mode)
     elif st["phase"] == "waiting-for-trust":
@@ -1014,7 +1085,7 @@ def lane_status(m, tmux, w, rec, rl, wins, table, own=None, disp=None):
     else:
         state, evidence = "not-running", "no agent process to be connected"
     st["rc"] = {"state": state, "evidence": evidence}
-    st["dispatch"] = dispatch.state(m, w, rl, proc, history, disp)
+    st["dispatch"] = dispatch.state(m, w, rl, proc, evidence_fn(m, w, rl, pr), disp)
     return st
 
 
@@ -1036,6 +1107,8 @@ def cmd_status(m, a, quiet_exit=False, pai=False):
     rows, cur = collect_status(m, tmux)
     ok = bool(rows) and len(rows) == len(m.workers) and all(lane_ok(m, r) for r in rows)
     if getattr(a, "json", False):
+        for r in rows:
+            r["dispatch"].pop("upgrade", None)  # internal: evidence a mutating command will record
         json.dump({"run_id": m.run_id, "session": m.session, "socket": m.socket, "ok": ok, "lanes": rows},
                   sys.stdout, indent=1)
         print()
@@ -1061,7 +1134,13 @@ def cmd_status(m, a, quiet_exit=False, pai=False):
         log("  lock      %s" % r["lock"])
         log("  state     %s%s" % (PHASES.get(r["phase"], r["phase"]), "" if r["phase"] != "waiting-for-trust" else
                                   ": %s" % attach_hint(m, tmux, r, pai)))
-        log("  dispatch  %s: %s" % (r["dispatch"]["state"], r["dispatch"]["detail"]))
+        log("  trust     %s: %s" % (r["trust"]["state"], r["trust"]["evidence"]))
+        log("  input     %s: %s" % ("ready" if r["input"]["ready"] else "not ready", r["input"]["evidence"]))
+        log("  dispatch  %s: %s" % (r["dispatch"]["state"], r["dispatch"].get("cause") or r["dispatch"]["detail"]))
+        if r["dispatch"].get("evidence"):
+            log("            evidence: %s" % r["dispatch"]["evidence"])
+        for i, step in enumerate(r["dispatch"].get("reconcile") or [], 1):
+            log("            %d. %s" % (i, step))
         log("  %-9s %s" % (r["agent"]["name"], {
             "running": "running (pid %s)" % p.get("pid"), "exited": "exited (status %s)" % p.get("exit"),
             "no-window": "no window", "no-claude": "window without the agent process (%s)" % p.get("detail"),
