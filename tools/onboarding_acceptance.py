@@ -20,7 +20,10 @@ with a fresh HOME there and nothing inherited from your environment except a min
   4. in a new Git checkout (with a local bare origin): pai doctor, then `pai init` through a
      pseudo-terminal answering with Enter wherever that is the safe default (each prompt is
      recorded), pai task new (preview, --write, refused rewrite), pai task list,
-     pai run --dry-run, pai run with fake Claude Code on an isolated tmux socket, pai status
+     pai run --dry-run, pai run with fake Claude Code on an isolated tmux socket, pai status;
+     then the browser tools from the same installed pai: pai paste into the lane, pai web
+     (one-time link, the lane's screen, typing that reaches the agent, a multi-line paste the
+     fake agent cannot take refused) and pai edit on the task note
   5. reinstall (kept), upgrade (configuration and task note unchanged), a damaged bundle and an
      unwritable install folder both refused with the previous version still answering
 
@@ -29,11 +32,13 @@ account is used, and nothing outside WORK is touched (the tmux server has its ow
 WORK). Writes WORK/onboarding-results.json; exit 0 only if every check passed.
 """
 import argparse
+import http.client
 import json
 import os
 import pty
 import re
 import select
+import shlex
 import shutil
 import signal
 import subprocess
@@ -131,6 +136,109 @@ def interactive(argv, env, cwd, answer, timeout=120):
             status = 9
     os.close(fd)
     return (os.waitstatus_to_exitcode(status) if status is not None else -1), buf.decode("utf-8", "replace")
+
+
+def served(cmd, env, cwd):
+    """Start `cmd` (pai web / pai edit, --no-browser) in a fresh login-like bash; (process, port,
+    path of its one-time link, printed lines)."""
+    p = subprocess.Popen(["bash", "-ic", "exec " + cmd], env=env, cwd=cwd, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True, stdin=subprocess.DEVNULL)
+    lines, end = [], time.time() + 60
+    while time.time() < end and not any("open:" in l for l in lines):
+        line = p.stdout.readline()
+        if not line:
+            break
+        lines.append(line)
+    url = next((l.split("open:")[1].strip() for l in lines if "open:" in l), "")
+    port = int(url.split(":")[2].split("/")[0]) if url else 0
+    return p, port, url.split(str(port), 1)[1] if url else "", "".join(lines)
+
+
+def request(port, method, path, body=None, cookie=None, csrf=None):
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=20)
+    h = {"Host": "127.0.0.1:%d" % port}
+    h.update({"Cookie": cookie} if cookie else {})
+    h.update({"X-PAI-CSRF": csrf, "Content-Type": "application/json"} if csrf else {})
+    c.request(method, path, body=json.dumps(body) if body is not None else None, headers=h)
+    r = c.getresponse()
+    data = r.read()
+    c.close()
+    try:
+        data = json.loads(data)
+    except ValueError:
+        pass
+    return r.status, dict(r.getheaders()), data
+
+
+def stop(p):
+    p.send_signal(signal.SIGINT)
+    try:
+        rc = p.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        rc = p.wait()
+    out = p.stdout.read()
+    p.stdout.close()
+    p.stderr.close()
+    return rc, out
+
+
+def browser_tools(fresh, env0, repo, ctl, note, work):
+    """pai paste, pai web and pai edit, from the installed pai, against the run just started."""
+    def received():
+        path = os.path.join(ctl, "received.jsonl")
+        return [json.loads(l)["text"] for l in open(path)] if os.path.exists(path) else []
+
+    def wait(fn, timeout=15):
+        end = time.time() + timeout
+        while time.time() < end and not fn():
+            time.sleep(0.2)
+        return fn()
+    msg = os.path.join(work, "message.md")
+    with open(msg, "w") as f:
+        f.write("from pai paste\n")
+    rc, o2, e2 = fresh("pai paste a %s --enter" % shlex.quote(msg), cwd=repo)
+    check("pai paste: a message file reaches the lane's agent in one piece, Enter only with --enter",
+          rc == 0 and "Enter pressed" in o2 and wait(lambda: "from pai paste" in received()), o2 + e2)
+
+    p, port, link, out = served("pai web --no-browser", env0, repo)
+    try:
+        st, hdrs, _ = request(port, "GET", link) if port else (0, {}, None)
+        cookie = (hdrs.get("Set-Cookie") or "").split(";")[0]
+        again = request(port, "GET", link)[0] if port else 0
+        check("pai web prints a one-time 127.0.0.1 link that signs in once",
+              port and st == 303 and again == 401 and "127.0.0.1" in out, out[-500:])
+        if port and cookie:
+            csrf = request(port, "GET", "/api/session", cookie=cookie)[2]["csrf"]
+            st, _, lanes = request(port, "GET", "/api/lanes", cookie=cookie)
+            st2, _, screen = request(port, "GET", "/api/screen?lane=a", cookie=cookie)
+            check("pai web lists the lane with its task note and shows its screen",
+                  st == 200 and [l["lane"] for l in lanes["lanes"]] == ["a"] and lanes["lanes"][0]["note_link"]
+                  and st2 == 200 and "received:" in screen.get("text", ""), (lanes, screen.get("text", "")[-300:]))
+            st, _, d = request(port, "POST", "/api/keys", {"lane": "a", "keys": [{"text": "typed in the browser"},
+                                                                              {"key": "Enter"}]}, cookie, csrf)
+            check("pai web: typing in the browser reaches the agent",
+                  st == 200 and wait(lambda: "typed in the browser" in received()), d)
+            st, _, d = request(port, "POST", "/api/paste", {"lane": "a", "text": "two\nlines"}, cookie, csrf)
+            check("pai web: a multi-line paste to a program without bracketed paste is refused, nothing sent",
+                  st == 409 and re.match(r"(not-bracketed|bracketed-unknown): ", d.get("error", ""))
+                  and "two" not in received(), d)
+    finally:
+        rc, out2 = stop(p)
+    check("pai web stops on Ctrl-C", rc == 0 and "stopped" in out2, out2[-300:])
+
+    before = open(note, "rb").read()
+    p, port, link, out = served("pai edit %s --no-browser" % shlex.quote(note), env0, repo)
+    try:
+        st, hdrs, _ = request(port, "GET", link) if port else (0, {}, None)
+        cookie = (hdrs.get("Set-Cookie") or "").split(";")[0]
+        page = request(port, "GET", "/", cookie=cookie)[2] if cookie else b""
+        doc = request(port, "GET", "/api/file?root=0&path=" + os.path.basename(note), cookie=cookie)[2] if cookie else {}
+        check("pai edit opens the task note in the browser editor from the installed pai",
+              st == 303 and b'id="text"' in page and "Add a smoke line" in doc.get("text", ""), out[-400:])
+    finally:
+        rc, out2 = stop(p)
+    check("pai edit stops on Ctrl-C and the note is unchanged", rc == 0 and open(note, "rb").read() == before, out2[-300:])
 
 
 def main(argv=None):
@@ -281,10 +389,10 @@ def main(argv=None):
         rc, o2, _ = fresh("pai task list", cwd=repo)
         check("pai task list shows the queue", rc == 0 and "add-a-smoke-line" in o2 and "1 todo" in o2, o2)
         refs = git("for-each-ref", cwd=repo)[1]
-        rc, o2, e2 = fresh("pai run --dry-run --workers 1 --tmux-socket %s" % sock, cwd=repo)
+        rc, o2, e2 = fresh("pai run --dry-run --workers 1 --tmux-socket %s" % shlex.quote(sock), cwd=repo)
         check("pai run --dry-run changes nothing", rc == 0 and "DRY RUN" in o2 and git("for-each-ref", cwd=repo)[1] == refs
               and not os.path.exists(sock), o2 + e2)
-        rc, o2, e2 = fresh("pai run --workers 1 --yes --wait 20 --tmux-socket %s" % sock, cwd=repo, timeout=240)
+        rc, o2, e2 = fresh("pai run --workers 1 --yes --wait 20 --tmux-socket %s" % shlex.quote(sock), cwd=repo, timeout=240)
         rc, o3, _ = fresh("pai status --json", cwd=repo)
         try:
             lane = json.loads(o3)["lanes"][0]
@@ -297,6 +405,7 @@ def main(argv=None):
               and len(got) == 1 and "add-a-smoke-line" in got[0]["text"], (o2 + e2)[-600:] + o3[-400:])
         TIMES["setup: %s -> first task delivered" % ("uv tool install" if a.uv else "verify download")] = round(
             time.time() - setup, 1)
+        browser_tools(fresh, env0, repo, ctl, note, work)
 
         cfg_bytes = {p: open(p, "rb").read() for p in cfgs}
         note_bytes = open(note, "rb").read() if os.path.isfile(note) else None
@@ -323,7 +432,7 @@ def main(argv=None):
         sh(summer + [nname + ".sha256"], env0, cwd=dl)
         sh(["tar", "-xzf", nname], env0, cwd=dl)
         nbundle = os.path.join(dl, "pai-workbench-%s" % nxt)
-        rc, o2, e2 = fresh("%s install" % os.path.join(nbundle, "bin", "pai"))
+        rc, o2, e2 = fresh("%s install" % shlex.quote(os.path.join(nbundle, "bin", "pai")))
         rc2, v, _ = fresh("pai --version")
         check("upgrade %s -> %s switches the launcher" % (version, nxt), rc == 0 and v.strip() == "pai %s" % nxt
               and "was %s" % version in o2, o2 + e2 + v)

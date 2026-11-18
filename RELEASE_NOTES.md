@@ -1,5 +1,73 @@
 # pai release notes
 
+## 0.4.0 (candidate; not tagged or published)
+
+pai in your browser, and long prompts that arrive whole. Configuration files, task notes and
+every 0.3.0 command are unchanged.
+
+### Install
+
+- **uv:** `uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.4.0`
+  (the line works once the owner pushes the `v0.4.0` tag). The package now also carries the
+  browser pages (`pai/_workbench/mdserver`).
+- **Archives:** `pai-workbench-0.4.0.tar.gz` / `.zip` with their `.sha256`; 55 files, now with
+  `QUICKSTART.md`, `QUICKSTART.zh-CN.md`, the editor and the console.
+
+### New (experimental)
+
+- **`pai web`**: one run in your browser on 127.0.0.1, behind a sign-in link that works once.
+  Each lane's screen live with its colours (select to copy); live typing into a lane (keys,
+  Ctrl/Alt combinations, arrows, input methods); clipboard pastes and a message box sent as one
+  piece; a shell in each lane's worktree (tmux session `<run session>-shell`); the task folder
+  and lane worktrees in the Markdown editor. The browser names a lane, never a tmux pane.
+- **`pai paste LANE [FILE|-]`**: a long or multi-line message into a lane's agent through a
+  tmux buffer and a bracketed paste (no file on disk, no shell); Enter only with `--enter`.
+  Shared with `pai web`: refused while the agent's folder-trust prompt shows; control
+  characters removed (no early end of the paste); a final newline is never Enter; several
+  lines only to a program that tmux says asked for bracketed paste, otherwise only after
+  `--allow-unbracketed` or a confirmation (tmux 3.8 can tell, 3.5a cannot); 1 MB at most.
+- **`pai edit FILE.md`** (from PAI-009): one Markdown file in a browser editor with a live
+  preview and confirmed saves that never overwrite a newer file. Runs on native Windows too.
+- **`QUICKSTART.md` / `QUICKSTART.zh-CN.md`**: install, doctor, first task, `pai web`,
+  `pai edit`, upgrade and uninstall, in English and Chinese.
+
+### Changed
+
+- The editor's server takes its port exclusively on Windows (no `SO_REUSEADDR`), saves report
+  a write error instead of dropping the connection, and accepts a file at a drive or
+  file-system root.
+- `pai server` / `pai setup --experimental server` (the long-running Markdown server) stay
+  checkout-only: an archive or uv install says so and changes nothing, although the editor
+  module now ships for `pai edit` and `pai web`.
+
+### Tested environments
+
+- **CI: not run yet for 0.4.0.** It runs when the branch is pushed: the unit tests, both
+  archives with a `pai edit` session in the bundle smoke (Ctrl-Break on Windows), and the
+  uv-installed `pai` with a full `pai edit` session (`pai.exe` on Windows), on Ubuntu, macOS
+  and Windows with Python 3.11 and 3.13, plus Debian, Ubuntu, Fedora and Alpine containers.
+  Until it has passed, macOS and native Windows are unverified for this release.
+- **Linux host (Arch, Python 3.14, tmux 3.8), fake agents, isolated tmux:** core suite 108 OK
+  (7 skipped: 6 Windows-only, 1 needs an installed `pai`); workbench suite 166 OK (13 new:
+  paste byte for byte against a recording terminal program, `pai web` and `pai paste` end to
+  end, `pai edit`); headless run tests 23/23; bundle smoke 57/57 on both archives;
+  new-user acceptance from the archive 32/32 in a folder with spaces and non-ASCII characters
+  (now including `pai paste`, `pai web` and `pai edit` from the installed copy); the
+  QUICKSTART walkthrough 17 steps, none stuck; CI's uv step run by hand (wheel, `uv tool
+  install`, RECORD check of 50 files, a `pai edit` session through the installed `pai`).
+- **Clean Debian 13 container** (Python 3.13.5, tmux 3.5a, uv 0.13.9, unprivileged user):
+  the paste, console and editor tests 21/21 on a tmux that cannot report bracketed paste;
+  the core suite; `uv tool install` of a local stand-in for the `v0.4.0` tag through a first
+  delivered task and the browser tools, 25/25; the QUICKSTART walkthrough, none stuck.
+- **Real browser** (headless Chromium 156 in a Debian 12 container, Python 3.11, tmux 3.3a):
+  `pai edit` 17/17 and `pai web` 26/26: one-time link; live typing, an input-method commit and
+  Ctrl-C reach the pane; a clipboard paste is held until Enter; several lines ask first when
+  tmux cannot tell; a trust prompt refuses Paste and is never answered; a lane shell with
+  colours; the task note opens in the editor; 390 px phone width at zoom 1 without
+  horizontal scrolling; no script errors.
+- **Not tested:** real Claude Code or Codex with `pai paste` / `pai web`; a desktop browser on
+  macOS or Windows; native Windows and macOS (CI pending); WSL by hand.
+
 ## 0.3.0 (prerelease)
 
 The workbench (`pai run`, `status`, `task`, ...) now ships with the core, and pai installs in

@@ -114,10 +114,16 @@ def check_entries(root, entries):
             rel = os.path.relpath(os.path.join(dirpath, f), root).replace(os.sep, "/")
             if rel.endswith(".py") or rel.startswith("pai/templates/"):
                 runtime.add(rel)
-    # the workbench's own modules (swarm/*.py; not its tests, examples or the Markdown server)
+    # the workbench's own modules (swarm/*.py and swarm/mdserver/*.py; not its tests or examples)
     swarm = os.path.join(root, "swarm")
     if os.path.isdir(swarm):
         runtime |= {"swarm/" + f for f in os.listdir(swarm) if f.endswith(".py") and os.path.isfile(os.path.join(swarm, f))}
+        md = os.path.join(swarm, "mdserver")  # `pai edit`, `pai web`: every module and page must ship too
+        if os.path.isdir(md):
+            runtime |= {"swarm/mdserver/" + f for f in os.listdir(md) if f.endswith(".py")}
+            static = os.path.join(md, "static")
+            if os.path.isdir(static):
+                runtime |= {"swarm/mdserver/static/" + f for f in os.listdir(static)}
     missing = sorted(runtime - set(entries))
     if missing:
         raise BuildError(f"runtime files not in the allowlist (add them or remove them): {', '.join(missing)}")
@@ -218,6 +224,8 @@ def build(root, out, epoch):
                          "script": "bin/pai.py (python3 bin/pai.py, or py -3 bin\\pai.py on Windows)",
                          "install": "bin/pai install (user-local; --prefix, --bin-dir)"},
         "workbench": "swarm/: pai doctor, init, task, run, status, ... (Linux, macOS, WSL; needs git and tmux)",
+        "editor": "swarm/mdserver/: pai edit FILE.md, a one-file browser editor on 127.0.0.1 (experimental; any OS, "
+                  "native Windows included), and the pages of pai web (the run's lanes in a browser; needs tmux)",
         "archives": {"tar.gz": "Linux and macOS", "zip": "Windows"},
         "external_prerequisites": ["agent CLIs and their logins (e.g. Claude Code, Codex)", "git and tmux for the workbench",
                                    "a Markdown vault",

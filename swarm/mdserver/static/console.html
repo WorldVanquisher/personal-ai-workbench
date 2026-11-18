@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en" data-theme="endfield">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAI Web (experimental)</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/console.css">
+<script src="/static/console.js" defer></script>
+</head>
+<body>
+<div class="app">
+  <header class="app-header">
+    <h1>PAI Web</h1>
+    <span class="tag signal" title="Experimental">EXPERIMENTAL</span>
+    <span id="run" class="run"></span>
+    <a id="notes" class="button-link" href="/notes" target="_blank" rel="noopener" hidden>Notes ↗</a>
+    <span id="state" class="state" aria-live="polite"></span>
+  </header>
+  <div id="error" class="banner" role="alert" hidden></div>
+  <div class="layout console">
+    <nav class="lanes panel" aria-label="Lanes">
+      <h2>LANES</h2>
+      <p id="hint" class="hint" hidden></p>
+      <ul id="lanes"></ul>
+    </nav>
+    <section class="lane panel" aria-label="Lane" id="lane" hidden>
+      <div class="lane-head">
+        <h2 id="lane-title"></h2>
+        <a id="note-link" class="button-link" target="_blank" rel="noopener" hidden>Task note ↗</a>
+      </div>
+      <div class="view-tabs always" role="group" aria-label="Pane">
+        <button type="button" id="tab-agent" aria-pressed="true">Agent</button>
+        <button type="button" id="tab-shell" aria-pressed="false">Shell</button>
+      </div>
+      <div id="trust" class="banner error" role="alert" hidden>
+        <strong>The agent is asking whether to trust this folder.</strong> Read the prompt below and answer it
+        yourself: click the screen and use the arrow keys and Enter. pai never answers it, and pasting is off
+        until it is answered.
+      </div>
+      <div id="no-shell" class="empty" hidden>
+        <p>No shell for this lane yet. It opens in the lane's worktree, in its own tmux session on the run's server.</p>
+        <button id="open-shell" class="primary" type="button">Open a shell</button>
+      </div>
+      <div id="term" class="term-wrap">
+        <pre id="screen" class="term" aria-label="Lane screen" aria-live="off"></pre>
+        <textarea id="kbd" class="kbd" aria-label="Live keys: what you type goes to the lane" autocomplete="off"
+          autocapitalize="off" spellcheck="false"></textarea>
+      </div>
+      <div class="keys" role="group" aria-label="Keys">
+        <button type="button" id="live" class="ghost" aria-pressed="false" title="Click the screen, or here, to type into the lane">Type here</button>
+        <button type="button" data-key="Escape">Esc</button>
+        <button type="button" data-key="C-c" title="Ctrl-C">Ctrl-C</button>
+        <button type="button" data-key="Tab">Tab</button>
+        <button type="button" data-key="Up" aria-label="Up">↑</button>
+        <button type="button" data-key="Down" aria-label="Down">↓</button>
+        <button type="button" data-key="Left" aria-label="Left">←</button>
+        <button type="button" data-key="Right" aria-label="Right">→</button>
+        <button type="button" data-key="Enter">Enter</button>
+        <button type="button" id="history" class="ghost" aria-pressed="false">Scrollback</button>
+        <button type="button" id="copy" class="ghost">Copy screen</button>
+        <button type="button" id="close-shell" class="ghost" hidden>Close shell</button>
+      </div>
+      <label for="compose" class="compose-label">Message: goes to the lane as one paste (nothing is submitted unless you choose "Paste and Enter")</label>
+      <textarea id="compose" class="compose" spellcheck="false" placeholder="Write or paste a longer message here"></textarea>
+      <div class="actions">
+        <button id="send" class="primary" type="button">Paste</button>
+        <button id="send-enter" type="button">Paste and Enter</button>
+        <span id="result" class="hint" aria-live="polite"></span>
+      </div>
+    </section>
+  </div>
+</div>
+</body>
+</html>

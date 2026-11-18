@@ -2,10 +2,13 @@
 # packaged. build_bundle.py refuses unlisted runtime modules or templates, and
 # any entry that names local configuration, evidence, caches, secrets or VCS data.
 # swarm/ is the workbench (pai run, status, ...; POSIX with tmux): its runtime modules
-# only. Its tests, examples and the experimental Markdown server are not packaged.
+# only, plus swarm/mdserver/ for `pai edit` and `pai web` (the browser editor and console; they
+# start only when you run them). Its tests and examples are not packaged.
 LICENSE
 README.md
 README.zh-CN.md
+QUICKSTART.md
+QUICKSTART.zh-CN.md
 REFERENCE.md
 INSTALL.md
 RELEASE_NOTES.md
@@ -28,12 +31,14 @@ pai/markdown.py
 pai/templates/handoff.md
 swarm/WORKBENCH.md
 swarm/agents.py
+swarm/console.py
 swarm/dispatch.py
 swarm/doctor.py
 swarm/gitprep.py
 swarm/guard.py
 swarm/jev.py
 swarm/notes.py
+swarm/panes.py
 swarm/pai_swarm.py
 swarm/publish_check.py
 swarm/rc.py
@@ -41,3 +46,14 @@ swarm/review.py
 swarm/wbconfig.py
 swarm/workbench.py
 swarm/wtlock.py
+swarm/mdserver/README.md
+swarm/mdserver/edit.py
+swarm/mdserver/render.py
+swarm/mdserver/server.py
+swarm/mdserver/static/app.css
+swarm/mdserver/static/app.js
+swarm/mdserver/static/console.css
+swarm/mdserver/static/console.html
+swarm/mdserver/static/console.js
+swarm/mdserver/static/index.html
+swarm/mdserver/static/login.html

@@ -160,24 +160,35 @@ jobs:
           "$pai" doctor --agents > "$RUNNER_TEMP/doctor.txt"
           "$pai" > "$RUNNER_TEMP/bare.txt"; bare=$?
           "$pai" run --help > "$RUNNER_TEMP/run.txt" 2>&1; run=$?
+          "$pai" web --help > "$RUNNER_TEMP/web.txt" 2>&1; web=$?
+          "$pai" edit --help > "$RUNNER_TEMP/edit.txt" 2>&1; edit=$?
           set -e
-          cat "$RUNNER_TEMP/install.txt" "$RUNNER_TEMP/doctor.txt" "$RUNNER_TEMP/bare.txt" "$RUNNER_TEMP/run.txt"
+          cat "$RUNNER_TEMP/install.txt" "$RUNNER_TEMP/doctor.txt" "$RUNNER_TEMP/bare.txt" "$RUNNER_TEMP/run.txt" "$RUNNER_TEMP/web.txt"
           test "$rc" = 2
           grep -q "installed Python package" "$RUNNER_TEMP/install.txt"
           grep -q "package pai-workbench .* intact: .* match its RECORD" "$RUNNER_TEMP/doctor.txt"
           test "$bare" = 0
+          test "$edit" = 0  # pai edit runs everywhere, native Windows included
           if [ "$RUNNER_OS" = "Windows" ]; then
-            # native Windows: PAI's own commands only; the workbench points to WSL
+            # native Windows: PAI's own commands and pai edit; the workbench points to WSL
             grep -q "WSL" "$RUNNER_TEMP/bare.txt"
             test "$run" = 2
             grep -q "WSL" "$RUNNER_TEMP/run.txt"
+            test "$web" = 2
+            grep -q "WSL" "$RUNNER_TEMP/web.txt"
           else
             # the workbench modules load from inside the package (pai/_workbench)
             grep -q "pai run --dry-run" "$RUNNER_TEMP/bare.txt"
             grep -q "_workbench/WORKBENCH.md" "$RUNNER_TEMP/bare.txt"
             test "$run" = 0
             grep -q -- "--dry-run" "$RUNNER_TEMP/run.txt"
+            test "$web" = 0
           fi
+          # a full pai edit session through the installed command (pai.exe on Windows): one-time
+          # link, confirmed save, stale refusal, clean stop (Ctrl-Break on Windows)
+          if [ "$RUNNER_OS" = "Windows" ]; then installed="$UV_TOOL_BIN_DIR/pai.exe"; else installed="$UV_TOOL_BIN_DIR/pai"; fi
+          PAI_INSTALLED="$installed" python -B -m unittest tests.test_packaging.RealInstall -v 2>&1 | tee "$RUNNER_TEMP/edit-session.txt"
+          grep -q "test_edit_through_the_installed_command .* ok" "$RUNNER_TEMP/edit-session.txt"
 
       - name: Upload smoke report on failure
         if: ${{ failure() }}

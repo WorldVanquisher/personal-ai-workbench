@@ -24,6 +24,20 @@ needs_tmux = unittest.skipUnless(shutil.which("git") and shutil.which("tmux") an
                                  "needs git, tmux and /proc")
 
 
+def tmux_reports_bracketed_paste():
+    """True when this tmux has #{bracket_paste_flag} (3.8 does; 3.5a does not)."""
+    if not shutil.which("tmux"):
+        return False
+    sock = os.path.join(tempfile.mkdtemp(prefix="pt", dir="/tmp"), "s")
+    try:
+        subprocess.run(["tmux", "-S", sock, "-f", os.devnull, "new-session", "-d", "sleep 5"], capture_output=True)
+        p = subprocess.run(["tmux", "-S", sock, "display-message", "-p", "[#{bracket_paste_flag}]"], capture_output=True, text=True)
+        return p.stdout.strip() in ("[0]", "[1]")
+    finally:
+        subprocess.run(["tmux", "-S", sock, "kill-server"], capture_output=True)
+        shutil.rmtree(os.path.dirname(sock), ignore_errors=True)
+
+
 def git(cwd, *args, check=True, env=None):
     e = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_TERMINAL_PROMPT="0", **HUMAN)
     e.update(env or {})

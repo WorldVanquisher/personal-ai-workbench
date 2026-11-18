@@ -1,8 +1,10 @@
 # The `pai` command as an installable package, for example:
-#   uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.3.0
+#   uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.4.0
 # Same code as the release archives (release/allowlist.txt): the pai package, plus the workbench
-# runtime (swarm/*.py and swarm/WORKBENCH.md) inside it as pai/_workbench. Not packaged: the
-# workbench's tests and examples, the experimental Markdown server, the archive launchers.
+# runtime (swarm/*.py and swarm/WORKBENCH.md) inside it as pai/_workbench, and the browser pages
+# of `pai edit` and `pai web` (swarm/mdserver/) as pai/_workbench/mdserver. Not packaged: the
+# workbench's tests and examples, the archive launchers. (`pai server`, the long-running
+# Markdown server, stays a checkout-only option even though its module ships for `pai edit`.)
 # No runtime dependencies; the version comes from pai/__init__.py.
 
 [build-system]
@@ -32,7 +34,7 @@ Homepage = "https://github.com/WorldVanquisher/personal-ai-workbench"
 pai = "pai.launch:main"
 
 [tool.setuptools]
-packages = ["pai", "pai._workbench"]
+packages = ["pai", "pai._workbench", "pai._workbench.mdserver"]
 include-package-data = false
 
 [tool.setuptools.package-dir]
@@ -41,6 +43,7 @@ include-package-data = false
 [tool.setuptools.package-data]
 pai = ["templates/handoff.md"]
 "pai._workbench" = ["WORKBENCH.md"]
+"pai._workbench.mdserver" = ["README.md", "static/*.html", "static/*.css", "static/*.js"]
 
 [tool.setuptools.dynamic]
 version = { attr = "pai.__version__" }

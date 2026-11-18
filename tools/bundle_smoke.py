@@ -21,6 +21,9 @@ Inside a new WORK directory (never the real vault):
 - checks launcher behaviour: argument forwarding (spaces, quotes, Unicode,
   shell metacharacters, an empty argument), the bin/pai.py entry point,
   a missing PAI_PYTHON, no Python on PATH, and a simulated Python 3.10;
+- runs `pai edit` on a note in a folder with spaces and non-ASCII characters
+  (one-time sign-in link, the editor page, a confirmed save, a clean stop;
+  Ctrl-Break on Windows), and checks that `pai server` stays checkout-only;
 - checks that both locations report the same tool version while their local
   configurations differ;
 - checks missing roots: a removed vault makes doctor and context fail
@@ -36,9 +39,11 @@ test tooling: it runs the bundle as subprocesses with a scrubbed environment
 
 import argparse
 import hashlib
+import http.client
 import json
 import os
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -361,6 +366,76 @@ def launcher_checks(info, work, env, cwd):
     check("simulated Python 3.10: exit 2 with the 3.11 requirement", rc == 2 and "3.11 or newer is required" in err, (rc, err))
 
 
+def editor_checks(info, work, env, cwd):
+    """`pai edit` from the extracted archive. On Windows through bin/pai.py (Ctrl-Break must reach
+    Python, not a cmd.exe batch prompt); elsewhere through the bin/pai launcher."""
+    bundle = info["bundle"]
+    docs = os.path.join(work, "notes dossier é 日本")
+    os.makedirs(docs)
+    note = os.path.join(docs, "plan.md")
+    Path(note).write_bytes(b"# Plan\r\n\r\nfirst line\r\n")
+    cmd = [sys.executable, "-B", os.path.join(bundle, "bin", "pai.py")] if WINDOWS else [launcher(bundle)]
+    e = {k: v for k, v in env.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+    p = subprocess.Popen(cmd + ["edit", note, "--no-browser"], cwd=cwd, env=e, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, encoding=TEXT_ENCODING, errors="replace",
+                         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if WINDOWS else 0)
+    try:
+        lines = []
+        while not any("open:" in l for l in lines):
+            line = p.stdout.readline()
+            if not line:
+                break
+            lines.append(line)
+        url = next((l.split("open:")[1].strip() for l in lines if "open:" in l), "")
+        check("pai edit prints a one-time 127.0.0.1 link for a note in a non-ASCII folder",
+              url.startswith("http://127.0.0.1:") and "/open?t=" in url and note in "".join(lines), "".join(lines)[-400:])
+        if not url:
+            return
+        port = int(url.split(":")[2].split("/")[0])
+
+        def req(method, path, body=None, headers=None):
+            c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            c.request(method, path, body=body, headers=dict({"Host": "127.0.0.1:%d" % port}, **(headers or {})))
+            r = c.getresponse()
+            data = r.read()
+            c.close()
+            return r.status, dict(r.getheaders()), data
+
+        st, hdrs, _ = req("GET", url.split(str(port), 1)[1])
+        cookie = (hdrs.get("Set-Cookie") or "").split(";")[0]
+        again = req("GET", url.split(str(port), 1)[1])[0]
+        page = req("GET", "/", headers={"Cookie": cookie})[2]
+        check("pai edit: the link signs in once and the editor page comes from the archive",
+              st == 303 and again == 401 and b'id="text"' in page, (st, again, page[:80]))
+        csrf = json.loads(req("GET", "/api/session", headers={"Cookie": cookie})[2])["csrf"]
+        doc = json.loads(req("GET", "/api/file?root=0&path=plan.md", headers={"Cookie": cookie})[2])
+        new = doc["text"] + "saved from the archive\n"
+        h = {"Cookie": cookie, "X-PAI-CSRF": csrf, "Content-Type": "application/json"}
+        st, _, body = req("POST", "/api/save", json.dumps({"root": 0, "path": "plan.md", "text": new, "base": doc["base"],
+                                                           "crlf": doc["crlf"], "confirm": sha256_text(new)}), h)
+        check("pai edit: a confirmed save writes the file and keeps CRLF",
+              st == 200 and Path(note).read_bytes() == b"# Plan\r\n\r\nfirst line\r\nsaved from the archive\r\n", body[:200])
+        p.send_signal(signal.CTRL_BREAK_EVENT if WINDOWS else signal.SIGINT)
+        rc = p.wait(timeout=20)
+        out = p.stdout.read()
+        check("pai edit stops cleanly (%s)" % ("Ctrl-Break" if WINDOWS else "Ctrl-C"), rc == 0 and "stopped" in out,
+              (rc, out[-200:], p.stderr.read()[-300:]))
+    finally:
+        if p.poll() is None:
+            p.kill()
+            p.wait()
+        p.stdout.close()
+        p.stderr.close()
+    if not WINDOWS:
+        rc, out, err = info["run"]("server", "status")
+        check("pai server (the long-running Markdown server) stays checkout-only in an archive",
+              rc == 2 and "not part of this installation" in out + err, (rc, (out + err)[-300:]))
+
+
+def sha256_text(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def other_archive(path, first_tree, work, n, env, cwd):
     side = path + ".sha256"
     want = Path(side).read_text(encoding="utf-8").split()[0] if os.path.exists(side) else None
@@ -407,6 +482,7 @@ def main(argv=None):
         one = location(archive, work, "location-one", "one", env, cwd)
         two = location(archive, work, "location two with spaces/dossier é 日本", "two", env, cwd)
         launcher_checks(two, work, env, cwd)
+        editor_checks(two, work, env, cwd)
         check("same tool version in both locations", one["version"] == two["version"] and one["version"], (one["version"], two["version"]))
         c1 = Path(one["config"]).read_text(encoding=TEXT_ENCODING)
         c2 = Path(two["config"]).read_text(encoding=TEXT_ENCODING)
