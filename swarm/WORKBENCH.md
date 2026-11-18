@@ -8,8 +8,10 @@ delivered from your Markdown task notes and published only through your own revi
 pai init -> pai doctor -> pai run -> pai status -> pai pr check -> pai pr open -> pai next -> pai cleanup
 ```
 
-The workbench lives in `swarm/` of a personal-ai-workbench checkout and is reached through
-`bin/pai` (Python 3.11+). It is not in the release bundle. Everything below was exercised
+The workbench lives in `swarm/` and is reached through `bin/pai` (Python 3.11+): in a
+checkout of personal-ai-workbench, and since 0.3.0 in the release archive too (`bin/pai
+install` puts `pai` on your PATH; README.md has the steps). Its tests, examples and the
+experimental Markdown server stay in the checkout. Everything below was exercised
 with fake agents, fake `gh`, fake `ssh` and an isolated tmux server; what that does **not**
 prove is listed in [section 12](#12-tested-with-fakes-and-not-verified-live).
 
@@ -17,16 +19,28 @@ prove is listed in [section 12](#12-tested-with-fakes-and-not-verified-live).
 
 ```sh
 cd ~/code/myapp                     # any directory inside the checkout, or one of its worktrees
+pai doctor                          # read-only: this pai (intact, on PATH), the checkout, system,
+                                    # git, tmux, gh, ps, agents, logins, SSH access; each problem with its fix
 pai init                            # asks: default agent, its model and effort, remote, base,
-                                    # task-notes folder, review checks, then (optional) a JEV key
-pai doctor                          # read-only: system, git, tmux, gh, ps, agents, logins, SSH access
+                                    # task-notes folder, review checks, then (optional) a JEV key;
+                                    # Enter keeps each suggestion, and it ends with your next commands
+pai task new "TITLE" --body "..."   # preview a task note; --write saves it (never overwrites)
+pai task list                       # the queue, in the order `pai run` takes it
 pai setup --dry-run                 # OS, architecture, worker backend, missing tools, install commands
 pai setup --install-missing         # runs only those commands; logins and folder trust stay yours
 ```
 
 Non-interactive: `pai init --no-input --default-agent codex --remote origin --base main
 --tasks ~/Vault/Tasks --check verify="make verify"`. An existing project is never
-overwritten: `--update` changes only what you pass, or use `pai config edit`.
+overwritten: `--update` changes only what you pass, or use `pai config edit`. A new project
+without `--tasks` gets pai's own task folder, `~/.local/share/pai-workbench/tasks/PROJECT`
+(answer `-` for none). With one agent installed, it is the suggested default.
+
+**Task notes.** `pai task new` writes the queue's format: front matter with `status: todo`
+and `priority` (and `paths` with `--path`), then `# TITLE` and the body. `--from FILE`
+imports one Markdown file: its own front matter and text are kept, `status: todo` is added
+when it has none, and a `# heading` is added from the file name when it has none. A note
+whose status is not `todo` is saved but flagged, because `pai run` will not take it.
 
 `pai init` lists each agent, whether it is installed, and whether pai can run it with
 Remote Control (Claude: yes, `rc` mode; Codex: not supported), plus "not set yet".

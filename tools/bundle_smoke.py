@@ -223,7 +223,7 @@ def location(archive, work, name, label, env, cwd):
     rc, out, err = run("--version")
     version = out.strip()
     check(f"[{label}] --version", rc == 0 and version.startswith("pai "), version or err)
-    rc, out, err = run("doctor")
+    rc, out, err = run("doctor", "--agents")  # PAI's own doctor; bare `doctor` is the workbench's
     check(f"[{label}] doctor before init reports the missing configuration (exit 1)",
           rc == 1 and "no configuration" in out and "intact" in out, out[-300:])
     rc, out, err = run(*init_args(repo, vault))
@@ -270,7 +270,34 @@ def location(archive, work, name, label, env, cwd):
     rc, out, err = run("handoff", "list", "demo")
     check(f"[{label}] handoff list shows the 6 new drafts with approval labels",
           out.count("approved=false") == 6 and "6 matching handoffs." in out, err or out[-300:])
+    first_run_and_install(run, bundle, work, label, version, env, cwd)
     return {"bundle": bundle, "version": version, "config": cfg, "repo": repo, "vault": vault, "run": run}
+
+
+def first_run_and_install(run, bundle, work, label, version, env, cwd):
+    """Bare `pai` (the start-here path; on native Windows, what runs there and that the
+    workbench needs WSL), then `pai install --prefix` and the installed launcher."""
+    rc, out, err = run()
+    if WINDOWS:
+        check(f"[{label}] bare pai says what native Windows runs and that the workbench needs WSL",
+              rc == 0 and "WSL" in out and "pai context" in out, out[-300:] + err)
+        rc, out, err = run("status")
+        check(f"[{label}] a workbench command on native Windows exits 2 and names WSL", rc == 2 and "WSL" in err, err[-300:])
+    else:
+        check(f"[{label}] bare pai shows doctor -> init -> run --dry-run -> run",
+              rc == 0 and out.index("pai doctor") < out.index("pai init") < out.index("pai run --dry-run"), out[-400:])
+    prefix = os.path.join(work, f"installed {label}")
+    rc, out, err = run("install", "--prefix", prefix)
+    shim = os.path.join(prefix, "bin", "pai.cmd" if WINDOWS else "pai")
+    check(f"[{label}] pai install --prefix: user-local copy and launcher", rc == 0 and os.path.isfile(shim)
+          and os.path.isfile(os.path.join(prefix, "versions", version.split()[-1], "SHA256SUMS")), (out + err)[-400:])
+    check(f"[{label}] install prints the PATH command for {prefix}/bin", "is not on PATH" in out and (
+        "SetEnvironmentVariable" in out if WINDOWS else "export PATH=" in out), out[-400:])
+    rc, out, err = Runner(bundle, env, cwd, command=[shim])("--version")
+    check(f"[{label}] the installed launcher runs {version}", rc == 0 and out.strip() == version, out + err)
+    rc, out, err = run("install", "--prefix", prefix)
+    check(f"[{label}] a second install keeps the intact copy", rc == 0 and "already installed and intact" in out,
+          (out + err)[-300:])
 
 
 # Arguments that a shell or cmd.exe could mangle. cmd.exe expands %VAR% and splits on unquoted
@@ -340,7 +367,7 @@ def other_archive(path, first_tree, work, n, env, cwd):
     check(f"{os.path.basename(path)} matches its .sha256", want is not None and sha256(path) == want, want)
     bundle = safe_extract(path, os.path.join(work, f"other format {n} é"))
     check(f"{os.path.basename(path)} extracts the same files with the same bytes", tree_digest(bundle) == first_tree)
-    rc, out, err = Runner(bundle, env, cwd)("doctor")
+    rc, out, err = Runner(bundle, env, cwd)("doctor", "--agents")
     check(f"{os.path.basename(path)}: doctor reports the bundle intact", "intact" in out and "PROBLEM  bundle" not in out,
           out[-300:])
 
@@ -406,7 +433,7 @@ def main(argv=None):
             f.write("\n# tampered\n")
         with open(os.path.join(tampered, "pai", "extra.py"), "w", encoding="utf-8") as f:
             f.write("print('unlisted')\n")
-        rc, out, err = Runner(tampered, env, cwd)("doctor")
+        rc, out, err = Runner(tampered, env, cwd)("doctor", "--agents")
         check("tampered bundle: doctor reports the modified and the unlisted file (exit 1)",
               rc == 1 and "pai/context.py" in out and "pai/extra.py" in out and "intact" not in out, out[-400:])
         bad = os.path.join(work, "corrupt.tar.gz")

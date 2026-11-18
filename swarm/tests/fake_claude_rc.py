@@ -32,6 +32,9 @@ import time
 import uuid
 
 args = sys.argv[1:]
+if args[:1] == ["--version"]:  # like the real CLI: answer and exit, never start a session
+    print("2.1.326 (Claude Code) [fake]")
+    sys.exit(0)
 if args[:1] == ["--help"]:
     print("Usage: claude [options] [command] [prompt]\n  --model <model>\n  -n, --name <name>")
     if not os.environ.get("FAKE_CLAUDE_NO_RC"):

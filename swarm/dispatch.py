@@ -140,18 +140,20 @@ def since(e):
 
 
 def reconcile(m, lane):
-    """What the operator does about an `unknown` dispatch: look, then decide."""
-    return ["look at the lane: `pai logs %s --tail 40` (or `pai attach %s`)" % (lane, lane),
-            "the agent is working on the task: `pai resume --lane %s --mark-delivered`" % lane,
+    """What the operator does about an `unknown` dispatch: look, then decide. The commands name
+    this run, so they work wherever more than one run is active."""
+    r = " --run %s" % m.run_id
+    return ["look at the lane: `pai logs %s%s --tail 40` (or `pai attach %s%s`)" % (lane, r, lane, r),
+            "the agent is working on the task: `pai resume%s --lane %s --mark-delivered`" % (r, lane),
             "the line still sits in the input box: press Enter there yourself (the next `pai status` sees the "
-            "prompt), or clear it and run `pai resume --lane %s --redispatch`" % lane,
-            "nothing arrived (input box empty, agent idle): `pai resume --lane %s --redispatch`" % lane]
+            "prompt), or clear it and run `pai resume%s --lane %s --redispatch`" % (r, lane),
+            "nothing arrived (input box empty, agent idle): `pai resume%s --lane %s --redispatch`" % (r, lane)]
 
 
 def _unknown(m, w, detail):
     return {"state": "unknown", "reconcile": reconcile(m, w.lane), "cause": detail,
-            "detail": "%s. Nothing resends it: look first (`pai logs %s`), then `pai resume --lane %s --mark-delivered` "
-                      "or `--redispatch`" % (detail, w.lane, w.lane)}
+            "detail": "%s. Nothing resends it: look first (`pai logs %s --run %s`), then `pai resume --run %s --lane %s "
+                      "--mark-delivered` or `--redispatch`" % (detail, w.lane, m.run_id, m.run_id, w.lane)}
 
 
 def _delivered(rl, e, evidence, upgrade=False):

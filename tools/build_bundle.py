@@ -18,8 +18,8 @@ format, also checked by `pai doctor`).
 Rules:
 - Only files named in release/allowlist.txt are packaged. Each must be a
   regular, non-symlink file inside the root.
-- The allowlist must cover every runtime module (pai/**/*.py) and template
-  (pai/templates/*).
+- The allowlist must cover every runtime module (pai/**/*.py, swarm/*.py) and
+  template (pai/templates/*).
 - Entries naming local configuration, evidence, handoffs, caches, VCS data or
   secrets are refused, even if listed.
 - Bundled text is scanned for absolute developer paths, and the build refuses
@@ -114,6 +114,10 @@ def check_entries(root, entries):
             rel = os.path.relpath(os.path.join(dirpath, f), root).replace(os.sep, "/")
             if rel.endswith(".py") or rel.startswith("pai/templates/"):
                 runtime.add(rel)
+    # the workbench's own modules (swarm/*.py; not its tests, examples or the Markdown server)
+    swarm = os.path.join(root, "swarm")
+    if os.path.isdir(swarm):
+        runtime |= {"swarm/" + f for f in os.listdir(swarm) if f.endswith(".py") and os.path.isfile(os.path.join(swarm, f))}
     missing = sorted(runtime - set(entries))
     if missing:
         raise BuildError(f"runtime files not in the allowlist (add them or remove them): {', '.join(missing)}")
@@ -211,9 +215,12 @@ def build(root, out, epoch):
         "schema": "pai_bundle_manifest_v1", "name": NAME, "version": version,
         "license": "MIT", "python_requires": ">=3.11", "runtime_dependencies": [],
         "entry_points": {"posix_launcher": "bin/pai", "windows_launcher": "bin/pai.cmd",
-                         "script": "bin/pai.py (python3 bin/pai.py, or py -3 bin\\pai.py on Windows)"},
+                         "script": "bin/pai.py (python3 bin/pai.py, or py -3 bin\\pai.py on Windows)",
+                         "install": "bin/pai install (user-local; --prefix, --bin-dir)"},
+        "workbench": "swarm/: pai doctor, init, task, run, status, ... (Linux, macOS, WSL; needs git and tmux)",
         "archives": {"tar.gz": "Linux and macOS", "zip": "Windows"},
-        "external_prerequisites": ["agent CLIs and their logins (e.g. Claude Code)", "a Markdown vault",
+        "external_prerequisites": ["agent CLIs and their logins (e.g. Claude Code, Codex)", "git and tmux for the workbench",
+                                   "a Markdown vault",
                                    "file synchronization such as Syncthing", "the project repositories"],
         "not_included": ["local configuration (pai.local.toml)", "vault contents", "handoffs", "trial evidence",
                          "credentials", "caches", "version-control data", "generated context"],

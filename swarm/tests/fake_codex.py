@@ -31,6 +31,9 @@ import time
 import uuid
 
 args = sys.argv[1:]
+if args[:1] == ["--version"]:  # like the real CLI: answer and exit, never start a session
+    print("codex-cli 0.167.0 [fake]")
+    sys.exit(0)
 if args[:1] == ["--help"]:
     print("Codex CLI\n\nUsage: codex [OPTIONS] [PROMPT]\n  -m, --model <MODEL>")
     sys.exit(0)

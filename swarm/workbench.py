@@ -265,6 +265,8 @@ def cmd_init(a):
     log("repository  %s" % repo)
     if old:
         log("existing    %s (kept unless you change a value)" % path)
+    if tty:
+        log("Press Enter to keep the value in [brackets]. Nothing is saved until you confirm at the end.")
     table = agent_table()
     choice = a.default_agent
     if choice is None and tty:
@@ -272,8 +274,10 @@ def cmd_init(a):
         for i, (n, p_, rcinfo) in enumerate(table, 1):
             log("  %d) %-7s %-40s %s" % (i, n, ("installed: %s" % p_) if p_ else "not installed", rcinfo))
         log("  %d) not set yet (choose per run with --agent)" % (len(table) + 1))
+        installed = [n for n, p_, _ in table if p_]
+        suggest = cur.get("default_agent") or (installed[0] if len(installed) == 1 else "not set yet")
         while choice is None:
-            ans = ask("Default agent", cur.get("default_agent") or "not set yet").lower()
+            ans = ask("Default agent", suggest).lower()
             if ans.isdigit() and 1 <= int(ans) <= len(table) + 1:
                 ans = table[int(ans) - 1][0] if int(ans) <= len(table) else "none"
             if ans in ("none", "not set yet", "not set"):
@@ -318,13 +322,16 @@ def cmd_init(a):
     if not base:
         raise Stop("pai init: the base branch of %s is not recorded locally. Pass --base BRANCH." % remote, 2)
     url = gitprep.out(repo, "config", "--get", "remote.%s.url" % remote) or ""
-    tasks = a.tasks if a.tasks is not None else cur.get("tasks")
+    managed = os.path.join(data_home(), "tasks", name)  # pai's own folder, created on save
+    tasks = a.tasks if a.tasks is not None else cur.get("tasks") or (None if old else managed)
     if tty:
-        tasks = ask("Task notes folder (Obsidian; blank for none)", tasks or "") or None
+        tasks = ask("Task notes folder (an Obsidian folder, or Enter for pai's own; '-' for none)", tasks or "-")
+    tasks = None if (tasks or "-").strip() == "-" else tasks
     if tasks:
         tasks = os.path.realpath(os.path.expanduser(tasks))
-        if not os.path.isdir(tasks):
-            raise Stop("pai init: task notes folder %s does not exist" % tasks, 2)
+        if not os.path.isdir(tasks) and tasks != os.path.realpath(managed):
+            raise Stop("pai init: task notes folder %s does not exist (create it, or press Enter for pai's own "
+                       "folder)" % tasks, 2)
     checks = dict((cur.get("review") or {}).get("checks") or {})
     if a.check:
         checks = dict(parse_check(c) for c in a.check)
@@ -365,17 +372,37 @@ def cmd_init(a):
     log("\nproject     %s" % name)
     for line in summary_lines(data):
         log("  " + line)
-    if tty and ask("Save to %s? [y/N]" % path, "n").lower() not in ("y", "yes"):
+    if tty and ask("Save to %s? %s" % (path, "[y/N]" if old else "[Y/n]"), "n" if old else "y").lower() not in ("y", "yes"):
         log("Nothing was saved.")
         return 1
+    if tasks and not os.path.isdir(tasks):
+        os.makedirs(tasks, exist_ok=True)
+        log("created     %s (task notes)" % tasks)
     try:
         wbconfig.write(path, text)
     except wbconfig.ConfigError as e:
         raise Stop("pai init: not saved: %s" % e, 2)
     log("saved       %s" % path)
     jev_setup(a, tty)
-    log("\nNext: pai doctor, then pai run --dry-run (pai config edit changes any default)")
+    log("\n" + "\n".join(next_steps(name, data)))
     return 0
+
+
+def next_steps(name, data):
+    """What to run after `pai init`, for the setup just saved."""
+    cfg = wbconfig.flat(data)
+    agent, tasks = cfg.get("default_agent"), cfg.get("tasks")
+    lines = ["Next:", "  pai doctor"]
+    if not tasks:
+        lines.append("  (no task notes folder: give each agent its task yourself, or: pai init --update --tasks DIR)")
+    else:
+        todo = [t for t in notes.load_tasks(tasks) if t.status == "todo"] if os.path.isdir(tasks) else []
+        if not todo:
+            lines.append('  pai task new "What the agent should do" --body "How to check it" --write')
+    lines.append("  pai run --dry-run%s" % ("" if agent else " --agent claude   (no default agent: name one per run)"))
+    lines.append("  pai run%s" % ("" if agent else " --agent claude"))
+    lines.append("(pai config edit changes any default; project %s)" % name)
+    return lines
 
 
 def set_checks(text, checks):
@@ -775,6 +802,7 @@ def cmd_run(a):
         plans = [gitprep.plan(s, probe=False) for s in specs]
         problems += rc.preflight(m, rc.Tmux(m.socket), True) if specs else []
         rc.show_plan(m, specs, plans, problems, rc.Tmux(m.socket))
+        queue_hint(m)
         blocked = bool(problems) or any(pl.blocked for pl in plans)
         log("\nDRY RUN: nothing was fetched, created, written or started; the base commit is resolved when the run "
             "starts.%s" % (" Blocked: fix the REFUSED lines first." if blocked else ""))
@@ -819,6 +847,7 @@ def cmd_run(a):
     bad = rc.ssh_preflight(m)
     if bad:
         raise Stop("\n".join(("REFUSED   " + x) if not x.startswith(("    ", "Run ")) else x for x in bad), 1)
+    queue_hint(m)
     _write_json(path, d, exclusive=True)
     _write_json(os.path.join(os.path.dirname(path), "run.json"), {"run_id": run_id, "project": name, "repo": repo,
                                                                    "created": gitprep.now()})
@@ -828,6 +857,19 @@ def cmd_run(a):
     remember_worktrees(m)
     log("\nrun %s: `pai status`, `pai attach LANE`, `pai trust` (folder-trust prompts), `pai cleanup`." % run_id)
     return code
+
+
+def queue_hint(m):
+    """Say which lanes would start without a task note, and how to add one."""
+    idle = [w.lane for w in m.workers if not w.task]
+    if not idle:
+        return
+    if not m.tasks_dir:
+        log("\nNO TASK  lane(s) %s: this project has no task notes folder, so their agents start idle; give each "
+            "its task in its window, or set a folder: pai init --update --tasks DIR" % ", ".join(idle))
+    else:
+        log('\nNO TASK  lane(s) %s: no todo note left in %s, so their agents start idle. Add one first: '
+            'pai task new "TITLE" --body "..." --write' % (", ".join(idle), m.tasks_dir))
 
 
 def worktree_note(project, w):
@@ -856,6 +898,96 @@ def show_review(repo, info):
     log("\nREVIEW    %s is a new checkout of %s. Cloning ran none of its code, but an agent started there may read "
         "its instructions and run its hooks, plugins and project commands." % (repo, info["url"]))
     log("          Files to look at before any agent starts: %s" % (", ".join(found) or "none of the usual ones"))
+
+
+# ---------------------------------------------------------------- task notes
+
+def task_folder(proj):
+    tasks = settings(proj).get("tasks")
+    if not tasks:
+        raise Stop("pai task: project %s has no task notes folder yet. Set one (it must exist):\n"
+                   "  mkdir -p ~/pai-tasks/%s && pai init --update --tasks ~/pai-tasks/%s" % (
+                       proj["name"], proj["name"], proj["name"]), 2)
+    if not os.path.isdir(tasks):
+        raise Stop("pai task: the task notes folder %s does not exist. Create it (mkdir -p %s) or choose another: "
+                   "pai init --update --tasks DIR" % (tasks, shlex.quote(tasks)), 2)
+    return tasks
+
+
+def slug(text, limit=48):
+    s = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")[:limit].strip("-")
+    return s or "task"
+
+
+def card(title, body, priority, paths, source=None, source_name=None):
+    """(name, text) of a task note in the queue's format (notes.py): front matter with status
+    todo, then `# Title` and the body. An imported note keeps its own front matter and text."""
+    if source is not None:
+        meta, rest = notes.parse(source)
+        title = title or next((l[2:].strip() for l in rest.splitlines() if l.startswith("# ")), None) or \
+            re.sub(r"[-_]+", " ", os.path.splitext(os.path.basename(source_name or "task"))[0]).strip() or "task"
+        front = source[:len(source) - len(rest)]  # its own front matter block, verbatim ("" if none)
+        text = source if any(l.startswith("# ") for l in rest.splitlines()) else \
+            front + "# %s\n\n%s" % (title, rest.lstrip("\n"))
+        updates = {"status": meta.get("status") or "todo"}
+    else:
+        if not (title or "").strip():
+            raise Stop('pai task new: give a title, for example: pai task new "Add a --json flag to export"', 2)
+        text = "# %s\n\n%s" % (title.strip(), (body.strip() + "\n") if body else "")
+        updates = {"status": "todo"}
+    if priority is not None:
+        updates["priority"] = priority
+    elif source is None:
+        updates["priority"] = 1
+    if paths:
+        updates["paths"] = paths
+    return slug(title), notes.set_meta(text, updates)
+
+
+def cmd_task(a):
+    proj = current_project(a)
+    folder = task_folder(proj)
+    if a.task_cmd == "list":
+        ts = notes.load_tasks(folder)
+        todo = sorted((t for t in ts if t.status == "todo"), key=lambda t: (-t.priority, t.name))
+        log("task notes in %s (%d; %d todo)" % (folder, len(ts), len(todo)))
+        for t in sorted(ts, key=lambda t: (t.status != "todo", -t.priority, t.name)):
+            log("  %-12s p%-3s %-30s %s" % (t.status, t.priority, t.name, t.title))
+        if not todo:
+            log('\nThe queue is empty: `pai run` takes notes with status todo. Add one: pai task new "TITLE" --write')
+        else:
+            log("\n`pai run` gives lanes the todo notes in this order. Next: pai run --dry-run")
+        return 0
+    source = None
+    if a.source:
+        try:
+            with open(os.path.expanduser(a.source), encoding="utf-8") as f:
+                source = f.read()
+        except (OSError, UnicodeDecodeError) as e:
+            raise Stop("pai task new --from %s: %s" % (a.source, e), 2)
+    name, text = card(a.title, a.body, a.priority, a.path, source, a.source)
+    name = a.name or name
+    if not NAME_RE.fullmatch(name):
+        raise Stop("pai task new: name %r: use lower-case letters, digits and - (or pass --name)" % name, 2)
+    path = os.path.join(folder, name + ".md")
+    meta, _ = notes.parse(text)
+    if os.path.lexists(path):
+        raise Stop("pai task new: %s already exists; nothing was written. Edit it, or choose another --name." % path, 1)
+    log("%s %s\n" % ("writing" if a.write else "PREVIEW (nothing written):", path))
+    log(text.rstrip("\n"))
+    if str(meta.get("status")).lower() != "todo":
+        log("\nnote: its status is %s, so `pai run` will not take it until it is todo" % meta.get("status"))
+    if not a.write:
+        log("\nTo save it, run the same command with --write. Existing notes are never overwritten.")
+        return 0
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    except FileExistsError:
+        raise Stop("pai task new: %s appeared meanwhile; nothing was written" % path, 1)
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text if text.endswith("\n") else text + "\n")
+    log("\nsaved. Next: pai run --dry-run   (then pai run)")
+    return 0
 
 
 # ---------------------------------------------------------------- lane commands
@@ -1038,6 +1170,57 @@ def cmd_cleanup(a):
 
 # ---------------------------------------------------------------- doctor and setup
 
+def self_rows(proj):
+    """doctor rows about pai itself: this installation's files, whether a new terminal finds
+    `pai`, and whether this directory is a configured checkout."""
+    from pai import __version__, doctor as core_doctor, install as core_install
+    root = os.path.dirname(HERE)
+    me = os.path.join(root, "bin", "pai")
+    bundle = os.path.isfile(os.path.join(root, "SHA256SUMS"))
+    rows = []
+    if bundle:
+        rep = core_doctor.Report()
+        core_doctor.check_bundle(rep, root)
+        rows.append({"tool": "pai", "used_by": "-", "state": "missing" if rep.problems else "ok",
+                     "detail": " ".join(l.split(None, 1)[1] for l in rep.lines if l.strip() and not l.startswith(" ")),
+                     "fix": "extract a verified archive again, then run its bin/pai install" if rep.problems else None})
+    else:
+        rows.append({"tool": "pai", "used_by": "-", "state": "info", "fix": None,
+                     "detail": "pai %s from a checkout (%s), not an installed bundle" % (__version__, root)})
+    found = shutil.which("pai")
+    prefix, bin_dir = core_install.defaults()
+    receipt = _read_json(os.path.join(prefix, "receipt.json")) or {}
+    bin_dir = receipt.get("bin_dir") or bin_dir
+    launcher = os.path.join(bin_dir, "pai.cmd" if os.name == "nt" else "pai")
+    if found and os.path.realpath(found) == os.path.realpath(me):
+        rows.append({"tool": "pai on PATH", "used_by": "-", "state": "ok", "fix": None,
+                     "detail": "%s runs this pai %s" % (found, __version__)})
+    elif found:
+        rows.append({"tool": "pai on PATH", "used_by": "-", "state": "info",
+                     "detail": "a new terminal runs %s, not this pai (%s)" % (os.path.realpath(found), me),
+                     "fix": ("%s install   # to make this one the default" % me) if bundle else None})
+    elif os.path.lexists(launcher):
+        rows.append({"tool": "pai on PATH", "used_by": "-", "state": "missing",
+                     "detail": "%s exists, but %s is not on PATH: a new terminal says `pai: command not found`"
+                               % (launcher, bin_dir), "fix": core_install.path_fix(bin_dir)[0]})
+    else:
+        rows.append({"tool": "pai on PATH", "used_by": "-", "state": "missing" if bundle else "info",
+                     "detail": "no `pai` on PATH; this one is %s" % me,
+                     "fix": "%s install" % me if bundle else "ln -s %s ~/.local/bin/pai" % me})
+    repo = enclosing_repo(os.getcwd())
+    if proj:
+        rows.append({"tool": "project", "used_by": "init, run", "state": "ok", "fix": None,
+                     "detail": "%s: %s" % (proj["name"], proj["repo"])})
+    elif repo:
+        rows.append({"tool": "project", "used_by": "init, run", "state": "info", "fix": "pai init",
+                     "detail": "%s is a Git checkout without pai defaults yet" % repo})
+    else:
+        rows.append({"tool": "project", "used_by": "init, run", "state": "info",
+                     "fix": "cd /path/to/your/checkout && pai init",
+                     "detail": "%s is not inside a Git checkout" % os.getcwd()})
+    return rows
+
+
 def cmd_doctor(a):
     import doctor
     proj = None
@@ -1046,7 +1229,7 @@ def cmd_doctor(a):
     except Stop:
         pass
     names = a.agent or ([proj["default_agent"]] if proj and proj.get("default_agent") else list(agents.names()))
-    rows = doctor.check(tuple(names))
+    rows = self_rows(proj) + doctor.check(tuple(names))
     if proj:
         res = gitprep.remote_auth(proj["repo"], proj["remote"], "refs/heads/" + proj["base_branch"])
         rows.append({"tool": "remote access", "used_by": "run, next", "state": "ok" if res["ok"] else "unknown",
@@ -1115,7 +1298,14 @@ def md_plan(a):
             "suffixes": [".md"]}, problems
 
 
+def md_missing():
+    if not os.path.isfile(os.path.join(MD_DIR, "server.py")):
+        raise Stop("pai: the experimental Markdown server is not part of this installation (it ships only in a "
+                   "checkout of personal-ai-workbench, swarm/mdserver/). Nothing was changed.", 2)
+
+
 def server_setup(a):
+    md_missing()
     cfg, problems = md_plan(a)
     log("EXPERIMENTAL  PAI Markdown server: a remote Nano with a Markdown preview (file picker, plain-text editor,")
     log("              rendered preview, explicit save confirmation). No dashboards, chat, agents, shell, Git or PRs.")
@@ -1180,6 +1370,7 @@ def md_healthy(cfg):
 
 
 def cmd_server(a):
+    md_missing()
     cfg = md_config()
     if not cfg:
         log("The experimental Markdown server is not installed (`pai setup --experimental server --dry-run` shows what "
@@ -1421,6 +1612,18 @@ def parser():
     r.add_argument("--jev-triage", action="store_true", help="optional: ask JEV whether each assigned note is ready "
                    "(one request per note; advisory, never blocks)")
     r.add_argument("--wait", type=float, help="seconds to wait for lanes to start and take their task (config run.wait)")
+    tk = p("task", "task notes: list the queue, or create one note (preview unless --write)", run=False)
+    tks = tk.add_subparsers(dest="task_cmd", required=True)
+    tn = tks.add_parser("new", help="preview a task note in the project's task folder; --write saves it (never overwrites)")
+    tn.add_argument("title", nargs="?", help="the task, in a short sentence (the note's # heading)")
+    tn.add_argument("--body", help="what to do and how to check it (the agent reads the whole note)")
+    tn.add_argument("--from", dest="source", metavar="FILE", help="import one Markdown file as the note (its front "
+                    "matter and text are kept; status todo is added when it has none)")
+    tn.add_argument("--priority", type=int, help="higher runs first (default 1)")
+    tn.add_argument("--path", action="append", metavar="PATH", help="limit the agent to this repository path (repeatable)")
+    tn.add_argument("--name", help="file name without .md (default: from the title)")
+    tn.add_argument("--write", action="store_true", help="save it (refuses an existing note)")
+    tks.add_parser("list", help="the notes in the task folder, in the order `pai run` takes them")
     st = p("status", "per lane: process, task dispatch, Remote Control evidence")
     st.add_argument("--json", action="store_true")
     at = p("attach", "open a lane's tmux window", lane=True)
@@ -1467,7 +1670,8 @@ def parser():
 
 COMMANDS = {"init": cmd_init, "doctor": cmd_doctor, "setup": cmd_setup, "run": cmd_run, "status": cmd_status,
             "attach": cmd_attach, "logs": cmd_logs, "trust": cmd_trust, "resume": cmd_resume, "pr": cmd_pr,
-            "next": cmd_next, "cleanup": cmd_cleanup, "config": None, "jev": cmd_jev, "server": cmd_server}
+            "next": cmd_next, "cleanup": cmd_cleanup, "config": None, "jev": cmd_jev, "server": cmd_server,
+            "task": cmd_task}
 
 
 def main(argv=None):

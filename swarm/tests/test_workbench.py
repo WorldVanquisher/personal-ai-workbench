@@ -161,11 +161,11 @@ class Init(WB):
         t.send(ENTER)
         t.expect("Base branch [main]: ")
         t.send(ENTER)
-        t.expect("Task notes folder (Obsidian; blank for none): ")
+        t.expect("Task notes folder (an Obsidian folder, or Enter for pai's own; '-' for none) [")
         t.send(self.tasks.encode() + ENTER)
         t.expect("'-' for none) [-]: ")
         t.send(b"verify=true" + ENTER)
-        t.expect("[y/N] [n]: ")
+        t.expect("[Y/n] [y]: ")  # a new file: Enter saves it
         t.send(b"y" + ENTER)
         self.assertEqual(t.wait(), 0, t.text)
         path = self.project_file = t.text.split("saved       ")[1].split()[0]

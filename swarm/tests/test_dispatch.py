@@ -103,6 +103,7 @@ class AfterTrust(Base):
         d = rows["a"]["dispatch"]
         self.assertEqual(d["state"], "delivered", d)
         self.assertIn("transcript", d.get("evidence", ""), "delivered rests on Claude's own transcript, not the tag")
+        rows, _ = self.wait_rows(lambda r: r["a"]["input"]["ready"])  # Claude is busy for a moment after the prompt
         self.assertEqual(rows["a"]["input"]["ready"], True)
         self.assertIn("idle", rows["a"]["input"]["evidence"])
         self.assertEqual(rows["a"]["trust"]["state"], "not-shown")
