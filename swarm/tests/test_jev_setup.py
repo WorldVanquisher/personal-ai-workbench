@@ -70,9 +70,10 @@ class JevSetup(WB):
         t = Terminal(self, ["init", "--worktree-root", self.root], self.env, cli=PAI, cwd=self.repo)
         t.expect("Default agent [not set yet]: ")
         t.send(b"3" + ENTER)
-        for prompt in ("Remote [origin]: ", "Base branch [main]: ", "(Obsidian; blank for none): ", "[-]: ", "[y/N] [n]: "):
+        for prompt, answer in (("Remote [origin]: ", b""), ("Base branch [main]: ", b""),
+                               ("'-' for none) [", b"-"), ("[-]: ", b""), (".toml? [", b"y")):  # [Y/n] new, [y/N] update
             t.expect(prompt)
-            t.send((b"y" if prompt.startswith("[y/N]") else b"") + ENTER)
+            t.send(answer + ENTER)
         t.expect("Enter JEV API key (optional): ")
         t.send(key_bytes + ENTER)
         if key_bytes and send is not None:

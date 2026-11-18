@@ -4,16 +4,33 @@ be observed about it. rc.py owns worktrees, locks, tmux, records and dispatch; a
   - names its launch modes and says which of them run Remote Control,
   - builds the argv for a mode (an argv list: nothing here is ever a shell line),
   - validates a model name and, where it can do so reliably, the installed program,
-  - recognises its own process, its first-use folder-trust prompt and its ready input box.
+  - recognises its own process, its first-use folder-trust prompt and its ready input box,
+  - finds evidence that a prompt was submitted, in the agent's own transcript on disk.
 
 The screen texts below were read from the installed programs (Claude Code 2.1.323 and Codex
 0.167.0 on the development host). They are matched as plain substrings of the visible pane,
 never answered: confirming folder trust is always left to the operator.
+
+Files the agents write themselves, read here and never written (structure observed on the
+development host with Claude Code 2.1.326 and Codex 0.167.0; formats are undocumented):
+  Claude  <config>/sessions/<pid>.json   per process: pid, procStart, cwd, sessionId, status
+                                         (idle|busy|waiting|shell), waitingFor, statusUpdatedAt
+          <config>/projects/<dir>/<sessionId>.jsonl
+                                         transcript; a prompt is {"type": "user", "timestamp",
+                                         "message": {"role": "user", "content": str | [{"type":
+                                         "text", "text"}]}}; <dir> is the cwd, non-alphanumerics -> -
+  Codex   $CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl
+                                         lines {"timestamp", "type", "payload"}: session_meta
+                                         (payload.cwd), response_item message role user with
+                                         content [{"type": "input_text", "text"}]
 """
+import datetime
+import glob
 import json
 import os
 import re
 import subprocess
+import time
 
 MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/+\[\]-]{0,99}")
 NAME_RE = re.compile(r"[a-z][a-z0-9-]{0,23}")
@@ -22,6 +39,79 @@ NAME_RE = re.compile(r"[a-z][a-z0-9-]{0,23}")
 def flat(text):
     """Lower case, every run of whitespace one space: box drawing and wrapping do not matter."""
     return " ".join((text or "").lower().split())
+
+
+class Probe:
+    """What an adapter may look at for one lane: its worktree, its agent process, Claude's
+    session record for exactly that process (already checked against pid, start time and
+    cwd, else None) and the agents' own data directories."""
+
+    def __init__(self, worktree, pid=None, record=None, claude_dir=None, codex_home=None):
+        self.worktree, self.pid, self.record = worktree, pid, record
+        self.claude_dir, self.codex_home = claude_dir, codex_home
+
+
+TAIL_BYTES = 4 << 20   # newest part of a transcript that is searched for a prompt
+MAX_FILES = 64         # transcripts looked at per check
+SKEW = 2.0             # seconds: an agent's timestamp may round below pai's own clock reading
+
+
+def epoch(stamp):
+    """Seconds since the epoch for an ISO 8601 time ("...Z" or with an offset), or None."""
+    if not isinstance(stamp, str) or not stamp:
+        return None
+    s = stamp.strip().replace("Z", "+00:00")
+    m = re.fullmatch(r"(.*T\d\d:\d\d:\d\d)(\.\d+)?(.*)", s)
+    if m and m.group(2):  # Python 3.9's fromisoformat takes 3 or 6 fraction digits only
+        s = m.group(1) + (m.group(2) + "000000")[:7] + m.group(3)
+    try:
+        t = datetime.datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=datetime.timezone.utc)
+    return t.timestamp()
+
+
+def jsonl(path, tail=TAIL_BYTES):
+    """The JSON objects of a JSONL file's newest `tail` bytes (a cut first line is dropped)."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - tail))
+            data = f.read()
+    except OSError:
+        return []
+    if size > tail:
+        data = data.split(b"\n", 1)[1] if b"\n" in data else b""
+    res = []
+    for line in data.decode("utf-8", "replace").splitlines():
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(d, dict):
+            res.append(d)
+    return res
+
+
+def recent(paths, since, limit=MAX_FILES):
+    """Existing files modified at or after `since` (less a little), newest first."""
+    seen, res = set(), []
+    for p in paths:
+        try:
+            mt = os.path.getmtime(p)
+        except OSError:
+            continue
+        if p not in seen and mt >= since - 5:
+            seen.add(p)
+            res.append((mt, p))
+    return [p for _, p in sorted(res, reverse=True)[:limit]]
+
+
+def same_dir(a, b):
+    return bool(a) and bool(b) and os.path.realpath(a) == os.path.realpath(b)
 
 
 class Adapter:
@@ -71,6 +161,31 @@ class Adapter:
         t = flat(pane_text)
         return bool(t) and not self.waiting_for_trust(pane_text) and any(m in t for m in self.ready_markers)
 
+    def input_state(self, screen, probe=None):
+        """(ready, evidence): may a line be typed into the agent's input box now? Never while
+        its folder-trust prompt is on screen."""
+        if self.waiting_for_trust(screen):
+            return False, "its folder-trust prompt is on screen"
+        t = flat(screen)
+        if not t:
+            return False, "the pane shows nothing yet"
+        mark = next((m for m in self.ready_markers if m in t), None)
+        if mark:
+            return True, 'the screen shows its idle input box ("%s")' % mark
+        return False, "the screen shows no idle input box (%s)" % " / ".join('"%s"' % m for m in self.ready_markers)
+
+    def enter_blocked(self, screen, probe=None):
+        """Why Enter must not be pressed now, after a paste, or None. The input box holds the
+        pasted line, so the idle markers may be gone; only signs of a prompt that Enter could
+        answer count."""
+        return "a folder-trust prompt appeared" if self.waiting_for_trust(screen) else None
+
+    def submitted(self, probe, tag, since):
+        """Evidence (one sentence) that a prompt containing `tag` was submitted to the agent at
+        or after `since` (seconds since the epoch), from the agent's own transcript; or None.
+        A tag that is only visible on screen proves nothing: it may still be in the input box."""
+        return None
+
     def rc_unsupported(self, mode):
         return self.no_rc_reason if not self.rc_modes else \
             "%s runs in %s mode; Remote Control was not requested for this lane" % (self.name, mode)
@@ -116,6 +231,55 @@ class Claude(Adapter):
                 % (exe, "exit %s" % code if code else "not in its --help"))
         return cache[key]
 
+    def input_state(self, screen, probe=None):
+        """Claude's own session record for exactly this process, when it carries a status, wins
+        over screen text: `idle` (no dialog waiting) is ready even when the footer shows something
+        other than "? for shortcuts" (it shows that hint only while it has nothing else to show);
+        busy, waiting or shell is not ready even if the hint is on screen."""
+        if self.waiting_for_trust(screen):
+            return False, "its folder-trust prompt is on screen"
+        rec = probe.record if probe else None
+        status = (rec or {}).get("status")
+        if isinstance(status, str):
+            if status == "idle" and not rec.get("waitingFor"):
+                return True, "Claude's session record for this process says idle (no dialog waiting)"
+            return False, "Claude's session record for this process says %s%s" % (
+                status, " (waiting for %s)" % rec["waitingFor"] if rec.get("waitingFor") else "")
+        return super().input_state(screen, probe)
+
+    def enter_blocked(self, screen, probe=None):
+        """Also: Claude's own record no longer says idle (a dialog opened, or it is busy)."""
+        rec = probe.record if probe else None
+        if isinstance((rec or {}).get("status"), str) and (rec["status"] != "idle" or rec.get("waitingFor")):
+            return "Claude's session record now says %s%s" % (
+                rec["status"], " (waiting for %s)" % rec["waitingFor"] if rec.get("waitingFor") else "")
+        return super().enter_blocked(screen, probe)
+
+    def submitted(self, probe, tag, since):
+        if not probe or not probe.claude_dir:
+            return None
+        projects = os.path.join(probe.claude_dir, "projects")
+        sid = (probe.record or {}).get("sessionId")
+        paths = glob.glob(os.path.join(glob.escape(projects), "*", glob.escape(sid) + ".jsonl")) if isinstance(sid, str) and sid else []
+        # after the process ended (no record) or before it recorded its session id
+        slug = "".join(c if c.isascii() and c.isalnum() else "-" for c in os.path.realpath(probe.worktree))
+        paths += glob.glob(os.path.join(glob.escape(projects), glob.escape(slug), "*.jsonl"))
+        for path in recent(paths, since):
+            for d in reversed(jsonl(path)):
+                msg = d.get("message") if isinstance(d.get("message"), dict) else {}
+                if d.get("type") != "user" or msg.get("role") != "user":
+                    continue
+                if d.get("cwd") and not same_dir(d["cwd"], probe.worktree):
+                    continue
+                content = msg.get("content")
+                texts = [content] if isinstance(content, str) else [
+                    x.get("text") for x in content if isinstance(x, dict) and x.get("type") == "text"
+                    and isinstance(x.get("text"), str)] if isinstance(content, list) else []
+                ts = epoch(d.get("timestamp"))
+                if ts is not None and ts >= since - SKEW and any(tag in t for t in texts):
+                    return "Claude's own transcript for this worktree records the prompt (user message at %s)" % d["timestamp"]
+        return None
+
     def login(self, exe):
         code, out, err = _run([exe, "auth", "status"])
         try:
@@ -145,6 +309,42 @@ class Codex(Adapter):
     def argv(self, program, mode, name, model, effort=None):
         return list(program) + (["--model", model] if model else []) + (
             ["-c", 'model_reasoning_effort="%s"' % effort] if effort else [])
+
+    def submitted(self, probe, tag, since):
+        if not probe or not probe.codex_home:
+            return None
+        root = os.path.join(probe.codex_home, "sessions")
+        days, t = [], max(since, time.time() - 7 * 86400)
+        while t <= time.time() + 86400:  # UTC and local dates around the attempt, at most a week back
+            for tm in (time.gmtime(t), time.localtime(t)):
+                days.append(os.path.join(root, time.strftime("%Y", tm), time.strftime("%m", tm), time.strftime("%d", tm)))
+            t += 43200
+        paths = [p for d in dict.fromkeys(days) for p in glob.glob(os.path.join(glob.escape(d), "rollout-*.jsonl"))]
+        for path in recent(paths, since):
+            meta = self._head(path)
+            if not meta or not same_dir((meta.get("payload") or {}).get("cwd"), probe.worktree):
+                continue
+            for d in reversed(jsonl(path)):
+                p = d.get("payload") if isinstance(d.get("payload"), dict) else {}
+                if d.get("type") != "response_item" or p.get("type") != "message" or p.get("role") != "user":
+                    continue
+                texts = [x.get("text") for x in p.get("content") or [] if isinstance(x, dict)
+                         and x.get("type") == "input_text" and isinstance(x.get("text"), str)]
+                ts = epoch(d.get("timestamp"))
+                if ts is not None and ts >= since - SKEW and any(tag in t for t in texts):
+                    return "Codex's own rollout file for this worktree records the prompt (user message at %s)" % d["timestamp"]
+        return None
+
+    @staticmethod
+    def _head(path):
+        """The rollout's first line, its session_meta (it carries the base instructions, so it
+        may be long; a longer line than this bound is not read and the file is skipped)."""
+        try:
+            with open(path, "rb") as f:
+                d = json.loads(f.readline(8 << 20).decode("utf-8", "replace"))
+        except (OSError, ValueError):
+            return None
+        return d if isinstance(d, dict) and d.get("type") == "session_meta" else None
 
     def login(self, exe):
         code, out, err = _run([exe, "login", "status"])

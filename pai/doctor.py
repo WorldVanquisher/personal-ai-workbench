@@ -3,7 +3,7 @@
 Checks:
 - the Python version;
 - bundle integrity (SHA256SUMS and MANIFEST.json, when this is a release
-  bundle);
+  bundle; the package RECORD, when this is an installed package);
 - the configuration file, and each project's registered roots and sources;
 - with --agents, which agent executables are on PATH.
 
@@ -61,7 +61,47 @@ def check_python(r):
         r.problem(f"Python {v.major}.{v.minor} is too old", "install Python 3.11 or newer")
 
 
+def check_package(r, pkg=os.path.dirname(os.path.abspath(__file__))):
+    """An installed package (uv tool install, pip): every file its RECORD lists with a hash still
+    matches it. RECORD is written by the installer; it proves the files are unchanged since then."""
+    import base64
+    from importlib import metadata
+
+    from pai import install
+    try:
+        dist = metadata.distribution(install.DIST)
+    except metadata.PackageNotFoundError:
+        r.warn(f"pai {__version__} runs from {pkg}, but no {install.DIST} package metadata is installed beside it, "
+               "so its files cannot be checked")
+        return
+    files = [f for f in (dist.files or []) if f.hash]
+    mine = os.path.realpath(os.path.join(pkg, "__init__.py"))
+    if not any(os.path.realpath(f.locate()) == mine for f in files):
+        r.warn(f"the {install.DIST} metadata found does not describe this pai ({pkg}), so its files cannot be checked")
+        return
+    bad = []
+    for f in files:
+        try:
+            with open(f.locate(), "rb") as fh:
+                digest = hashlib.new(f.hash.mode, fh.read()).digest()
+        except (OSError, ValueError):
+            bad.append(str(f))
+            continue
+        if base64.urlsafe_b64encode(digest).rstrip(b"=").decode() != f.hash.value:
+            bad.append(str(f))
+    fix = "reinstall it the way you installed it, for example: " + install.uv_command(force=True)
+    if dist.version != __version__:
+        r.problem(f"package metadata says {install.DIST} {dist.version}, the code is {__version__}", fix)
+    if bad:
+        r.problem(f"installed files modified or missing: {', '.join(bad[:5])}{', ...' if len(bad) > 5 else ''}", fix)
+    if not bad and dist.version == __version__:
+        r.ok(f"package {install.DIST} {__version__} intact: {len(files)} files match its RECORD ({pkg})")
+
+
 def check_bundle(r, root=config.WORKBENCH):
+    if config.PACKAGED and root == config.WORKBENCH:
+        check_package(r)
+        return
     sums = os.path.join(root, "SHA256SUMS")
     manifest = os.path.join(root, "MANIFEST.json")
     if not os.path.exists(sums):

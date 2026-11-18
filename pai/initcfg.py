@@ -72,6 +72,8 @@ def prepare(key, a):
 
 def write(path, text):
     parent = os.path.dirname(os.path.abspath(path)) or "."
+    if not os.path.isdir(parent) and config.PACKAGED and os.path.abspath(path) == os.path.abspath(config.DEFAULT_CONFIG):
+        os.makedirs(parent, mode=0o700, exist_ok=True)  # an installed package's own default folder
     if not os.path.isdir(parent):
         raise config.ConfigError(f"directory for the configuration does not exist: {parent} (create it first)")
     if os.path.lexists(path):

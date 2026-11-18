@@ -1,10 +1,10 @@
-"""Command line: `python3 -m pai {init,doctor,check,context,handoff} …`."""
+"""Command line: `python3 -m pai {init,doctor,check,context,handoff,install} …`."""
 
 import argparse
 import os
 import sys
 
-from pai import __version__, config, context, doctor, handoff, initcfg
+from pai import __version__, config, context, doctor, handoff, initcfg, install
 
 INIT_EPILOG = """examples:
   preview (writes nothing):
@@ -21,9 +21,10 @@ pai init only looks at the paths you give it; it never overwrites an existing co
 def _parser():
     p = argparse.ArgumentParser(prog="pai", description="Project context and draft handoffs for agent sessions "
                                 "(standard library; no network, model or command execution).")
-    p.add_argument("--config", help="configuration file (default: $PAI_CONFIG, else pai.local.toml in the pai directory)")
+    p.add_argument("--config", help="configuration file (default: $PAI_CONFIG, else %s)" % (
+        config.DEFAULT_CONFIG.replace("%", "%%") if config.PACKAGED else "pai.local.toml in the pai directory"))
     p.add_argument("--version", action="version", version=f"pai {__version__}")
-    sub = p.add_subparsers(dest="cmd", required=True, metavar="{init,doctor,check,context,handoff}")
+    sub = p.add_subparsers(dest="cmd", required=True, metavar="{init,doctor,check,context,handoff,install}")
 
     i = sub.add_parser("init", help="create a local configuration from explicit paths (preview unless --write)",
                        epilog=INIT_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -46,6 +47,14 @@ def _parser():
     d.add_argument("project", nargs="?", help="check only this project")
     d.add_argument("--agents", action="store_true", help="also report agent executables on PATH (never launched)")
 
+    ins = sub.add_parser("install", help="copy this verified bundle to a user-local folder and put `pai` on PATH "
+                         "(no sudo; see `pai install --help`)", description=install.__doc__,
+                         formatter_class=argparse.RawDescriptionHelpFormatter)
+    ins.add_argument("--prefix", help="install folder (default: ~/.local/share/pai-workbench; Windows: "
+                     "%%LOCALAPPDATA%%\\pai-workbench)")
+    ins.add_argument("--bin-dir", help="folder for the `pai` launcher (default: ~/.local/bin, or PREFIX/bin with --prefix; "
+                     "Windows: PREFIX\\bin)")
+    ins.add_argument("--dry-run", action="store_true", help="show what would happen; write nothing")
     k = sub.add_parser("check", help="validate one project and list source status")
     k.add_argument("project")
 
@@ -103,6 +112,8 @@ def main(argv=None):
     try:
         if a.cmd == "init":
             return _init(a)
+        if a.cmd == "install":
+            return install.main(a)
         if a.cmd == "doctor":
             r = doctor.run(a.config, a.project, a.agents)
             print("\n".join(r.lines))

@@ -5,8 +5,10 @@ prints the context a coding agent needs for a task. At the end of the task it
 writes a draft handoff note into your notes folder.
 
 **Requirements:** Windows, macOS or Linux with **Python 3.11 or newer**. pai
-installs nothing: no runtime dependencies, no background service, no
-administrator or root rights, and it never downloads Python or changes PATH.
+has no runtime dependencies and no background service, needs no administrator
+or root rights, never downloads Python and never edits PATH or a shell profile
+(`pai install` prints the line to add instead). The workbench (`pai run` and
+friends, see README.md) also needs git and tmux: Linux, macOS or WSL.
 Check with `python3 --version` (Linux, macOS) or `py -3 --version` (Windows).
 
 **Not included (external prerequisites):** your coding agent (for example
@@ -14,6 +16,32 @@ Claude Code or Codex) and its login, your Markdown vault (for example
 Obsidian), file synchronization (for example Syncthing) and your project
 repositories. pai never installs, configures, launches or logs in to any of
 these.
+
+## With uv (one line)
+
+If you have [uv](https://docs.astral.sh/uv/) and git (Linux, macOS or WSL):
+
+```sh
+uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.3.0
+pai --version                                   # pai 0.3.0
+```
+
+uv builds the package from that tag and puts `pai` in its bin folder (usually
+`~/.local/bin`); if that folder is not on PATH it prints the `export PATH=…` line to run (or
+use `uv tool update-shell`), then open a new terminal. uv uses a Python 3.11+ it finds (by
+default it downloads one when there is none). The package holds the same code as the archives, workbench included. Its
+own configuration lives in `~/.config/pai/config.toml` (Windows: `%LOCALAPPDATA%\pai\config.toml`)
+unless `--config` or `PAI_CONFIG` says otherwise, and the workbench's in
+`~/.config/pai-workbench/`, so reinstalling never touches them. `pai doctor` checks the
+installed files against the package's RECORD.
+
+- Upgrade: the same command with the new version (`@v0.3.1`); `--force` reinstalls.
+- Remove: `uv tool uninstall pai-workbench`; configuration and task notes stay.
+- `pai install` is for the archives below; in a uv install it says to use uv instead.
+- Native Windows: the package installs `pai.exe` with the core only (CI installs it this way
+  on windows-latest); the workbench needs WSL, as below.
+
+Without uv, use the archives:
 
 In the examples, replace the placeholders: `<PROJECT>` is a short key such as
 `flh`; paths in capitals (`/ABS/PATH/TO/REPO`, `D:\PATH\TO\VAULT`) are absolute
@@ -25,11 +53,17 @@ no vault folders.
 ## Linux and macOS
 
 ```sh
-# 1. Download pai-workbench-0.2.0.tar.gz and its .sha256 into one folder; verify.
-sha256sum -c pai-workbench-0.2.0.tar.gz.sha256            # macOS: shasum -a 256 -c …
-# 2. Extract into a new folder (spaces and non-ASCII characters are fine).
-mkdir -p "$HOME/Apps" && tar -xzf pai-workbench-0.2.0.tar.gz -C "$HOME/Apps"
-PAI="$HOME/Apps/pai-workbench-0.2.0/bin/pai"
+# 1. Put pai-workbench-0.3.0.tar.gz and its .sha256 into one folder; verify.
+#    Download: https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.3.0
+#    (or build both from a checkout: `python3 -B tools/build_bundle.py --out dist`)
+sha256sum -c pai-workbench-0.3.0.tar.gz.sha256            # macOS: shasum -a 256 -c …
+# 2. Extract, then install: a verified copy in ~/.local/share/pai-workbench/versions/0.3.0
+#    and the launcher ~/.local/bin/pai (--prefix DIR puts both under DIR instead).
+tar -xzf pai-workbench-0.3.0.tar.gz
+pai-workbench-0.3.0/bin/pai install
+#    If it says ~/.local/bin is not on PATH, run the line it prints, e.g. for bash:
+#    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc     and open a new terminal.
+PAI=pai
 # 3. Choose where this device's configuration lives (outside the bundle; see below).
 mkdir -p "$HOME/.config/pai" && export PAI_CONFIG="$HOME/.config/pai/config.toml"
 # 4. Check Python and the bundle ("no configuration" is expected until step 6).
@@ -46,20 +80,29 @@ mkdir -p "$HOME/.config/pai" && export PAI_CONFIG="$HOME/.config/pai/config.toml
 "$PAI" handoff list <PROJECT>
 ```
 
-To shorten commands, add `alias pai="$HOME/Apps/pai-workbench-0.2.0/bin/pai"`
-and the `export PAI_CONFIG=…` line to your shell profile (`~/.bashrc`,
-`~/.zshrc`), or symlink `bin/pai` into a folder on your PATH such as
-`~/.local/bin`; the launcher follows the link to its bundle.
+Add the `export PAI_CONFIG=…` line to your shell profile (`~/.bashrc`,
+`~/.zshrc`) as well. Without `pai install`, any extracted bundle still works
+by its full path (`…/pai-workbench-0.3.0/bin/pai`), and a symlink to `bin/pai`
+works too: the launcher follows the link to its bundle.
 
 ## Windows (PowerShell)
 
+Native Windows runs the core (context and handoffs). The workbench needs tmux:
+for `pai run` and friends, install pai inside WSL with the Linux steps above.
+For 0.3.0 the CI checks that cover these steps pass on windows-latest (`tools/bundle_smoke.py`
+with `pai install --prefix`, and the launchers from cmd.exe and PowerShell); a person has not
+yet run them by hand on a Windows PC.
+
 ```powershell
-# 1. Download pai-workbench-0.2.0.zip and its .sha256 into one folder; verify.
-$want = (Get-Content .\pai-workbench-0.2.0.zip.sha256 -Raw).Split(" ")[0]
-if ((Get-FileHash -Algorithm SHA256 .\pai-workbench-0.2.0.zip).Hash -ne $want) { throw "checksum mismatch: do not use this file" }
-# 2. Extract into a new folder (spaces and non-ASCII characters are fine).
-Expand-Archive .\pai-workbench-0.2.0.zip -DestinationPath "$env:LOCALAPPDATA\Programs"
-$pai = "$env:LOCALAPPDATA\Programs\pai-workbench-0.2.0\bin\pai.cmd"
+# 1. Put pai-workbench-0.3.0.zip and its .sha256 into one folder; verify.
+$want = (Get-Content .\pai-workbench-0.3.0.zip.sha256 -Raw).Split(" ")[0]
+if ((Get-FileHash -Algorithm SHA256 .\pai-workbench-0.3.0.zip).Hash -ne $want) { throw "checksum mismatch: do not use this file" }
+# 2. Extract, then install: a verified copy in %LOCALAPPDATA%\pai-workbench\versions\0.3.0
+#    and the launcher %LOCALAPPDATA%\pai-workbench\bin\pai.cmd. If it says that folder is not
+#    on PATH, run the PowerShell line it prints and open a new terminal window.
+Expand-Archive .\pai-workbench-0.3.0.zip -DestinationPath .
+& .\pai-workbench-0.3.0\bin\pai.cmd install
+$pai = "$env:LOCALAPPDATA\pai-workbench\bin\pai.cmd"
 # 3. Choose where this device's configuration lives, for this and future sessions.
 New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\pai" | Out-Null
 $env:PAI_CONFIG = "$env:LOCALAPPDATA\pai\config.toml"
@@ -79,10 +122,10 @@ $env:PAI_CONFIG = "$env:LOCALAPPDATA\pai\config.toml"
 ```
 
 From **cmd.exe** the same launcher works:
-`"%LOCALAPPDATA%\Programs\pai-workbench-0.2.0\bin\pai.cmd" doctor`, with `^`
+`"%LOCALAPPDATA%\pai-workbench\bin\pai.cmd" doctor --agents`, with `^`
 for line continuation and `set PAI_CONFIG=…` (or `setx PAI_CONFIG …` for future
 sessions). For a short `pai` command in PowerShell, add
-`function pai { & "$env:LOCALAPPDATA\Programs\pai-workbench-0.2.0\bin\pai.cmd" @args }`
+`function pai { & "$env:LOCALAPPDATA\pai-workbench\bin\pai.cmd" @args }`
 to your `$PROFILE`.
 
 **Quoting on Windows.** `pai.cmd` is a batch file, so cmd.exe reads its
@@ -92,7 +135,7 @@ PowerShell adds quotes only around arguments that contain spaces, so
 `--task "a&b"` reaches cmd.exe unquoted and breaks. When text needs those
 characters, bypass cmd.exe with the script entry point, which receives
 arguments exactly:
-`py -3 "$env:LOCALAPPDATA\Programs\pai-workbench-0.2.0\bin\pai.py" context <PROJECT> --task "a&b 100%"`.
+`py -3 "$env:LOCALAPPDATA\pai-workbench\versions\0.3.0\bin\pai.py" context <PROJECT> --task "a&b 100%"`.
 
 **Output encoding.** pai writes UTF-8 when its output is piped or redirected
 on Windows. In Windows PowerShell 5.1, capturing that output into a variable
@@ -119,9 +162,11 @@ pai looks for its configuration in this order: `--config FILE`, then the
 folder. Keep it **outside** the bundle (step 3 above) so that upgrades never
 touch it; `doctor` warns when it lives inside a release bundle.
 
-**Upgrade:** verify and extract the new version into a **new** folder, point
-your alias, symlink or `$PROFILE` function at it, and run `doctor`: it must
-report the new version and an intact bundle. With `PAI_CONFIG` set there is
+**Upgrade:** verify and extract the new archive, then run its `bin/pai install`
+(Windows: `bin\pai.cmd install`). The new version is copied and checked before
+the launcher switches to it in one step, so a failure at any point leaves the
+previous version working; earlier versions stay in `versions/` until you delete
+them. Then run `doctor`: it must report the new version and an intact bundle. With `PAI_CONFIG` set there is
 nothing to copy; a 0.1.0 configuration works unchanged. If yours is still the
 `pai.local.toml` inside the old bundle, move it to the `PAI_CONFIG` location
 once. Delete the old folder when satisfied. Handoffs and notes live in your

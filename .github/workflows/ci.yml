@@ -2,7 +2,8 @@ name: CI
 
 # Synthetic tests and release-bundle smoke checks on Windows, macOS and Linux, plus
 # lightweight runs in Debian, Ubuntu, Fedora and Alpine userspaces.
-# Nothing is published: no release, tag, package upload or secret is used.
+# Nothing is published: no release, tag, package upload or secret is used. The uv check
+# installs uv from PyPI and builds the package with setuptools from PyPI.
 
 on:
   pull_request:
@@ -141,6 +142,42 @@ jobs:
           & "$env:PAI_BUNDLE\bin\pai.cmd" --version
           if ($LASTEXITCODE -ne 2) { exit 1 }
           exit 0
+
+      # The installable package (pyproject.toml): build a wheel from this checkout and install it
+      # the way `uv tool install git+https://...@vX.Y.Z` does, into temporary folders.
+      - name: Package installed with uv tool install
+        timeout-minutes: 6
+        run: |
+          python -m pip install --quiet "uv==0.13.9"
+          export UV_TOOL_DIR="$RUNNER_TEMP/uv tools" UV_TOOL_BIN_DIR="$RUNNER_TEMP/uv-bin" UV_PYTHON_DOWNLOADS=never
+          python -m uv build --wheel --out-dir "$RUNNER_TEMP/wheel" .
+          python -m uv tool install --python "$(python -c 'import sys; print(sys.executable)')" "$RUNNER_TEMP"/wheel/pai_workbench-*.whl
+          if [ "$RUNNER_OS" = "Windows" ]; then pai="$(cygpath -u "$UV_TOOL_BIN_DIR")/pai"; else pai="$UV_TOOL_BIN_DIR/pai"; fi
+          want="pai $(python -B -c 'import pai; print(pai.__version__)')"
+          test "$("$pai" --version)" = "$want"
+          set +e
+          "$pai" install 2> "$RUNNER_TEMP/install.txt"; rc=$?
+          "$pai" doctor --agents > "$RUNNER_TEMP/doctor.txt"
+          "$pai" > "$RUNNER_TEMP/bare.txt"; bare=$?
+          "$pai" run --help > "$RUNNER_TEMP/run.txt" 2>&1; run=$?
+          set -e
+          cat "$RUNNER_TEMP/install.txt" "$RUNNER_TEMP/doctor.txt" "$RUNNER_TEMP/bare.txt" "$RUNNER_TEMP/run.txt"
+          test "$rc" = 2
+          grep -q "installed Python package" "$RUNNER_TEMP/install.txt"
+          grep -q "package pai-workbench .* intact: .* match its RECORD" "$RUNNER_TEMP/doctor.txt"
+          test "$bare" = 0
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            # native Windows: PAI's own commands only; the workbench points to WSL
+            grep -q "WSL" "$RUNNER_TEMP/bare.txt"
+            test "$run" = 2
+            grep -q "WSL" "$RUNNER_TEMP/run.txt"
+          else
+            # the workbench modules load from inside the package (pai/_workbench)
+            grep -q "pai run --dry-run" "$RUNNER_TEMP/bare.txt"
+            grep -q "_workbench/WORKBENCH.md" "$RUNNER_TEMP/bare.txt"
+            test "$run" = 0
+            grep -q -- "--dry-run" "$RUNNER_TEMP/run.txt"
+          fi
 
       - name: Upload smoke report on failure
         if: ${{ failure() }}

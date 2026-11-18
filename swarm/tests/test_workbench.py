@@ -161,11 +161,11 @@ class Init(WB):
         t.send(ENTER)
         t.expect("Base branch [main]: ")
         t.send(ENTER)
-        t.expect("Task notes folder (Obsidian; blank for none): ")
+        t.expect("Task notes folder (an Obsidian folder, or Enter for pai's own; '-' for none) [")
         t.send(self.tasks.encode() + ENTER)
         t.expect("'-' for none) [-]: ")
         t.send(b"verify=true" + ENTER)
-        t.expect("[y/N] [n]: ")
+        t.expect("[Y/n] [y]: ")  # a new file: Enter saves it
         t.send(b"y" + ENTER)
         self.assertEqual(t.wait(), 0, t.text)
         path = self.project_file = t.text.split("saved       ")[1].split()[0]
@@ -287,12 +287,15 @@ class MixedBatch(WB):
         self.assertEqual(len(self.received("a")), 1)
         self.pai("resume", "--wait", "2")
         self.assertEqual(len(self.received("a")), 1)
-        # The process ends after a send: the next state is unknown again, never a resend.
+        # The process ends after a send: the next state is unknown again, never a resend. (No
+        # transcript shows the prompt either: with that evidence it would count as delivered.)
         with open(path) as f:
             d = json.load(f)
         d["entries"]["a/task-a"].update(state="sent")
+        d["entries"]["a/task-a"].pop("evidence", None)
         with open(path, "w") as f:
             json.dump(d, f)
+        shutil.rmtree(os.path.join(self.env["CODEX_HOME"], "sessions"), ignore_errors=True)
         self.tmux("kill-window", "-t", "=%s:a" % ("pai-" + run))
         self.pai("resume", "--wait", "3")  # restarts the worker: a new process, which never saw the task
         rows, _ = self.status()

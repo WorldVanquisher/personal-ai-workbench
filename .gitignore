@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 trial-evidence/
 dist/
+build/
+*.egg-info/
