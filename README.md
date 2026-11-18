@@ -2,6 +2,19 @@
 
 English | [简体中文](README.zh-CN.md)
 
+**Install in one line** (Linux, macOS or WSL; needs [uv](https://docs.astral.sh/uv/) and git):
+
+```sh
+uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.3.0
+```
+
+If uv warns that its bin folder is not on your PATH, run the `export PATH=…` line it prints
+(or `uv tool update-shell`) and open a new terminal. Then, inside your Git checkout:
+`pai doctor` → `pai init` → `pai task new "TITLE" --write` → `pai run --dry-run`.
+Upgrade: the same line with the new version. Remove: `uv tool uninstall pai-workbench`
+(your configuration and task notes stay). No uv? Use the archives on the
+[v0.3.0 release page](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.3.0), as in the Quick start below.
+
 PAI keeps an AI-assisted project's working memory in plain Markdown files, and runs coding
 agents against it under your control.
 
@@ -44,9 +57,9 @@ prompt for you to answer; the task follows. Upgrading is the same three lines wi
 archive: the previous version keeps working if anything fails, and your configuration and
 task notes are not touched.
 
-**Getting the archive.** 0.3.0 is not on the Releases page yet. Until it is, build the same
-archives (`.tar.gz`, `.zip`, each with its `.sha256`) from a checkout:
-`python3 -B tools/build_bundle.py --out dist`.
+**Getting the archive.** Download `pai-workbench-0.3.0.tar.gz` and its `.sha256` from the
+[v0.3.0 release page](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.3.0) (the `.zip` is the same files, for Windows). The same archives
+can be built from a checkout: `python3 -B tools/build_bundle.py --out dist`.
 
 From a remote repository, pai clones into a checkout it manages and starts no agent until
 you have reviewed it: `pai run --repo https://github.com/OWNER/REPO.git --workers 2 --agent
@@ -66,11 +79,13 @@ Windows steps for the core.
 
 ## Tested, not yet verified, and optional
 
-- **Tested:** the core on Windows, macOS and Linux in CI (see RELEASE_NOTES.md). The
-  workbench with fake agents, fake GitHub, fake SSH and an isolated tmux server.
+- **Tested:** the core, both archives, `pai install` and the uv-installed package on
+  Windows, macOS and Linux in CI (see RELEASE_NOTES.md). The workbench with fake agents, fake
+  GitHub, fake SSH and an isolated tmux server, on Linux: from the archive and from
+  `uv tool install` of the release tag in a clean container, up to a first delivered task.
 - **Not yet verified live by the developer:** the workbench against real Claude Code,
-  Codex, GitHub and SSH; `pai install` on macOS and native Windows (tested on Linux; the
-  cross-platform CI checks are configured but have not run). The owner-run checklists are
+  Codex, GitHub and SSH, and the workbench's run/dispatch path on macOS (CI there checks the
+  install, the core and that the workbench loads). The owner-run checklists are
   `swarm/SMOKE.md` and `swarm/LIVE-VALIDATION.md`.
 - **Optional:** JEV (TypeSafe) as an advisory signal for task triage and review; it never
   overrides a check. Tested against a mock endpoint; `pai jev check` sends the one real
@@ -81,7 +96,7 @@ Windows steps for the core.
 
 ## Documentation
 
-- [INSTALL.md](INSTALL.md): installing the core bundle; [REFERENCE.md](REFERENCE.md): its commands.
+- [INSTALL.md](INSTALL.md): installing with uv or from the archives, upgrades, Windows; [REFERENCE.md](REFERENCE.md): its commands.
 - `swarm/WORKBENCH.md` (in the archive and in a checkout): the workbench guide, including platform setup,
   configuration, folder trust, SSH, cleanup and JEV costs.
 - [SESSION_START.md](SESSION_START.md): the prompt for an agent session;

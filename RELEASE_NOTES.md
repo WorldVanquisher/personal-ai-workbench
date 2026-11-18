@@ -1,5 +1,62 @@
 # pai release notes
 
+## 0.3.0 (prerelease)
+
+The workbench (`pai run`, `status`, `task`, ...) now ships with the core, and pai installs in
+one line with uv or from the archives. Configuration files and core commands are unchanged
+from 0.2.0.
+
+### Install
+
+- **uv:** `uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.3.0`
+  (new `pyproject.toml`; console script `pai`; the workbench inside the package as
+  `pai/_workbench`). Upgrade with the same line and a newer tag; `uv tool uninstall
+  pai-workbench` removes it and leaves configuration and task notes.
+- **Archives:** `pai-workbench-0.3.0.tar.gz` / `.zip`, each with a `.sha256`. They now include
+  the workbench runtime (`swarm/*.py`, `swarm/WORKBENCH.md`; not its tests, examples or the
+  Markdown server). New `bin/pai install`: re-checks the extracted files against
+  `SHA256SUMS`, copies them to `~/.local/share/pai-workbench/versions/0.3.0` and switches the
+  `~/.local/bin/pai` launcher in one atomic step. It prints the PATH line instead of editing
+  shell profiles. A failed upgrade leaves the previous version working.
+
+### New
+
+- **First run:** bare `pai` and `pai --help` show doctor → init → task new → run --dry-run → run.
+  `pai init` explains that Enter keeps each default, suggests the only installed agent, offers
+  a managed task folder and ends with the next commands. `pai task new` previews a task note
+  (`--write` saves it, never overwriting; `--from FILE` imports one Markdown file).
+  `pai task list` shows the queue.
+- **`pai doctor`** also checks pai itself: the archive's `SHA256SUMS` or the package's RECORD,
+  whether `pai` is on PATH (with the exact fix), and whether this is a configured checkout.
+- **Native Windows** runs the core; workbench commands exit 2 and point to WSL.
+
+### Fixed
+
+- **Dispatch after folder trust** (PAI-008). Claude counts as ready when its own session record
+  says idle, so it no longer stays `pending` after trust. Every lane must stay ready, with no
+  trust prompt on screen, for 3 seconds before anything is typed, and Enter is never pressed
+  when a trust prompt appeared after the paste. `delivered` now requires the task in the
+  agent's own transcript (Claude session log, Codex rollout). Anything else is `unknown`, with
+  recovery steps, and is never resent automatically. `pai status` reports process, trust,
+  input, dispatch and Remote Control separately.
+- POSIX PATH advice used the host's path separator when computed on Windows.
+
+### Tested environments
+
+- **CI** ([run 44233348494](https://github.com/WorldVanquisher/personal-ai-workbench/actions/runs/44233348494),
+  commit `076bf57`; the release commit adds only documentation): all 10 jobs passed on Ubuntu,
+  macOS and Windows (Python 3.11 and 3.13) and in Debian, Ubuntu, Fedora and Alpine containers.
+  The jobs ran the unit tests, both archive builds (byte-identical rebuild), the bundle smoke
+  with `pai install`, and a wheel installed with `uv tool install` (version, doctor's RECORD
+  check, first screen, workbench loading; on Windows the WSL messages).
+- **Linux (Arch host, Python 3.14), fake agents and an isolated tmux server:** the core suite,
+  the workbench suite (153 tests, 17 of them new for dispatch) and the headless run tests
+  (23/23). The new-user acceptance (`tools/onboarding_acceptance.py`) ran from the built
+  archive and from `uv tool install` of the release tag in a clean Debian 13 container, up to a
+  first task delivered to a fake agent.
+- **Not tested:** real Claude Code, Codex, GitHub or SSH; the workbench's run and dispatch path
+  on macOS; `pai install` and the uv install run by hand on a Windows PC (CI only).
+
 ## 0.2.0
 
 Portable release for **Windows, macOS and Linux**, now under the **MIT

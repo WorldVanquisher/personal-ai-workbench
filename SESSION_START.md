@@ -3,8 +3,9 @@
 Replace `<PAI>` with the launcher path, `<PROJECT>` with your configured
 project key (e.g. `flh`), and `<TASK>` and `<TASK-ID>`:
 
-- Linux, macOS: `<PAI>` is `"/path/to/pai-workbench-0.2.0/bin/pai"`.
-- Windows PowerShell: `<PAI>` is `& "C:\path\to\pai-workbench-0.2.0\bin\pai.cmd"`
+- Installed with `uv tool install` or `pai install`: `<PAI>` is `pai`.
+- Linux, macOS: `<PAI>` is `"/path/to/pai-workbench-0.3.0/bin/pai"`.
+- Windows PowerShell: `<PAI>` is `& "C:\path\to\pai-workbench-0.3.0\bin\pai.cmd"`
   (cmd.exe: the same path without `&`).
 
 One session, one agent: do not start loops, schedules, subagents or other

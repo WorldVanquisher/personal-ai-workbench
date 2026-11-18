@@ -17,6 +17,32 @@ Obsidian), file synchronization (for example Syncthing) and your project
 repositories. pai never installs, configures, launches or logs in to any of
 these.
 
+## With uv (one line)
+
+If you have [uv](https://docs.astral.sh/uv/) and git (Linux, macOS or WSL):
+
+```sh
+uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.3.0
+pai --version                                   # pai 0.3.0
+```
+
+uv builds the package from that tag and puts `pai` in its bin folder (usually
+`~/.local/bin`); if that folder is not on PATH it prints the `export PATH=…` line to run (or
+use `uv tool update-shell`), then open a new terminal. uv uses a Python 3.11+ it finds (by
+default it downloads one when there is none). The package holds the same code as the archives, workbench included. Its
+own configuration lives in `~/.config/pai/config.toml` (Windows: `%LOCALAPPDATA%\pai\config.toml`)
+unless `--config` or `PAI_CONFIG` says otherwise, and the workbench's in
+`~/.config/pai-workbench/`, so reinstalling never touches them. `pai doctor` checks the
+installed files against the package's RECORD.
+
+- Upgrade: the same command with the new version (`@v0.3.1`); `--force` reinstalls.
+- Remove: `uv tool uninstall pai-workbench`; configuration and task notes stay.
+- `pai install` is for the archives below; in a uv install it says to use uv instead.
+- Native Windows: the package installs `pai.exe` with the core only (CI installs it this way
+  on windows-latest); the workbench needs WSL, as below.
+
+Without uv, use the archives:
+
 In the examples, replace the placeholders: `<PROJECT>` is a short key such as
 `flh`; paths in capitals (`/ABS/PATH/TO/REPO`, `D:\PATH\TO\VAULT`) are absolute
 paths on this device. Paths after `--vault` (`--memory`, `--inbox`,
@@ -28,7 +54,8 @@ no vault folders.
 
 ```sh
 # 1. Put pai-workbench-0.3.0.tar.gz and its .sha256 into one folder; verify.
-#    (0.3.0 is not on the Releases page yet: build both with `python3 -B tools/build_bundle.py --out dist`.)
+#    Download: https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.3.0
+#    (or build both from a checkout: `python3 -B tools/build_bundle.py --out dist`)
 sha256sum -c pai-workbench-0.3.0.tar.gz.sha256            # macOS: shasum -a 256 -c …
 # 2. Extract, then install: a verified copy in ~/.local/share/pai-workbench/versions/0.3.0
 #    and the launcher ~/.local/bin/pai (--prefix DIR puts both under DIR instead).
@@ -62,8 +89,9 @@ works too: the launcher follows the link to its bundle.
 
 Native Windows runs the core (context and handoffs). The workbench needs tmux:
 for `pai run` and friends, install pai inside WSL with the Linux steps above.
-For 0.3.0 the steps below have not been run on Windows yet: the CI checks that cover them
-(`tools/bundle_smoke.py` on windows-latest) are configured but have not run.
+For 0.3.0 the CI checks that cover these steps pass on windows-latest (`tools/bundle_smoke.py`
+with `pai install --prefix`, and the launchers from cmd.exe and PowerShell); a person has not
+yet run them by hand on a Windows PC.
 
 ```powershell
 # 1. Put pai-workbench-0.3.0.zip and its .sha256 into one folder; verify.

@@ -2,6 +2,14 @@
 
 [English](README.md) | 简体中文
 
+**一行安装**（Linux、macOS 或 WSL；需要 [uv](https://docs.astral.sh/uv/) 和 git）：
+
+```sh
+uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.3.0
+```
+
+如果 uv 提示它的 bin 目录不在 PATH 里，运行它打印的那行 `export PATH=…`（或 `uv tool update-shell`），然后打开一个新终端。接着在你的 Git checkout 里依次运行：`pai doctor` → `pai init` → `pai task new "标题" --write` → `pai run --dry-run`。升级：把这一行里的版本号换成新版本再运行一次。卸载：`uv tool uninstall pai-workbench`（配置和任务笔记会保留）。没有 uv？请从 [v0.3.0 发布页](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.3.0) 下载压缩包，按下面的“快速开始”操作。
+
 PAI 把一个 AI 辅助项目的“工作记忆”保存在普通的 Markdown 文件里，并在你的控制下让编码 agent 基于它干活。
 
 - **核心**（`pai context`、`pai handoff`）：为 agent 会话提供它必须遵守的项目上下文（规则、人的决定、状态、限制），结束时生成一份 handoff 草稿。支持 Windows、macOS、Linux；需要 Python 3.11+；只用标准库；不联网、不调用模型；不执行任何命令，包括 Git。
@@ -30,7 +38,7 @@ pai status               # 每条 lane：进程、信任提示、输入框、任
 
 单独运行 `pai` 会再次显示这条路径；`pai --help` 列出所有命令。如果某条 lane 在等 agent 首次使用时的“是否信任此文件夹”提示，`pai status` 会说明，`pai trust` 会逐个打开提示让你回答，任务随后送达。升级就是用新压缩包重复上面三行：任何一步失败，旧版本都照常可用；你的配置和任务笔记不会被改动。
 
-**获取压缩包。** 0.3.0 还没有发布到 Releases 页面。在那之前，可以在源码 checkout 里构建同样的压缩包（`.tar.gz`、`.zip`，各带一个 `.sha256`）：`python3 -B tools/build_bundle.py --out dist`。
+**获取压缩包。** 从 [v0.3.0 发布页](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.3.0) 下载 `pai-workbench-0.3.0.tar.gz` 和它的 `.sha256`（`.zip` 内容相同，供 Windows 使用）。也可以在源码 checkout 里构建同样的压缩包：`python3 -B tools/build_bundle.py --out dist`。
 
 从远程仓库开始时，pai 会克隆到它管理的 checkout，在你审阅之前不启动任何 agent：`pai run --repo https://github.com/OWNER/REPO.git --workers 2 --agent claude --agent codex`。
 
@@ -47,14 +55,14 @@ pai status               # 每条 lane：进程、信任提示、输入框、任
 
 ## 已测试、尚未实测、可选
 
-- **已测试：** 核心在 CI 中于 Windows、macOS、Linux 上测试（见 RELEASE_NOTES.md）。工作台用假 agent、假 GitHub、假 SSH 和隔离的 tmux server 测试。
-- **开发者尚未实测：** 工作台对接真实的 Claude Code、Codex、GitHub 和 SSH；`pai install` 在 macOS 和原生 Windows 上的表现（已在 Linux 上测试；跨平台 CI 检查已配置，但尚未运行）。由所有者执行的检查清单是 `swarm/SMOKE.md` 和 `swarm/LIVE-VALIDATION.md`。
+- **已测试：** 核心、两种压缩包、`pai install` 和用 uv 安装的包，在 CI 中于 Windows、macOS、Linux 上测试（见 RELEASE_NOTES.md）。工作台用假 agent、假 GitHub、假 SSH 和隔离的 tmux server 在 Linux 上测试：分别从压缩包和在干净容器里 `uv tool install` 发布 tag 开始，一直到第一个任务送达。
+- **开发者尚未实测：** 工作台对接真实的 Claude Code、Codex、GitHub 和 SSH；工作台在 macOS 上的运行与派发（那里的 CI 只检查安装、核心以及工作台能否加载）。由所有者执行的检查清单是 `swarm/SMOKE.md` 和 `swarm/LIVE-VALIDATION.md`。
 - **可选：** JEV（TypeSafe）作为任务分诊和审阅的参考信号；它永远不能推翻检查结果。目前只对模拟端点测试过；`pai jev check` 会在你决定时发送那一次真实请求。
 - **实验性、可选：** 只监听本机回环地址的 Markdown 服务器（远程版 Nano，带预览和确认保存），只有执行 `pai setup --experimental server` 才会安装；见 `swarm/mdserver/README.md`。通过 SSH 隧道或你的私有 tailnet 访问。
 
 ## 文档
 
-- [INSTALL.md](INSTALL.md)：安装核心发布包；[REFERENCE.md](REFERENCE.md)：核心命令。
+- [INSTALL.md](INSTALL.md)：用 uv 或压缩包安装、升级、Windows；[REFERENCE.md](REFERENCE.md)：核心命令。
 - `swarm/WORKBENCH.md`（压缩包和 checkout 里都有）：工作台指南，包括平台安装、配置、文件夹信任、SSH、清理和 JEV 费用。
 - [SESSION_START.md](SESSION_START.md)：agent 会话的开场提示；[RELEASE_NOTES.md](RELEASE_NOTES.md)：变更与测试记录。
 
