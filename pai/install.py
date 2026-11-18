@@ -105,7 +105,7 @@ def on_path(folder, env=None):
 def _home_relative(path, posix=True):
     home = os.path.expanduser("~")
     if posix and (path == home or path.startswith(home + os.sep)):
-        return "$HOME" + path[len(home):]
+        return "$HOME" + path[len(home):].replace(os.sep, "/")  # a POSIX shell line, whatever this host uses
     return path
 
 
