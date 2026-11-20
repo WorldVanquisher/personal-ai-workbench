@@ -174,10 +174,14 @@ def walk(demo, sock, restart=False):
     say("   pai web on 127.0.0.1:%d, signed in once with its link" % port)
 
     say("\n2. The lane list: the same lifecycle name and why as pai status")
+    # The fake agent keeps working meanwhile (running -> delivered), so the console's answer is
+    # compared with pai status read just before and just after it: it must equal one of them.
+    before = json.loads(run(*PAI, "status", "--json", ok=(0, 1)).stdout)["lanes"][0]["lifecycle"]["state"]
     lanes_ = get("/api/lanes")
     lane = lanes_["lanes"][0]
-    if lane["lifecycle"]["state"] != st["lanes"][0]["lifecycle"]["state"]:
-        raise Failed("console and pai status disagree: %s vs %s" % (lane["lifecycle"]["state"], st["lanes"][0]["lifecycle"]["state"]))
+    after = json.loads(run(*PAI, "status", "--json", ok=(0, 1)).stdout)["lanes"][0]["lifecycle"]["state"]
+    if lane["lifecycle"]["state"] not in (before, after):
+        raise Failed("console and pai status disagree: %s vs %s (before) / %s (after)" % (lane["lifecycle"]["state"], before, after))
     say("   %s" % lanes_["summary_line"])
     say("   lane a: %s: %s" % (lane["lifecycle"]["state"], lane["lifecycle"]["why"]))
 

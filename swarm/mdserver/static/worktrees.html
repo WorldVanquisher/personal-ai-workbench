@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en" data-theme="endfield">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAI Worktrees (experimental)</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/worktrees.css">
+<script src="/static/worktrees.js" defer></script>
+</head>
+<body>
+<div class="app">
+  <header class="app-header">
+    <h1>PAI Worktrees</h1>
+    <span class="tag signal" title="Experimental: keep backups of anything important">EXPERIMENTAL</span>
+    <span id="state" class="state" role="status" aria-live="polite"></span>
+  </header>
+  <div id="error" class="banner error" role="alert" hidden></div>
+  <div class="layout">
+    <nav class="picker panel" aria-label="Worktree">
+      <h2>WORKTREE</h2>
+      <label for="wt">Worktree (repository · branch)</label>
+      <select id="wt"></select>
+      <dl id="wt-info" class="facts"></dl>
+      <label for="file">Instruction file</label>
+      <select id="file">
+        <option>AGENTS.md</option>
+        <option>CLAUDE.md</option>
+        <option>CONTRIBUTING.md</option>
+      </select>
+    </nav>
+    <main class="panel work">
+      <div class="tabs" role="tablist" aria-label="Views">
+        <button type="button" role="tab" id="tab-ins" aria-controls="view-ins" aria-selected="true">Instructions</button>
+        <button type="button" role="tab" id="tab-ref" aria-controls="view-ref" aria-selected="false" tabindex="-1">Refresh</button>
+        <button type="button" role="tab" id="tab-plan" aria-controls="view-plan" aria-selected="false" tabindex="-1">Split plan</button>
+        <button type="button" role="tab" id="tab-pr" aria-controls="view-pr" aria-selected="false" tabindex="-1">PR preview</button>
+      </div>
+
+      <section id="view-ins" role="tabpanel" aria-labelledby="tab-ins">
+        <h2 id="path">NO FILE</h2>
+        <div id="stale" class="banner error" role="alert" hidden>
+          <strong>The file changed on disk since you opened it.</strong> Nothing was written; your draft is kept here.
+          <button id="copy" type="button">Copy draft</button>
+          <button id="reload" type="button" class="ghost">Reload from disk (discards the draft)</button>
+        </div>
+        <ul id="sections" class="sections" aria-label="Sections of the file"></ul>
+        <details id="gen" class="gen">
+          <summary>Propose rules for this worktree</summary>
+          <div class="grid2">
+            <label>Goal <input id="g-goal" type="text" autocomplete="off"></label>
+            <label>Scope (folders, comma separated) <input id="g-scope" type="text" autocomplete="off"></label>
+            <label>Owner <input id="g-owner" type="text" autocomplete="off"></label>
+            <label>Lane <input id="g-lane" type="text" autocomplete="off"></label>
+          </div>
+          <label>Checks (one per line, NAME=COMMAND) <textarea id="g-checks" class="short" spellcheck="false"></textarea></label>
+          <label class="inline"><input id="g-jev" type="checkbox"> Let JEV score the rule library (only the goal and scope are sent)</label>
+          <fieldset id="g-rules" class="rules" hidden><legend>Proposed additions (tick to accept)</legend><ul id="g-list"></ul></fieldset>
+          <p id="g-meta" class="hint"></p>
+          <div class="actions"><button id="g-run" type="button">Propose…</button></div>
+        </details>
+        <div class="view-tabs" role="group" aria-label="View">
+          <button type="button" id="show-edit" aria-pressed="true">Edit</button>
+          <button type="button" id="show-preview" aria-pressed="false">Preview</button>
+        </div>
+        <div class="panes" id="panes">
+          <textarea id="text" spellcheck="false" aria-label="Instruction file text" disabled></textarea>
+          <article id="preview" class="preview reading" aria-label="Rendered preview"></article>
+        </div>
+        <div class="actions">
+          <button id="save" class="primary" type="button" disabled>Review and save…</button>
+          <button id="undo" class="ghost" type="button" disabled>Undo the last save made here</button>
+        </div>
+      </section>
+
+      <section id="view-ref" role="tabpanel" aria-labelledby="tab-ref" hidden>
+        <h2>REFRESH AFTER A MERGE</h2>
+        <dl id="ref-facts" class="facts wide"></dl>
+        <p id="ref-ready" class="ready" role="status"></p>
+        <p class="hint">Run these yourself; this page never fetches or changes a worktree. A fetch alone updates refs, not a worktree.</p>
+        <h3>Bash</h3><pre id="ref-bash" class="cmd" tabindex="0"></pre>
+        <button type="button" class="ghost copy-btn" data-copy="ref-bash">Copy Bash commands</button>
+        <h3>PowerShell</h3><pre id="ref-ps" class="cmd" tabindex="0"></pre>
+        <button type="button" class="ghost copy-btn" data-copy="ref-ps">Copy PowerShell commands</button>
+        <div class="actions"><button id="ref-check" type="button" class="primary">Check again</button></div>
+        <h3>Checks this session</h3>
+        <ol id="ref-attempts" class="attempts"></ol>
+      </section>
+
+      <section id="view-plan" role="tabpanel" aria-labelledby="tab-plan" hidden>
+        <h2>SPLIT A GOAL INTO WORKER SLICES</h2>
+        <div class="side">
+          <div>
+            <div class="grid2">
+              <label>Parent task ID <input id="p-parent" type="text" value="TASK" autocomplete="off"></label>
+              <label>Workers <input id="p-workers" type="number" min="1" max="26" value="4"></label>
+            </div>
+            <label>Goal and slices (<code>- id: goal | paths: … | verify: … | prereqs: … | needs: …</code>)
+              <textarea id="p-goals" class="mid" spellcheck="false"></textarea></label>
+            <div class="actions"><button id="p-run" type="button" class="primary">Preview the split</button></div>
+          </div>
+          <div id="p-out" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section id="view-pr" role="tabpanel" aria-labelledby="tab-pr" hidden>
+        <h2>PULL REQUEST FROM THIS WORKTREE</h2>
+        <div class="grid2">
+          <label>Title <input id="r-title" type="text" autocomplete="off"></label>
+          <label>Base branch <input id="r-base" type="text" value="main" autocomplete="off"></label>
+          <label>GitHub repository (OWNER/REPO; only when the remote URL is not GitHub's) <input id="r-github" type="text" autocomplete="off"></label>
+        </div>
+        <label>Approved paths (one per line, exactly as Git shows them) <textarea id="r-paths" class="short" spellcheck="false"></textarea></label>
+        <label>Body <textarea id="r-body" class="short"></textarea></label>
+        <label class="inline"><input id="r-offline" type="checkbox"> Offline (no ls-remote, no GitHub): last fetched refs only</label>
+        <div class="actions"><button id="r-run" type="button" class="primary">Preview (changes nothing)</button></div>
+        <dl id="r-facts" class="facts wide"></dl>
+        <pre id="r-text" class="cmd" tabindex="0" hidden></pre>
+        <div class="actions"><button id="r-publish" type="button" disabled>Review and publish…</button></div>
+        <p id="r-result" role="status"></p>
+      </section>
+    </main>
+  </div>
+
+  <div id="dialog" class="dialog-backdrop" hidden>
+    <div class="dialog panel" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+      <h2 id="dialog-title" tabindex="-1">CONFIRM</h2>
+      <p id="dialog-text"></p>
+      <pre id="diff" class="diff" tabindex="0"></pre>
+      <fieldset id="pr-state" class="rules" hidden>
+        <legend>State of a new PR (your choice)</legend>
+        <label class="inline"><input type="radio" name="prstate" value="draft"> Draft</label>
+        <label class="inline"><input type="radio" name="prstate" value="ready"> Ready for review</label>
+        <label class="inline"><input type="checkbox" id="pr-reviewed"> I reviewed the paths, the text and the SHAs above</label>
+      </fieldset>
+      <div class="actions">
+        <button id="confirm" class="primary" type="button">Confirm</button>
+        <button id="cancel" class="ghost" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

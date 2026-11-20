@@ -60,6 +60,11 @@ swarm/review.py
 swarm/wbconfig.py
 swarm/workbench.py
 swarm/wtlock.py
+swarm/agentsmd.py
+swarm/refresh.py
+swarm/splitplan.py
+swarm/wtpr.py
+swarm/wtweb.py
 swarm/mdserver/README.md
 swarm/mdserver/edit.py
 swarm/mdserver/render.py
@@ -71,3 +76,6 @@ swarm/mdserver/static/console.html
 swarm/mdserver/static/console.js
 swarm/mdserver/static/index.html
 swarm/mdserver/static/login.html
+swarm/mdserver/static/worktrees.css
+swarm/mdserver/static/worktrees.html
+swarm/mdserver/static/worktrees.js

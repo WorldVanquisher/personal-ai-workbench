@@ -58,7 +58,40 @@ pai edit README.md   # 带实时预览的编辑器；保存时先显示 diff 并
 
 它只提供这一个文件，只在本机可访问；如果文件在此期间被别处改过，它绝不会覆盖新版本。它在原生 Windows 上也能运行。在服务器上，加上 `--no-browser --port 8765`，再像上面那样用 SSH 隧道。
 
-## 6. 升级和卸载
+## 6. PR 合并之后：一个新的 worktree
+
+GitHub 上的合并不会改变你机器上的任何东西；单独一次 fetch 只会移动 `origin/main`，你的
+worktree 里仍然是旧文件。pai 打印出命令，由你自己运行。
+
+```sh
+pai worktree refresh     # 在你的仓库里运行；打印 Bash 和 PowerShell 命令，不做任何修改
+```
+
+squash 合并（GitHub 的常见方式）之后，它建议从刚 fetch 的 main 新建一个 worktree：
+
+```bash
+git -C ~/code/app fetch origin +refs/heads/main:refs/remotes/origin/main
+BASE=$(git -C ~/code/app rev-parse origin/main) && echo "fetched origin/main = $BASE"
+git -C ~/code/app worktree add -b postmerge/20261120 ~/code/app-20261120 "$BASE"
+pai worktree verify ~/code/app-20261120 --base "$BASE"
+```
+
+```powershell
+git -C 'C:\code\app' fetch origin +refs/heads/main:refs/remotes/origin/main
+$BASE = git -C 'C:\code\app' rev-parse origin/main; "fetched origin/main = $BASE"
+git -C 'C:\code\app' worktree add -b postmerge/20261120 'C:\code\app-20261120' $BASE
+pai worktree verify 'C:\code\app-20261120' --base $BASE
+```
+
+- **把 worktree 交给 agent 之前先核对 SHA。** `pai worktree verify` 并排打印 worktree 的
+  HEAD 和你 fetch 到的 base；只要 HEAD 不包含它，就以 1 退出。
+- **未提交的修改永远不会被动到：** 不会 reset、stash 或覆盖。对这样的 worktree
+  （`pai worktree refresh --worktree PATH`），pai 建议在旁边新建一个 worktree；旧的保留它的文件和分支，由你决定怎么处理。
+- 一个干净、只是落后于 main 的 worktree 会得到快进（`git merge --ff-only`，不能快进时它会拒绝，而不是合并）。
+- `pai worktree list` 列出每个 worktree、它的分支、未提交的路径，以及它是否包含最近一次 fetch 的 main。
+  `pai worktree web` 在浏览器里显示同样的内容，外加该 worktree 的 AGENTS.md、拆分计划和 PR 预览（实验性）。
+
+## 7. 升级和卸载
 
 - **升级：** 把安装命令里的版本号换成新版本（例如 `@v0.4.1`）再运行一次。你的配置和任务笔记会保留。
 - **卸载：** `uv tool uninstall pai-workbench`。它只删除 pai 本身；你的配置和笔记会保留。
