@@ -71,9 +71,9 @@ def sha256_bytes(data):
 
 def read_version(root):
     text = Path(root, "pai", "__init__.py").read_text(encoding="utf-8")
-    m = re.search(r'^__version__\s*=\s*"(\d+\.\d+\.\d+)"\s*$', text, re.M)
+    m = re.search(r'^__version__\s*=\s*"(\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?)"\s*$', text, re.M)
     if not m:
-        raise BuildError("pai/__init__.py has no __version__ = \"X.Y.Z\"")
+        raise BuildError("pai/__init__.py has no __version__ = \"X.Y.Z\" (or a pre-release such as X.Y.Zrc1)")
     return m.group(1)
 
 

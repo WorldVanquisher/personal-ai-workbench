@@ -39,7 +39,8 @@ class Inventory(unittest.TestCase):
         p = run("--json")
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertNotIn("NOT ROUTED", p.stdout)
-        for cmd in ("pai queue restart", "pai recover", "pai task import", "pai run", "pai guide"):
+        for cmd in ("pai queue restart", "pai recover", "pai task import", "pai run", "pai guide", "pai worktree publish",
+                    "pai worktree web", "pai plan accept", "pai queue add"):
             self.assertIn('"%s"' % cmd, p.stdout)
 
 

@@ -39,6 +39,22 @@ recorded run of the release candidate commit**:
 
 The release notes must list, for every platform, what was verified, how, and what was not.
 
+## R4: the owner-to-worker loop (worktree refresh, AGENTS.md, plans, queues, publish, worktree web)
+
+What the R4 queue actually ran, per platform (no other platform was run):
+
+| Platform | Verified in R4 | Not verified |
+| --- | --- | --- |
+| Linux (Arch, x86_64, Python 3.14.9, git 2.56.0, tmux 3.8, bash 5.3) | every R4 command and test (`swarm/tests`, `tests/`), `tools/worktree_rehearsal.py` with a local bare remote and the fake gh, bash execution of the refresh commands with hostile branch names | other distributions, Python 3.11-3.13 locally (CI covers them on a push) |
+| PowerShell | the generated refresh commands parsed and run by PowerShell 7.4.7 (local image `mcr.microsoft.com/powershell:lts-debian-12`, on Linux, no network): every value arrives literally (6/6) | PowerShell 5.1; PowerShell on Windows |
+| Browsers | `pai worktree web` in Chromium 131 (local image `mcr.microsoft.com/playwright/python:v1.49.1-jammy`, the server on the host's loopback): the R3 smoke 48/48 (5 runs) and the R4 smoke 30/30 | Firefox, Safari, a real screen reader |
+| Native Windows | by code: `pai worktree` and `pai plan` are workbench commands, which the launcher refuses on native Windows with the WSL message (`pai/launch.py`); `pai queue` is core and is meant to run there (CI's Windows job runs `tests/test_workqueue.py`) | nothing was run on Windows |
+| WSL | nothing (no WSL here) | the whole loop |
+| macOS | nothing (no Mac here); `/proc`-based process checks are off there by design | the whole loop |
+
+Owner-run commands for the gaps are in "Evidence still needed" below (WSL, macOS, Windows) and in
+`docs/0.5.0/OWNER-WORKER-LOOP.md` (the loop's acceptance scenarios).
+
 ## Evidence still needed, with the exact owner-run command for each
 
 The worker could not produce these (no browser, no `docker run` permission, no WSL, macOS or

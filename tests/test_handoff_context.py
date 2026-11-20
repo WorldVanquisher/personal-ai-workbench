@@ -45,6 +45,32 @@ class DiscoveryTests(unittest.TestCase):
         self.assertIn("Newer reports do not supersede human decisions", out)
         self.assertLessEqual(len(out), self.p.budget_chars)
 
+    def test_decisions_and_owner_decisions_are_recorded_and_privacy_filtered(self):
+        """R4-PAI-019/020: decisions within the worker's authority (what, why, how to reverse) and decisions left
+        for the owner (options, trade-offs, recommendation; not acted on) have their own sections."""
+        args = ("--config", str(self.f.cfg))
+        rc, path, err = run_cli(*args, "handoff", "new", "demo", "--task-id", "R4-PAI-019",
+                                "--evidence", "test_wtpr 15 OK",
+                                "--decision", "Quoted every value in the refresh commands: a branch name could run code; "
+                                              "reverse: drop the quoting",
+                                "--needs-owner", "Make --expect-plan required: safer but breaks scripts; recommend "
+                                                 "optional now, required in 1.0",
+                                "--needs-owner", "Token ghp_" + "Ab12Cd34" * 5 + " was in the log")
+        self.assertEqual(rc, 0, err)
+        text = Path(path.strip()).read_text(encoding="utf-8")
+        self.assertIn("## Decisions made within the worker's authority\n\nWhat was chosen, why, and how to reverse it.\n\n"
+                      "- Quoted every value in the refresh commands", text)
+        self.assertIn("## Decisions for the owner (not acted on)", text)
+        self.assertIn("- Make --expect-plan required: safer but breaks scripts", text)
+        self.assertNotIn("Ab12Cd34Ab12", text, "the privacy filter covers the new fields")
+        self.assertIn("removed  needs-owner 2: GitHub token", err)
+        rc, out, _ = run_cli(*args, "context", "demo", "--task", "release", "--handoffs", "1")
+        self.assertIn("Decisions for the owner (not acted on)", out)
+        plain = self.create("T-2")
+        body = plain.read_text(encoding="utf-8")
+        self.assertIn("## Decisions made within the worker's authority", body)
+        self.assertEqual(body.count("- None recorded."), 2, "empty sections say so")
+
     def test_isolation_metadata_and_shallow_reads(self):
         good = self.create(summary="MATCHED")
         other = self.create("OTHER", summary="UNRELATED BODY")

@@ -224,6 +224,20 @@ class BuildTests(unittest.TestCase):
         with self.assertRaises(build_bundle.BuildError):  # never overwrites
             build_bundle.build(str(ROOT), str(self.tmp / "o1"), 0)
 
+    def test_versions_x_y_z_and_pre_releases_only(self):
+        """R4: a candidate such as 0.5.0rc2 builds (PEP 440 a/b/rc suffix); anything else is refused."""
+        for good in ("0.5.0", "0.5.0rc2", "1.0.0a1", "1.0.0b3"):
+            root = self.tmp / ("v-" + good)
+            (root / "pai").mkdir(parents=True)
+            (root / "pai" / "__init__.py").write_text('"""x"""\n__version__ = "%s"\n' % good)
+            self.assertEqual(build_bundle.read_version(str(root)), good)
+        for bad in ("0.5", "0.5.0-rc2", "0.5.0.dev1", "v0.5.0", "0.5.0rc"):
+            root = self.tmp / ("bad-" + bad)
+            (root / "pai").mkdir(parents=True)
+            (root / "pai" / "__init__.py").write_text('__version__ = "%s"\n' % bad)
+            with self.subTest(bad=bad), self.assertRaisesRegex(build_bundle.BuildError, "no __version__"):
+                build_bundle.read_version(str(root))
+
     def test_refuses_when_any_artifact_exists_and_writes_nothing(self):
         out = self.tmp / "partial"
         out.mkdir()

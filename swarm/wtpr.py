@@ -213,7 +213,8 @@ def preview(path, paths, title, body="", message=None, branch=None, base="main",
     if current is None:
         problems.append("HEAD is detached: check out the branch the PR comes from")
     if branch and current and branch != current:
-        problems.append("the worktree is on %s, not %s" % (current, branch))
+        problems.append("the worktree is on %s, not %s: to publish %s, switch back (git -C %s switch %s); to publish %s, "
+                        "preview it instead" % (current, branch, branch, shlex.quote(wt), shlex.quote(branch), current))
     branch = branch or current
     url = gitprep.out(wt, "remote", "get-url", "--push", remote)
     if not url:
@@ -331,7 +332,10 @@ def drift(plan, now, journal):
     if now["head"] != plan["head"] and now["head"] != commit:
         out.append("HEAD moved from %s to %s" % ((plan["head"] or "?")[:12], (now["head"] or "?")[:12]))
     if now["branch"] != plan["branch"]:
-        out.append("the branch is now %s, not %s" % (now["branch"], plan["branch"]))
+        out.append("the worktree is on %s, not the previewed %s: to publish this plan, switch back (git -C %s switch %s); "
+                   "to publish %s, preview it instead" % (now["branch"] or "a detached HEAD", plan["branch"],
+                                                         shlex.quote(plan["worktree"]), shlex.quote(plan["branch"] or ""),
+                                                         now["branch"] or "the detached HEAD"))
     if now["remote"]["push_url"] != plan["remote"]["push_url"]:
         out.append("the remote's push URL changed (%s)" % now["remote"]["push_url"])
     was = {r["path"]: r for r in plan["paths"]["approved"]}
@@ -438,14 +442,67 @@ def adopt(plan, journal):
     return None
 
 
-def publish(plan_path, yes=False, draft=None, no_pr=False, log=print):
-    with open(plan_path, encoding="utf-8") as f:
-        plan = json.load(f)
+def plan_digest(plan_path):
+    with open(plan_path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def outcome(plan_path, plan):
+    """One line from the durable records only (the journal and the local branch): what this plan
+    has actually done so far. A step without a journal entry is reported as not done."""
+    j = _journal(plan_path)
+    st = j["steps"]
+    c, pu, pr = st.get("commit"), st.get("push"), st.get("pr")
+    head = gitprep.rev(plan["worktree"], "HEAD")
+    if c:
+        commit = "%s (%s)" % (c["sha"][:12], "local branch at it" if head == c["sha"] else "no longer HEAD")
+    else:
+        commit = "none made by this plan"
+    return "outcome     commit: %s; remote: %s; PR: %s" % (
+        commit, "%s %s = %s (read back)" % (plan["remote"]["name"], plan["branch"], pu["sha"][:12]) if pu else
+        "not pushed by this plan", pr["url"] if pr else "not opened")
+
+
+def publish(plan_path, yes=False, draft=None, no_pr=False, log=print, expect=None):
+    """`expect` (optional): the sha256, or a prefix of at least 12 hex digits, of the plan file the
+    owner reviewed; any other plan file is refused before anything is done. Every run that was
+    asked to act (--yes) ends with an `outcome` line built from the journal alone."""
+    code = _publish(plan_path, yes, draft, no_pr, log, expect)
+    if yes:
+        try:
+            with open(plan_path, encoding="utf-8") as f:
+                plan = json.load(f)
+            if plan.get("format") == PLAN_FORMAT:
+                log(outcome(plan_path, plan))
+        except (OSError, ValueError, KeyError):
+            pass
+    return code
+
+
+def _publish(plan_path, yes, draft, no_pr, log, expect):
+    with open(plan_path, "rb") as f:
+        raw = f.read()
+    plan = json.loads(raw.decode("utf-8"))
     if plan.get("format") != PLAN_FORMAT:
         raise PlanError("%s is not a worktree PR plan" % plan_path)
+    if expect is not None:
+        want, got = expect.strip().lower(), hashlib.sha256(raw).hexdigest()
+        if not re.fullmatch(r"[0-9a-f]{12,64}", want):
+            raise PlanError("--expect-plan takes the plan's sha256 (at least 12 hex digits), not %r" % expect)
+        if not got.startswith(want):
+            log("REFUSED     %s is not the plan that was reviewed: its sha256 is %s, the reviewed one starts %s. It "
+                "changed after the review; preview again. Nothing was staged, committed, pushed or opened."
+                % (plan_path, got[:16], want[:16]))
+            return 1
     j = _journal(plan_path)
     wt, branch, remote = plan["worktree"], plan["branch"], plan["remote"]["name"]
     d = plan["draft"]
+    unmoded = [r["path"] for r in plan["paths"]["approved"] if "mode" not in r]
+    if unmoded:  # made by a pai that did not record the approved type and mode
+        log("REFUSED     %s was made by an earlier pai and does not record the approved type and mode of %s: the "
+            "review did not cover them. Preview again (pai worktree preview ... --out NEW_PLAN) and publish the new "
+            "plan. Nothing was staged, committed, pushed or opened." % (plan_path, ", ".join(unmoded)))
+        return 1
     adopted = adopt(plan, j)
     if adopted:
         why = commit_mismatch(plan, adopted["sha"])

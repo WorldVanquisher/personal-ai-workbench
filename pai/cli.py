@@ -79,6 +79,10 @@ def _parser():
     n.add_argument("--blocker", action="append", default=[], metavar="TEXT")
     n.add_argument("--next", action="append", default=[], metavar="TEXT")
     n.add_argument("--proposal", action="append", default=[], metavar="TEXT")
+    n.add_argument("--decision", action="append", default=[], metavar="TEXT",
+                   help="a decision made within your authority: what, why, how to reverse it (repeatable)")
+    n.add_argument("--needs-owner", action="append", default=[], metavar="TEXT",
+                   help="a decision above your authority, not acted on: options, trade-offs, recommendation (repeatable)")
     n.add_argument("--preview", action="store_true", help="print the draft and what the privacy filter removes; "
                    "write nothing")
     n.add_argument("--keep-private", action="store_true", help="keep agent session links and credential-like text "
@@ -145,7 +149,7 @@ def main(argv=None):
             return 1 if problems else 0
         if a.cmd == "handoff" and a.hcmd == "new":
             states = {s: getattr(a, s) for s in handoff.STATES}
-            summary, lists = a.summary, [a.evidence, a.blocker, a.next, a.proposal]
+            summary, lists = a.summary, [a.evidence, a.blocker, a.next, a.proposal, a.decision, a.needs_owner]
             if not a.keep_private:  # session links and credentials stay out of a shared handoff by default
                 removed = []
 
@@ -156,7 +160,8 @@ def main(argv=None):
                 states = {k: clean(v, k) for k, v in states.items()}
                 summary = clean(summary, "summary")
                 lists = [[clean(x, "%s %d" % (name, i)) for i, x in enumerate(items, 1)]
-                         for name, items in zip(("evidence", "blocker", "next", "proposal"), lists)]
+                         for name, items in zip(("evidence", "blocker", "next", "proposal", "decision", "needs-owner"),
+                                                 lists)]
                 for field, r in removed:
                     print(f"removed  {field}: {r['kind']} ({r['sample']})", file=sys.stderr)
             if a.preview:
@@ -165,7 +170,8 @@ def main(argv=None):
                 print(handoff.render(project, a.task_id, "(set when written)",
                                      {k: v for k, v in states.items() if v}, summary, *lists), end="")
                 return 0
-            path = handoff.create(project, a.task_id, states, summary, *lists)
+            path = handoff.create(project, a.task_id, states, summary, *lists[:4], decisions=lists[4],
+                                  needs_owner=lists[5])
             print(path)
             return 0
     except (config.ConfigError, handoff.HandoffError) as e:

@@ -11,10 +11,21 @@
 - Run `make test` (unit) before you report.
 - Report what changed (paths), each check with its exit code, and what is not verified.
 
+### Decisions you own
+
+- Implementation: how to make the change inside your scope. Record what you chose, why, and how to reverse it.
+- Testing: which tests to add or change, and how to run them. Record what you chose, why, and how to reverse it.
+- Design: local design inside your scope: names, structure, helpers. Record what you chose, why, and how to reverse it.
+
 ### Owner only
 
-- Do not push, open or merge pull requests, deploy, or change credentials, secrets or remote settings.
+- Do not push, open or merge pull requests, publish packages, tags or releases, deploy, or change credentials, secrets or remote settings.
 - Do not reset, stash, force or delete branches or worktrees. The owner publishes (`pai worktree publish`).
+- Ask the owner before: anything outside your scope, another lane's paths, or a shared or public interface; cloud or production writes, spending, credentials or secrets, real user data, database migrations, DNS.
+
+### When a decision is above your authority
+
+- Stop that part and do not act on it. Write the options, their trade-offs and your recommendation into your report or handoff; keep going with independent work; wait for the owner's answer.
 
 ### Repository rules (inherited; the source files decide)
 

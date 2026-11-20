@@ -4,6 +4,8 @@
     pai plan check PLAN [--queues DIR] [--json]
     pai plan assign PLAN SLICE WORKER
     pai plan accept PLAN --queues DIR [--slice ID ...] [--write] [--json]
+    pai plan split-owner PLAN SLICE        a slice that needs live access -> local rehearsal + owner decision
+    pai plan status PLAN --queues DIR [--lane L] [--json]   per lane: current, blocked, remaining, done, next
 
 A goals file has one slice per line:
     - api: Add the export endpoint | paths: src/api/, tests/api/ | verify: python -m pytest tests/api | prereqs: none | needs: schema
@@ -16,7 +18,13 @@ or `pai plan assign` a slice to another worker, until `check` is clean.
 
 `check` refuses a slice without verification criteria, scope paths or test prerequisites,
 two slices that would write the same paths, a slice whose paths another worktree owns, an
-unknown or circular dependency. `accept` (after --write) puts each accepted slice into its
+unknown or circular dependency. It warns (without refusing) about a slice whose goal mentions
+live work (deploy, AWS, production, DNS, publish, release, migration, spending, credentials):
+`split-owner` turns such a slice into a local rehearsal the same worker can do (it keeps the
+slice's item number, paths and checks) and an owner decision that depends on it (`owner: yes`,
+the next item number, in the owner's own queue as owner-only); slices that needed the original
+now wait for the decision. A goals line may also say `owner: yes` itself.
+`accept` (after --write) puts each accepted slice into its
 worker's durable queue (`pai queue`, one file per worker in --queues), marks a slice that waits
 for an unfinished one as blocked there, and records what it did in PLAN.accepted.json. Running
 it again (also after an interruption, or to accept more slices later) adds nothing twice.
@@ -24,6 +32,7 @@ it again (also after an interruption, or to accept more slices later) adds nothi
 import json
 import os
 import re
+import shlex
 import string
 import sys
 
@@ -40,6 +49,11 @@ WORKER_RE = re.compile(r"[a-z][a-z0-9-]{0,23}")  # both become part of queue fil
 SLICE_RE = re.compile(r"^\s*[-*+]\s+([a-z][a-z0-9-]{0,31}):\s*(.+?)\s*$")
 SCOPE_RE = re.compile(r"Change only files under: (.+?)\. ")
 LANE_RE = re.compile(r"this is lane `([^`]+)`")
+
+
+LIVE_RE = re.compile(r"(?i)\b(deploy\w*|aws|terraform apply|production|prod|dns|publish\w*|releases?|migrat\w*|billing|"
+                     r"spend\w*|credentials?|secrets?)\b")
+OWNER = "owner"  # the queue (and worker name) of owner-decision slices
 
 
 class PlanError(Exception):
@@ -68,8 +82,13 @@ def parse_goals(text):
         for kv in parts[1:]:
             k, sep, v = kv.partition(":")
             k = k.strip().lower()
-            if not sep or k not in ("paths", "verify", "prereqs", "needs", "worker"):
-                raise PlanError("slice %s: %r is not one of paths/verify/prereqs/needs/worker" % (sid, kv))
+            if not sep or k not in ("paths", "verify", "prereqs", "needs", "worker", "owner"):
+                raise PlanError("slice %s: %r is not one of paths/verify/prereqs/needs/worker/owner" % (sid, kv))
+            if k == "owner":
+                if v.strip().lower() not in ("yes", "true", "decision"):
+                    raise PlanError("slice %s: owner takes yes (an owner decision), not %r" % (sid, v.strip()))
+                sl["owner"], sl["worker"] = True, OWNER
+                continue
             vals = [x.strip() for x in v.split(",") if x.strip()] if k in ("paths", "needs") else v.strip()
             sl[k] = vals
         if any(s["id"] == sid for s in slices):
@@ -110,6 +129,9 @@ def propose(parent, goals_text, workers=4, repo=None):
     load = {l: 0 for l in lanes}
     for n, sl in enumerate(slices, 1):  # owners first, then the least-loaded worker in order
         sl["item"] = "%s-%03d" % (parent, n)
+        if sl.get("owner"):
+            sl["assigned_by"] = "owner decision"
+            continue
         owner = next((o for p in sl.get("paths", []) for d, o in owned.items() if overlaps(p, d)), None)  # first path decides
         if sl.get("worker"):
             sl["assigned_by"] = "goals file"
@@ -132,6 +154,11 @@ def check(plan, queues=None):
     probs = []
     ids = [s["id"] for s in plan["slices"]]
     for s in plan["slices"]:
+        if s.get("owner"):  # a decision: no scope, checks or prerequisites of its own
+            for d in s.get("needs", []):
+                if d not in ids:
+                    probs.append({"slice": s["id"], "kind": "unknown-dependency", "detail": "needs %s, which is not a slice" % d})
+            continue
         if not s.get("verify"):
             probs.append({"slice": s["id"], "kind": "no-verification", "detail": "no verification criteria (verify: ...)"})
         if not s.get("paths"):
@@ -201,7 +228,7 @@ def startable(plan, states, queues):
         except workqueue.QueueError:
             continue
         if reason.startswith("waits for "):
-            out.append((s["id"], "pai queue mark '%s' %s doing --session NAME" % (q, s["item"])))
+            out.append((s["id"], "pai queue mark %s %s doing --session NAME" % (shlex.quote(q), s["item"])))
     return out
 
 
@@ -243,6 +270,49 @@ def accepted(path):
             return json.load(f)
     except (OSError, ValueError):
         return {"slices": {}}
+
+
+def live_warnings(plan):
+    """Slices whose goal mentions live work and that are not owner decisions (shown, never refused)."""
+    out = []
+    for s in plan["slices"]:
+        m = None if s.get("owner") or s.get("rehearsal") else LIVE_RE.search(s.get("goal", ""))
+        if m:
+            out.append({"slice": s["id"], "kind": "looks-owner-only",
+                        "detail": "the goal mentions %r: if it needs live access or an owner decision, split it: "
+                                  "pai plan split-owner PLAN %s (a local rehearsal for the worker, then the owner's "
+                                  "decision)" % (m.group(0), s["id"])})
+    return out
+
+
+def split_owner(path, slice_id):
+    """Replace one slice by a local rehearsal (same worker, item, paths, checks) and an owner
+    decision that depends on it; whoever needed the slice now needs the decision."""
+    plan = load(path)
+    if slice_id in accepted(path)["slices"]:
+        raise PlanError("slice %s is already in a queue; mark it blocked there and split it by hand (an owner decision)"
+                        % slice_id)
+    sl = next((s for s in plan["slices"] if s["id"] == slice_id), None)
+    if not sl:
+        raise PlanError("no slice %s" % slice_id)
+    if sl.get("owner"):
+        raise PlanError("slice %s is already an owner decision" % slice_id)
+    reh, dec = slice_id + "-rehearsal", slice_id + "-decision"
+    for new_id in (reh, dec):
+        if not re.fullmatch(r"[a-z][a-z0-9-]{0,31}", new_id) or any(s["id"] == new_id for s in plan["slices"]):
+            raise PlanError("cannot name the new slice %s (too long, or it exists); rename %s first" % (new_id, slice_id))
+    last = max(int(s["item"].rsplit("-", 1)[1]) for s in plan["slices"])
+    rehearsal = dict(sl, id=reh, goal="Rehearse locally, with no live writes or spending: %s" % sl["goal"], rehearsal=True)
+    decision = {"id": dec, "goal": "Owner decision: %s (after reviewing the rehearsal's evidence)" % sl["goal"],
+                "paths": [], "verify": "the owner records the decision in the owner queue", "prereqs": "the rehearsal's "
+                "evidence", "needs": [reh], "owner": True, "worker": OWNER, "assigned_by": "owner decision",
+                "item": "%s-%03d" % (plan["parent"], last + 1)}
+    i = plan["slices"].index(sl)
+    plan["slices"][i:i + 1] = [rehearsal, decision]
+    for s in plan["slices"]:
+        s["needs"] = [dec if d == slice_id else d for d in s.get("needs", [])]
+    save(path, plan)
+    return plan
 
 
 def assign(path, slice_id, worker):
@@ -301,7 +371,12 @@ def accept(path, queues, only=None, write=False, log=print):
                            "checkpoints": [], "items": [item]}, f, indent=2)
                 f.write("\n")
             os.replace(tmp, q)
-        if waits:
+        if s.get("owner"):
+            workqueue.append(q, {"event": "state", "id": s["item"], "state": "owner-only", "at": workqueue.now(),
+                                 "reason": "owner decision: %s%s" % (s["goal"], "; waits for %s" % ", ".join(waits)
+                                                                    if waits else ""), "evidence": None,
+                                 "session": "pai-plan"})
+        elif waits:
             workqueue.append(q, {"event": "state", "id": s["item"], "state": "blocked", "at": workqueue.now(),
                                  "reason": "waits for %s" % ", ".join(waits), "evidence": None, "session": "pai-plan"})
         rec["slices"][s["id"]] = {"queue": q, "item": s["item"], "worker": s["worker"], "at": workqueue.now()}
@@ -322,6 +397,61 @@ def _done(plan, queues, sid):
         return False
 
 
+def lane_status(plan, queues, lane=None):
+    """{lane: {queue, current, blocked, owner_only, remaining, done, startable}} from the plan's slices and
+    each lane's queue (read only). An unknown --lane is an error, not an empty report."""
+    lanes = sorted({s["worker"] for s in plan["slices"]})
+    if lane and lane not in lanes:
+        raise PlanError("no lane %s in this plan (lanes: %s)" % (lane, ", ".join(lanes)))
+    ready = {sid for sid, _ in startable(plan, check(plan, queues)[1], queues)}
+    out = {}
+    for ln in [lane] if lane else lanes:
+        q = os.path.join(queues, "%s-%s.queue" % (plan["parent"], ln))
+        try:
+            doc = workqueue.load(q)
+            evs, _ = workqueue.events(q)
+            st = workqueue.state(doc, evs)
+        except workqueue.QueueError:
+            st = {}
+        rows = {"queue": q, "current": [], "blocked": [], "owner_only": [], "remaining": [], "done": [], "startable": []}
+        for s in plan["slices"]:
+            if s["worker"] != ln:
+                continue
+            x = st.get(s["item"]) or {"state": "not queued", "reason": None}
+            entry = {"slice": s["id"], "item": s["item"], "goal": s["goal"]}
+            if x["state"] == "doing":
+                rows["current"].append(entry)
+            elif x["state"] == "blocked":
+                rows["blocked"].append(dict(entry, reason=x.get("reason")))
+            elif x["state"] == "owner-only":
+                rows["owner_only"].append(dict(entry, reason=x.get("reason")))
+            elif x["state"] in ("done", "prototype"):
+                rows["done"].append(entry)
+            else:
+                rows["remaining"].append(dict(entry, state=x["state"]))
+            if s["id"] in ready:
+                rows["startable"].append(s["id"])
+        out[ln] = rows
+    return out
+
+
+def render_status(st):
+    out = []
+    for ln, r in st.items():
+        out.append("lane %s   %s" % (ln, r["queue"]))
+        out.append("  current    %s" % (", ".join("%s %s" % (x["item"], x["slice"]) for x in r["current"]) or "none"))
+        for x in r["blocked"]:
+            out.append("  BLOCKED    %s %s: %s" % (x["item"], x["slice"], x["reason"]))
+        for x in r["owner_only"]:
+            out.append("  OWNER      %s %s: %s" % (x["item"], x["slice"], x["reason"]))
+        out.append("  remaining  %s" % (", ".join("%s %s (%s)" % (x["item"], x["slice"], x["state"]) for x in r["remaining"])
+                                        or "none"))
+        out.append("  done       %s" % (", ".join("%s %s" % (x["item"], x["slice"]) for x in r["done"]) or "none"))
+        if r["startable"]:
+            out.append("  ready      %s (everything they need is done)" % ", ".join(r["startable"]))
+    return "\n".join(out)
+
+
 def render(plan, probs, states=None, queues=None):
     out = ["parent    %s (repository %s)" % (plan["parent"], plan["repository"]), "workers   %s" % ", ".join(plan["workers"])]
     for s in plan["slices"]:
@@ -332,6 +462,8 @@ def render(plan, probs, states=None, queues=None):
             "; queue %s" % states[s["id"]] if states and s["id"] in states else ""))
     for p in probs:
         out.append("PROBLEM   %s %s: %s" % (p["slice"], p["kind"], p["detail"]))
+    for w in live_warnings(plan):
+        out.append("WARNING   %s %s: %s" % (w["slice"], w["kind"], w["detail"]))
     for sid, cmd in startable(plan, states or {}, queues) if queues else []:
         out.append("READY     %s: everything it needs is done; start it with: %s" % (sid, cmd))
     out.append("\n%s" % ("clean: `pai plan accept PLAN --queues DIR --write` queues it" if not probs else
@@ -339,7 +471,8 @@ def render(plan, probs, states=None, queues=None):
     return "\n".join(out)
 
 
-def main(argv=None):
+def parser():
+    """The `pai plan` command line (also read by tools/command_inventory.py)."""
     import argparse
     ap = argparse.ArgumentParser(prog="pai plan", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="pcmd", required=True)
@@ -363,6 +496,21 @@ def main(argv=None):
     ac.add_argument("--queues", required=True)
     ac.add_argument("--slice", action="append")
     ac.add_argument("--write", action="store_true")
+    ss = sub.add_parser("status", help="per lane: current, blocked, owner-only, remaining and done items, and what can "
+                        "start")
+    ss.add_argument("plan")
+    ss.add_argument("--queues", required=True)
+    ss.add_argument("--lane")
+    ss.add_argument("--json", action="store_true")
+    so = sub.add_parser("split-owner", help="a slice that needs live access: a local rehearsal for the worker, then the "
+                        "owner's decision")
+    so.add_argument("plan")
+    so.add_argument("slice")
+    return ap
+
+
+def main(argv=None):
+    ap = parser()
     a = ap.parse_args(argv)
     try:
         if a.pcmd == "propose":
@@ -379,8 +527,17 @@ def main(argv=None):
             plan = load(a.plan)
             probs, states = check(plan, a.queues)
             ready = [{"slice": sid, "start": cmd} for sid, cmd in startable(plan, states, a.queues)] if a.queues else []
-            print(json.dumps({"plan": plan, "problems": probs, "queue_states": states, "startable": ready}, indent=1)
-                  if a.json else render(plan, probs, states, a.queues))
+            print(json.dumps({"plan": plan, "problems": probs, "warnings": live_warnings(plan), "queue_states": states,
+                              "startable": ready}, indent=1) if a.json else render(plan, probs, states, a.queues))
+            return 1 if probs else 0
+        if a.pcmd == "status":
+            st = lane_status(load(a.plan), a.queues, a.lane)
+            print(json.dumps(st, indent=1) if a.json else render_status(st))
+            return 0
+        if a.pcmd == "split-owner":
+            plan = split_owner(a.plan, a.slice)
+            probs, _ = check(plan)
+            print(render(plan, probs))
             return 1 if probs else 0
         if a.pcmd == "assign":
             plan = assign(a.plan, a.slice, a.worker)

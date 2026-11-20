@@ -37,3 +37,12 @@ h3 { font-family: var(--ef-ui); font-size: 14px; margin: 14px 0 4px; }
   .side, .grid2 { grid-template-columns: 1fr; }
 }
 @media (min-width: 900px) { .view-tabs { display: none; } }
+/* a narrow screen: each slice becomes a card of labelled lines instead of a 9-column row */
+@media (max-width: 640px) {
+  table.split, table.split tbody, table.split tr, table.split td { display: block; width: 100%; box-sizing: border-box; }
+  table.split tr:first-child { display: none; }
+  table.split tr { border: 1px solid var(--border); margin-bottom: 10px; }
+  table.split td { border: 0; border-top: 1px solid var(--border); }
+  table.split td:first-child { border-top: 0; font-weight: 700; }
+  table.split td::before { content: attr(data-label) ": "; color: var(--muted); font-weight: 600; }
+}

@@ -55,6 +55,15 @@ function showSections() {
     li.append(b); ul.append(li);
   }
 }
+// where the cursor is: the owner's own text, or pai's managed section (replaced when it is generated again)
+function showWhere() {
+  const t = $("text"), w = $("where");
+  if (!cur || t.disabled) { w.textContent = ""; return; }
+  const line = t.value.slice(0, t.selectionStart).split("\n").length;
+  const s = sections(t.value).find((x) => line >= x.start && line <= x.end);
+  w.textContent = !s ? "" : s.kind === "manual" ? "Line " + line + ": your text. pai keeps it byte for byte." :
+    "Line " + line + ": " + KIND[s.kind] + ", inside pai's managed section. Edits here are replaced when the section is generated again; write your own notes outside it.";
+}
 function selectLines(a, b) {
   const t = $("text"); const lines = t.value.split("\n");
   let start = 0; for (let i = 0; i < a - 1; i++) start += lines[i].length + 1;
@@ -87,10 +96,15 @@ function showInfo() {
     ["base", w.contains_last_fetched_base ? "contains the last fetched base" : "does NOT contain the last fetched base",
       w.contains_last_fetched_base ? "good" : "bad"]]);
 }
+// Each load answers only for the latest request: a slower earlier answer (a reload, then a quick switch to another
+// worktree) must never put another worktree's file into the editor, where a save would write it.
+let openSeq = 0, refSeq = 0;
 async function openFile() {
+  const seq = ++openSeq;
   showError(""); $("stale").hidden = true;
   const w = info(); showInfo();
   const r = await api("GET", "/api/wt/file?wt=" + encodeURIComponent($("wt").value) + "&file=" + encodeURIComponent($("file").value));
+  if (seq !== openSeq) return;
   if (r.status !== 200) { cur = null; $("text").disabled = true; return showError(r.data.error || "could not open the file"); }
   cur = r.data; cur.writable = !w.main;
   $("path").textContent = (cur.exists ? "" : "NEW: ") + cur.file + " — " + cur.worktree + (cur.writable ? "" : " (main checkout: read only)");
@@ -173,14 +187,14 @@ async function reviewSave() {
   const text = $("text").value;
   const r = await api("POST", "/api/wt/diff", { wt: cur.worktree, file: cur.file, text, base: cur.base });
   if (r.status !== 200) return showError(r.data.error || "could not diff");
-  if (r.data.stale) { $("stale").hidden = false; return say("Not saved: the file changed on disk"); }
+  if (r.data.stale) { $("stale").hidden = false; $("stale").focus(); return say("Not saved: the file changed on disk"); }
   ask({ title: "SAVE " + cur.file, text: "Write " + cur.worktree + "/" + cur.file + "? Lines marked − are removed, + are added.",
     diff: r.data.diff, confirm: "Save this revision", cancel: "Keep editing" }, () => save(text));
 }
 async function save(text) {
   const r = await api("POST", "/api/wt/save", { wt: cur.worktree, file: cur.file, text, base: cur.base,
     confirm: await sha256(text), crlf: cur.crlf, bom: cur.bom });
-  if (r.status === 409) { $("stale").hidden = false; return say("Not saved: the file changed on disk"); }
+  if (r.status === 409) { $("stale").hidden = false; $("stale").focus(); return say("Not saved: the file changed on disk"); }
   if (r.status !== 200) return showError(r.data.error || "could not save");
   cur.base = r.data.base; cur.exists = true; $("undo").disabled = false;
   if ($("text").value === text) setDirty(false);
@@ -197,7 +211,9 @@ async function undo() {
 
 // ---- refresh ----
 async function loadRefresh(recheck) {
+  const seq = ++refSeq;
   const r = recheck ? await api("POST", "/api/wt/recheck", { wt: $("wt").value }) : await api("GET", "/api/wt/refresh?wt=" + encodeURIComponent($("wt").value));
+  if (seq !== refSeq) return;
   if (r.status !== 200) return showError(r.data.error || "could not read the refresh state");
   const d = r.data, v = d.verify;
   const repo = d.plan.repository, rec = d.plan.recommendation;
@@ -224,11 +240,14 @@ async function planPreview() {
   const out = $("p-out"); out.textContent = "";
   if (r.status !== 200) return showError(r.data.error || "could not split");
   const d = r.data, t = el("table", undefined, "split");
-  const head = el("tr"); for (const h of ["Slice", "Item", "Worker", "Why this worker", "Paths", "Verify", "Prereqs", "Needs", "Queue"]) head.append(el("th", h));
+  const cols = ["Slice", "Item", "Worker", "Why this worker", "Paths", "Verify", "Prereqs", "Needs", "Queue"];
+  const head = el("tr"); for (const h of cols) head.append(el("th", h));
   t.append(head);
   for (const s of d.plan.slices) {
     const tr = el("tr");
-    for (const v of [s.id + ": " + s.goal, s.item, s.worker, s.assigned_by, (s.paths || []).join(", "), s.verify || "—", s.prereqs || "—", (s.needs || []).join(", ") || "—", d.queues ? (d.queue_states[s.id] || "not queued") : "no --queues"]) tr.append(el("td", v));
+    [s.id + ": " + s.goal, s.item, s.worker, s.assigned_by, (s.paths || []).join(", "), s.verify || "—", s.prereqs || "—", (s.needs || []).join(", ") || "—", d.queues ? (d.queue_states[s.id] || "not queued") : "no --queues"].forEach((v, i) => {
+      const td = el("td", v); td.dataset.label = cols[i]; tr.append(td);  // the label is shown when rows stack on a narrow screen
+    });
     t.append(tr);
   }
   out.append(t);
@@ -292,6 +311,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   guardSwitch($("wt"), () => lastWt); guardSwitch($("file"), () => lastFile);
   $("text").addEventListener("input", changed);
+  for (const ev of ["keyup", "click", "select", "focus"]) $("text").addEventListener(ev, showWhere);
   $("save").addEventListener("click", reviewSave);
   $("undo").addEventListener("click", undo);
   $("g-run").addEventListener("click", propose);
@@ -304,7 +324,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   for (const b of document.querySelectorAll(".copy-btn")) b.addEventListener("click", () => navigator.clipboard && navigator.clipboard.writeText($(b.dataset.copy).textContent).then(() => say("Copied")));
   $("confirm").addEventListener("click", () => closeDialog(true));
   $("cancel").addEventListener("click", () => closeDialog(false));
-  $("dialog").addEventListener("keydown", (e) => { if (e.key === "Escape") closeDialog(false); });
+  $("dialog").addEventListener("keydown", (e) => {
+    if (e.key !== "Tab") return;  // a modal dialog keeps keyboard focus inside it
+    const f = [...$("dialog").querySelectorAll("button, input, pre[tabindex], [tabindex='0']")].filter((x) => !x.disabled && x.offsetParent !== null);
+    if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("dialog").hidden) closeDialog(false); });
   const prOk = () => { $("confirm").disabled = !(document.querySelector("input[name=prstate]:checked") && $("pr-reviewed").checked); };
   for (const r of document.querySelectorAll("input[name=prstate]")) r.addEventListener("change", prOk);
   $("pr-reviewed").addEventListener("change", prOk);
