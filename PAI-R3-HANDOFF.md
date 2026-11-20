@@ -5,7 +5,7 @@ Started after PR #12 was merged and the owner confirmed the refreshed worktree.
 
 | | |
 | --- | --- |
-| Worktree | `/home/worldvanquisher/workspace/pai-workers/20261120-postmerge/pai` |
+| Worktree | `~/workspace/pai-workers/20261120-postmerge/pai` |
 | Branch | `worker/20261120-postmerge/pai` |
 | Base | `5fe3627c0a1b3d943aa0bd2cc107618d8d131d29` (= `origin/main`, PR #12 merged; owner-confirmed) |
 | State | all work **uncommitted** in this worktree; nothing committed, pushed or opened |
@@ -88,7 +88,7 @@ The new preview, run on this worktree offline, is clean (nothing unexpected or s
 `tools/console_walkthrough.py` (the pre-existing race fix) as its own commit; the other 24 paths in `seal/files.txt` as the R3 change.
 
 ```sh
-cd /home/worldvanquisher/workspace/pai-workers/20261120-postmerge/pai
+cd ~/workspace/pai-workers/20261120-postmerge/pai
 python3 -B bin/pai.py worktree preview . PATHS --title "worktree: post-merge refresh, worktree PRs, AGENTS.md and task splits" --body-file BODY.md --out /var/tmp/r3-pr.json
 python3 -B bin/pai.py worktree publish /var/tmp/r3-pr.json --yes --draft
 ```
@@ -108,15 +108,15 @@ add it. Or commit the same path set by hand.
 
 | ID | State | Evidence or reason |
 | --- | --- | --- |
-| R3-001 | done | /home/worldvanquisher/.cache/pai-r3-work/RECON.md |
-| R3-002 | done | /home/worldvanquisher/.cache/pai-r3-work/RECON.md |
-| R3-003 | done | /home/worldvanquisher/.cache/pai-r3-work/RECON.md |
-| R3-004 | done | /home/worldvanquisher/.cache/pai-r3-work/RECON.md |
-| R3-005 | done | /home/worldvanquisher/.cache/pai-r3-work/RECON.md |
-| R3-006 | done | /home/worldvanquisher/.cache/pai-r3-work/RECON.md |
-| R3-007 | done | /home/worldvanquisher/.cache/pai-r3-work/RECON.md |
-| R3-008 | done | /home/worldvanquisher/.cache/pai-r3-work/RECON.md |
-| R3-009 | done | /home/worldvanquisher/.cache/pai-r3-work/RECON.md |
+| R3-001 | done | ~/.cache/pai-r3-work/RECON.md |
+| R3-002 | done | ~/.cache/pai-r3-work/RECON.md |
+| R3-003 | done | ~/.cache/pai-r3-work/RECON.md |
+| R3-004 | done | ~/.cache/pai-r3-work/RECON.md |
+| R3-005 | done | ~/.cache/pai-r3-work/RECON.md |
+| R3-006 | done | ~/.cache/pai-r3-work/RECON.md |
+| R3-007 | done | ~/.cache/pai-r3-work/RECON.md |
+| R3-008 | done | ~/.cache/pai-r3-work/RECON.md |
+| R3-009 | done | ~/.cache/pai-r3-work/RECON.md |
 | R3-010 | done | swarm/tests/test_refresh.py (4 OK) |
 | R3-011 | done | swarm/tests/test_wtpr.py (5 OK; local bare remote + fake gh) |
 | R3-012 | done | swarm/tests/test_wtpr.py (5 OK; local bare remote + fake gh) |
@@ -178,35 +178,35 @@ add it. Or commit the same path set by hand.
 | R3-068 | done | swarm/tests/test_splitplan.py (3 OK) |
 | R3-069 | done | swarm/tests/test_splitplan.py (3 OK) |
 | R3-070 | done | swarm/tests/test_splitplan.py (3 OK) |
-| R3-071 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (/home/worldvanquisher/.cache/pai-r3-work/evidence/browser/results.json) |
-| R3-072 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (/home/worldvanquisher/.cache/pai-r3-work/evidence/browser/results.json) |
-| R3-073 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (/home/worldvanquisher/.cache/pai-r3-work/evidence/browser/results.json) |
-| R3-074 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (/home/worldvanquisher/.cache/pai-r3-work/evidence/browser/results.json) |
-| R3-075 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (/home/worldvanquisher/.cache/pai-r3-work/evidence/browser/results.json) |
-| R3-076 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (/home/worldvanquisher/.cache/pai-r3-work/evidence/browser/results.json) |
-| R3-077 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (/home/worldvanquisher/.cache/pai-r3-work/evidence/browser/results.json) |
-| R3-078 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (/home/worldvanquisher/.cache/pai-r3-work/evidence/browser/results.json) |
-| R3-079 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (/home/worldvanquisher/.cache/pai-r3-work/evidence/browser/results.json) |
-| R3-080 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (/home/worldvanquisher/.cache/pai-r3-work/evidence/browser/results.json) |
-| R3-081 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (/home/worldvanquisher/.cache/pai-r3-work/evidence/browser/results.json) |
-| R3-082 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (/home/worldvanquisher/.cache/pai-r3-work/evidence/browser/results.json) |
-| R3-083 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (/home/worldvanquisher/.cache/pai-r3-work/evidence/browser/results.json) |
-| R3-084 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (/home/worldvanquisher/.cache/pai-r3-work/evidence/browser/results.json) |
-| R3-085 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (/home/worldvanquisher/.cache/pai-r3-work/evidence/browser/results.json) |
-| R3-086 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (/home/worldvanquisher/.cache/pai-r3-work/evidence/browser/results.json) |
-| R3-087 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (/home/worldvanquisher/.cache/pai-r3-work/evidence/browser/results.json) |
-| R3-088 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (/home/worldvanquisher/.cache/pai-r3-work/evidence/browser/results.json) |
-| R3-089 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (/home/worldvanquisher/.cache/pai-r3-work/evidence/browser/results.json) |
-| R3-090 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (/home/worldvanquisher/.cache/pai-r3-work/evidence/browser/results.json) |
-| R3-091 | done | /home/worldvanquisher/.cache/pai-r3-work/roundtrip.sh vs git archive of 5fe3627: 14/14 (/home/worldvanquisher/.cache/pai-r3-work/evidence/roundtrip.log) |
+| R3-071 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (~/.cache/pai-r3-work/evidence/browser/results.json) |
+| R3-072 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (~/.cache/pai-r3-work/evidence/browser/results.json) |
+| R3-073 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (~/.cache/pai-r3-work/evidence/browser/results.json) |
+| R3-074 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (~/.cache/pai-r3-work/evidence/browser/results.json) |
+| R3-075 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (~/.cache/pai-r3-work/evidence/browser/results.json) |
+| R3-076 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (~/.cache/pai-r3-work/evidence/browser/results.json) |
+| R3-077 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (~/.cache/pai-r3-work/evidence/browser/results.json) |
+| R3-078 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (~/.cache/pai-r3-work/evidence/browser/results.json) |
+| R3-079 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (~/.cache/pai-r3-work/evidence/browser/results.json) |
+| R3-080 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (~/.cache/pai-r3-work/evidence/browser/results.json) |
+| R3-081 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (~/.cache/pai-r3-work/evidence/browser/results.json) |
+| R3-082 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (~/.cache/pai-r3-work/evidence/browser/results.json) |
+| R3-083 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (~/.cache/pai-r3-work/evidence/browser/results.json) |
+| R3-084 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (~/.cache/pai-r3-work/evidence/browser/results.json) |
+| R3-085 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (~/.cache/pai-r3-work/evidence/browser/results.json) |
+| R3-086 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (~/.cache/pai-r3-work/evidence/browser/results.json) |
+| R3-087 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (~/.cache/pai-r3-work/evidence/browser/results.json) |
+| R3-088 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (~/.cache/pai-r3-work/evidence/browser/results.json) |
+| R3-089 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (~/.cache/pai-r3-work/evidence/browser/results.json) |
+| R3-090 | done | swarm/tests/test_wtweb.py (5 OK); real Chromium 156 smoke 48/48 (~/.cache/pai-r3-work/evidence/browser/results.json) |
+| R3-091 | done | ~/.cache/pai-r3-work/roundtrip.sh vs git archive of 5fe3627: 14/14 (~/.cache/pai-r3-work/evidence/roundtrip.log) |
 | R3-092 | done | swarm/tests/fixtures/agents-golden/{manual,section}.md; test_agentsmd golden test OK |
 | R3-093 | done | swarm/tests/test_splitplan.py::test_a_mixed_batch_where_one_lane_has_a_ci_blocker OK |
 | R3-094 | done | test_splitplan kill-at-any-point (6 SIGKILLs) + test_wtpr kill between commit and journal: OK |
-| R3-095 | done | verify.py: 7 PASS (core, workbench 793s, archives, bundle, headless, onboarding, path-bash), console FAIL = pre-existing race (base 6/12 fail) fixed in tools/console_walkthrough.py (10/10, then final OK); verify --quick 3/3 after the last change; browser smokes final 48/48 + pai edit 17/17; logs /home/worldvanquisher/.cache/pai-r3-work/logs |
-| R3-096 | done | QUICKSTART.md and QUICKSTART.zh-CN.md section 6; PowerShell variant run in pwsh 7.4.7 (/home/worldvanquisher/.cache/pai-r3-work/evidence/pwsh-refresh.log) |
-| R3-097 | done | /home/worldvanquisher/.cache/pai-r3-work/dryrun.sh -> /home/worldvanquisher/.cache/pai-r3-work/evidence/dryrun-4-lanes.md (before/after, 4 lanes, fake gh) |
+| R3-095 | done | verify.py: 7 PASS (core, workbench 793s, archives, bundle, headless, onboarding, path-bash), console FAIL = pre-existing race (base 6/12 fail) fixed in tools/console_walkthrough.py (10/10, then final OK); verify --quick 3/3 after the last change; browser smokes final 48/48 + pai edit 17/17; logs ~/.cache/pai-r3-work/logs |
+| R3-096 | done | QUICKSTART.md and QUICKSTART.zh-CN.md section 6; PowerShell variant run in pwsh 7.4.7 (~/.cache/pai-r3-work/evidence/pwsh-refresh.log) |
+| R3-097 | done | ~/.cache/pai-r3-work/dryrun.sh -> ~/.cache/pai-r3-work/evidence/dryrun-4-lanes.md (before/after, 4 lanes, fake gh) |
 | R3-098 | done | swarm/WORKBENCH.md section 14 Troubleshooting (JEV states, push auth, gh auth, non-GitHub remote, drift) |
-| R3-099 | done | /home/worldvanquisher/.cache/pai-r3-work/evidence/package-smoke.log (byte-identical rebuild, checksums, new modules in bundle, commands from extracted bundle); platform gaps listed in PAI-R3-HANDOFF.md |
-| R3-100 | done | /home/worldvanquisher/.cache/pai-r3-work/seal/ (r3.patch sha256 01391309ca3e..., files.sha256, clean apply to base 5fe3627 reproduces 25 files); PAI-R3-HANDOFF.md |
+| R3-099 | done | ~/.cache/pai-r3-work/evidence/package-smoke.log (byte-identical rebuild, checksums, new modules in bundle, commands from extracted bundle); platform gaps listed in PAI-R3-HANDOFF.md |
+| R3-100 | done | ~/.cache/pai-r3-work/seal/ (r3.patch sha256 01391309ca3e..., files.sha256, clean apply to base 5fe3627 reproduces 25 files); PAI-R3-HANDOFF.md |
 
 Totals: todo 0, doing 0, done 100, prototype 0, blocked 0, owner-only 0 (100 items)

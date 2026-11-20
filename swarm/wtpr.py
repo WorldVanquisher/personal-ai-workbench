@@ -20,11 +20,20 @@ branch without force, reads the remote's SHA back, and only then opens a PR (or 
 matching one) as --draft or --ready, which must be chosen. Each step is recorded in
 PLAN.json.journal; a rerun after an interruption continues from the last completed step and
 never commits, pushes or opens anything twice.
+
+Approval is a hard gate. Before any push or PR step, on every run (the first one, a retry that
+reads the journal, or one that adopts a commit an interrupted run made), the commit itself is
+checked against the approved preview: its only parent is the previewed HEAD, it changes exactly
+the approved paths, each approved file holds exactly the previewed content, and its message is
+the reviewed one. Anything else (a hook that added a file, a different staged version, an
+edited message) stops publication with exit 1: nothing is pushed and no PR is opened, the local
+commit stays as it is, and the mismatch is listed. A journal entry never stands in for this check.
 """
 import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -254,10 +263,79 @@ def drift(plan, now, journal):
     return out
 
 
+def tidy(wt, text):
+    """A commit message as `git commit -F` stores it (whitespace clean-up), for comparing."""
+    try:
+        p = subprocess.run([gitprep.git_bin(), "-C", wt, "stripspace"], input=text or "", capture_output=True,
+                           text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return (text or "").strip()
+    return p.stdout.strip() if p.returncode == 0 else (text or "").strip()
+
+
+def same_message(plan, sha):
+    wt = plan["worktree"]
+    return tidy(wt, git_ro(wt, "log", "-1", "--format=%B", sha)) == tidy(wt, plan["draft"]["message"])
+
+
+def changed_paths(wt, sha):
+    out = git_ro(wt, "diff-tree", "--no-commit-id", "--name-only", "-r", "-z", sha) or ""
+    return sorted(p for p in out.split("\0") if p)
+
+
+def commit_mismatch(plan, sha):
+    """Why commit `sha` is not exactly what the preview approved ([] when it is): its only parent
+    must be the previewed HEAD, it must change exactly the approved paths with their previewed
+    contents, and carry the reviewed message. Read from Git every time, never from the journal."""
+    wt, out = plan["worktree"], []
+    parents = (git_ro(wt, "rev-list", "--parents", "-n", "1", sha) or "").split()[1:]
+    if parents != [plan["head"]]:
+        out.append("its parent is %s, not the previewed HEAD %s" % (
+            ", ".join(p[:12] for p in parents) or "none", (plan["head"] or "?")[:12]))
+    rows = [r for r in plan["paths"]["approved"] if r["status"] != "unchanged"]
+    todo = {r["path"] for r in rows}
+    changed = set(changed_paths(wt, sha))
+    extra, missing = sorted(changed - todo), sorted(todo - changed)
+    if extra:
+        out.append("it changes path(s) outside the approved preview: %s" % ", ".join(extra))
+    if missing:
+        out.append("it leaves out approved path(s): %s" % ", ".join(missing))
+    for r in rows:
+        if r["path"] in missing:
+            continue
+        have = (git_ro(wt, "rev-parse", "--verify", "-q", "%s:%s" % (sha, r["path"])) or "").strip() or None
+        if have == r["blob"]:
+            continue
+        if have and r["blob"] and blob(wt, r["path"]) == r["blob"]:
+            # a clean filter (line endings, attributes) stores other bytes than the working file:
+            # compare with what `git add` stores for the previewed file, which is still on disk
+            if (git_ro(wt, "hash-object", "--", r["path"]) or "").strip() == have:
+                continue
+        out.append("%s in the commit is %s, not the previewed content %s" % (
+            r["path"], (have or "absent")[:12], (r["blob"] or "absent")[:12]))
+    if not same_message(plan, sha):
+        out.append("its message is not the reviewed one")
+    return out
+
+
+def refuse_commit(plan, sha, why, log, how):
+    wt = plan["worktree"]
+    log("REFUSED     commit %s (%s) is not the commit the preview approved:" % (sha[:12], how))
+    for w in why:
+        log("              - %s" % w)
+    q = shlex.quote(wt)
+    log("            Nothing was pushed and no PR was opened; the commit stays in your local branch as it is.\n"
+        "            Inspect it: git -C %s show --stat %s\n"
+        "            To publish only the approved work, undo it yourself (for example git -C %s reset --soft %s), "
+        "then preview again." % (q, sha[:12], q, (plan["head"] or "HEAD~1")[:12]))
+    return 1
+
+
 def adopt(plan, journal):
     """The journal entry for a commit this plan made when the run stopped before recording it
     (killed between `git commit` and the journal write): HEAD's only parent is the previewed
-    HEAD, its message is the reviewed one and it changes exactly the approved paths. Else None."""
+    HEAD and its message is the reviewed one. Else None. Adopting it authorizes nothing: the
+    commit still has to pass commit_mismatch() before anything is pushed."""
     if journal["steps"].get("commit"):
         return None
     wt = plan["worktree"]
@@ -265,11 +343,8 @@ def adopt(plan, journal):
     if not head or head == plan["head"]:
         return None
     parents = (git_ro(wt, "rev-list", "--parents", "-n", "1", head) or "").split()
-    msg = git_ro(wt, "log", "-1", "--format=%B", head)
-    changed = sorted((git_ro(wt, "diff-tree", "--no-commit-id", "--name-only", "-r", "-z", head) or "").strip("\0").split("\0"))
-    todo = sorted(r["path"] for r in plan["paths"]["approved"] if r["status"] != "unchanged")
-    if parents[1:] == [plan["head"]] and (msg or "").strip() == plan["draft"]["message"].strip() and changed == todo:
-        return {"sha": head, "paths": changed, "adopted": True}
+    if parents[1:] == [plan["head"]] and same_message(plan, head):
+        return {"sha": head, "paths": changed_paths(wt, head), "adopted": True}
     return None
 
 
@@ -283,6 +358,9 @@ def publish(plan_path, yes=False, draft=None, no_pr=False, log=print):
     d = plan["draft"]
     adopted = adopt(plan, j)
     if adopted:
+        why = commit_mismatch(plan, adopted["sha"])
+        if why:
+            return refuse_commit(plan, adopted["sha"], why, log, "made before an interruption")
         j["steps"]["commit"] = adopted
         if yes:
             _save_journal(plan_path, j)
@@ -298,6 +376,11 @@ def publish(plan_path, yes=False, draft=None, no_pr=False, log=print):
     if moved or blocking:
         log("\npai worktree publish: nothing was staged, committed, pushed or opened. Preview again.")
         return 1
+    recorded = j["steps"].get("commit", {}).get("sha")
+    if recorded and recorded == now["head"] and not adopted:  # an earlier run's commit: checked again, every time
+        why = commit_mismatch(plan, recorded)
+        if why:
+            return refuse_commit(plan, recorded, why, log, "recorded in the journal by an earlier run")
     todo = [r["path"] for r in plan["paths"]["approved"] if r["status"] != "unchanged"]
     log("plan        %s -> %s %s (base %s)" % (wt, remote, branch, plan["base"]["branch"]))
     if not yes:
@@ -313,6 +396,7 @@ def publish(plan_path, yes=False, draft=None, no_pr=False, log=print):
         log("REFUSED     choose --draft or --ready: the PR's state is the owner's choice. Nothing was done.")
         return 1
     # 1. commit, once
+    made_now = False
     if todo and not j["steps"].get("commit"):
         lit = dict(os.environ, GIT_LITERAL_PATHSPECS="1")
         st = status(wt)
@@ -338,14 +422,18 @@ def publish(plan_path, yes=False, draft=None, no_pr=False, log=print):
                 (r.stderr.strip() or r.stdout.strip())[-600:], "; %s untracked again" % ", ".join(untracked) if untracked else ""))
             return 1
         sha = gitprep.rev(wt, "HEAD")
-        changed = sorted((git_ro(wt, "diff-tree", "--no-commit-id", "--name-only", "-r", "-z", sha) or "").strip("\0").split("\0"))
+        changed = changed_paths(wt, sha)
         j["steps"]["commit"] = {"sha": sha, "paths": changed}
-        _save_journal(plan_path, j)
+        _save_journal(plan_path, j)  # a record that this run committed (so it never commits again), not an approval
+        made_now = True
         log("committed   %s (%s)" % (sha[:12], ", ".join(changed)))
-        extra = sorted(set(changed) - set(todo))
-        if extra:
-            log("WARNING     the commit also changed %s (a hook?); review before the push" % ", ".join(extra))
     head = gitprep.rev(wt, "HEAD")
+    # the gate: on every run, the commit about to be published is checked against the preview
+    if head != plan["head"]:
+        why = commit_mismatch(plan, head)
+        if why:
+            return refuse_commit(plan, head, why, log, "made by this run" if made_now else
+                                 "recorded in the journal by an earlier run")
     # 2. push without force, then read the remote back
     rsha, _ = remote_branch(wt, remote, branch, False)
     if rsha != head:

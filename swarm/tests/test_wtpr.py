@@ -229,6 +229,86 @@ class WorktreePR(helpers.Fixture):
         self.assertEqual(p.returncode, 1)
         self.assertIn("DRIFT       HEAD moved", p.stdout, "a commit this plan did not make is never adopted")
 
+    # -- approval is a hard gate before anything leaves the machine
+
+    def remote_refs(self):
+        return git(self.origin, "for-each-ref", "--format=%(refname) %(objectname)")
+
+    def pr_creates(self):
+        return [c for c in self.gh_calls() if c[:2] == ["pr", "create"]]
+
+    def hook(self, name, text):
+        hooks = os.path.join(self.repo, git(self.repo, "rev-parse", "--git-path", "hooks"))
+        self.write_abs(os.path.join(hooks, name), text)
+        os.chmod(os.path.join(hooks, name), 0o755)
+        return os.path.join(hooks, name)
+
+    def assert_refused_and_nothing_left(self, p, remote_before, head, *needles):
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        for needle in ("REFUSED     commit %s" % head[:12], "is not the commit the preview approved",
+                       "Nothing was pushed and no PR was opened; the commit stays in your local branch") + needles:
+            self.assertIn(needle, p.stdout)
+        self.assertNotIn("pushed      ", p.stdout)
+        self.assertEqual(self.remote_refs(), remote_before, "the remote is unchanged")
+        self.assertEqual(self.pr_creates(), [], "gh pr create is never called")
+        self.assertEqual(git(self.wt, "rev-parse", "HEAD"), head, "the local commit is kept as it is")
+
+    def test_a_commit_with_unapproved_paths_is_refused_on_the_first_attempt_and_on_retries(self):
+        self.assertEqual(self.preview("--out", self.plan).returncode, 0)
+        remote_before = self.remote_refs()
+        hook = self.hook("pre-commit", "#!/bin/sh\ngit add debug.log\n")  # a hook slips an unapproved file in
+        p = self.pai("publish", self.plan, "--yes", "--draft")
+        head = git(self.wt, "rev-parse", "HEAD")
+        self.assertNotEqual(head, self.c0, "the commit was made")
+        self.assertIn("debug.log", git(self.wt, "show", "--name-only", "--format=", head).splitlines())
+        self.assert_refused_and_nothing_left(p, remote_before, head, "(made by this run)",
+                                             "it changes path(s) outside the approved preview: debug.log")
+        os.remove(hook)
+        # a retry reads the journal: its entry for this commit authorizes nothing
+        for args in (("--yes", "--draft"), ("--yes", "--ready"), ()):
+            p = self.pai("publish", self.plan, *args)
+            self.assert_refused_and_nothing_left(p, remote_before, head, "(recorded in the journal by an earlier run)",
+                                                 "it changes path(s) outside the approved preview: debug.log")
+        # a retry after an interruption that lost the journal adopts the commit, and refuses it the same way
+        os.remove(self.plan + ".journal")
+        p = self.pai("publish", self.plan, "--yes", "--draft")
+        self.assert_refused_and_nothing_left(p, remote_before, head, "(made before an interruption)",
+                                             "it changes path(s) outside the approved preview: debug.log")
+        self.assertFalse(os.path.exists(self.plan + ".journal"), "a refused commit is not recorded as adopted")
+        self.assertEqual(git(self.wt, "rev-list", "--count", "%s..HEAD" % self.c0), "1", "never committed twice")
+
+    def test_a_commit_with_other_content_than_the_preview_is_refused_when_adopted(self):
+        self.assertEqual(self.preview("--out", self.plan).returncode, 0)
+        with open(self.plan) as f:
+            plan = json.load(f)
+        remote_before = self.remote_refs()
+
+        def obj(*args, data=None):
+            return subprocess.run(["git", "-C", self.wt] + list(args), input=data, capture_output=True, text=True,
+                                  check=True, env=dict(self.env, GIT_INDEX_FILE=os.path.join(self.tmp, "other.index"))
+                                  ).stdout.strip()
+        # an interrupted run (or someone) committed the approved paths with the reviewed message, but README.md
+        # holds another version than the previewed one; the working files still match the preview
+        obj("read-tree", self.c0)
+        other = obj("hash-object", "-w", "--stdin", data="hello\nsomething else\n")
+        note = obj("hash-object", "-w", "--stdin", data="# New\n")
+        obj("update-index", "--add", "--cacheinfo", "100644,%s,README.md" % other)
+        obj("update-index", "--add", "--cacheinfo", "100644,%s,docs/new note.md" % note)
+        tree = obj("write-tree")
+        sha = obj("commit-tree", tree, "-p", self.c0, "-m", plan["draft"]["message"])
+        git(self.wt, "update-ref", "refs/heads/feat/y", sha)
+        p = self.pai("publish", self.plan, "--yes", "--ready")
+        self.assert_refused_and_nothing_left(p, remote_before, sha, "(made before an interruption)",
+                                             "README.md in the commit is %s, not the previewed content" % other[:12])
+
+    def test_a_hook_that_edits_the_reviewed_message_is_refused(self):
+        self.assertEqual(self.preview("--out", self.plan).returncode, 0)
+        remote_before = self.remote_refs()
+        self.hook("commit-msg", "#!/bin/sh\nprintf '\\nCo-authored-by: Someone <s@example.org>\\n' >> \"$1\"\n")
+        p = self.pai("publish", self.plan, "--yes", "--draft")
+        head = git(self.wt, "rev-parse", "HEAD")
+        self.assert_refused_and_nothing_left(p, remote_before, head, "its message is not the reviewed one")
+
 
 if __name__ == "__main__":
     unittest.main()
