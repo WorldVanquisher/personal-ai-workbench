@@ -41,6 +41,7 @@ SCHEMA = [
     ("review", "checks", "checks", None, "approved check commands, NAME = [argv]; only these ever run"),
     ("review", "required_checks", "list", None, "checks that always run before pr open"),
     ("review", "check_timeout_min", "int", 45, "minutes before a check is stopped"),
+    ("review", "strip_trailers", "list", None, "trailer keys `pai pr draft` removes from PR text (case-insensitive)"),
     ("logs", "tail", "int", 60, "pai logs --tail"),
 ]
 AGENT_KEYS = [("mode", "launch mode"), ("model", "model; unset: the agent's own default"),
@@ -325,4 +326,4 @@ def flat(data):
             "base_branch": r.get("base"), "tasks": r.get("tasks"), "worktree_root": r.get("worktree_root"),
             "tmux_socket": r.get("tmux_socket"), "wait": r.get("wait"), "dispatch": r.get("dispatch"),
             "review": review if review.get("checks") else {}, "agents": data.get("agents") or {},
-            "logs_tail": (data.get("logs") or {}).get("tail")}
+            "logs_tail": (data.get("logs") or {}).get("tail"), "strip_trailers": rv.get("strip_trailers")}

@@ -5,6 +5,7 @@ verified download to a first delivered task in a fresh HOME; here it runs in a t
 folder. `pai task new --from` imports are checked on their own."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -15,6 +16,52 @@ import helpers  # noqa: E402
 from test_workbench import WB, needs_311  # noqa: E402
 
 ROOT = os.path.dirname(helpers.SWARM)
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+import onboarding_acceptance as oa  # noqa: E402
+
+# Ubuntu's /etc/bash.bashrc defines this hook; /usr/lib/command-not-found then prints a hint
+# and exits 127. Reproduced here, so the check does not depend on the host's distribution.
+UBUNTU_HOOK = """command_not_found_handle() {
+    if [ -x "$HOME/command-not-found" ]; then "$HOME/command-not-found" -- "$1"; return $?; fi
+    printf '%s: command not found\\n' "$1" >&2; return 127
+}
+"""
+UBUNTU_HELPER = """#!/bin/sh
+shift
+printf "Command '%s' not found, but can be installed with:\\n\\nsudo apt install %s\\n" "$1" "$1" >&2
+exit 127
+"""
+
+
+@unittest.skipUnless(shutil.which("bash"), "needs bash")
+class MissingPai(unittest.TestCase):
+    """The acceptance checks that a fresh shell cannot find `pai` test the exit status (127),
+    not bash's own wording: Ubuntu's command-not-found hook words it differently."""
+
+    def fresh_shell(self, bashrc, helper=None):
+        with tempfile.TemporaryDirectory() as home:
+            with open(os.path.join(home, ".bashrc"), "w") as f:
+                f.write(bashrc)
+            if helper:
+                path = os.path.join(home, "command-not-found")
+                with open(path, "w") as f:
+                    f.write(helper)
+                os.chmod(path, 0o755)
+            env = {"HOME": home, "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "TERM": "dumb"}
+            return oa.sh(["bash", "-ic", "pai --version"], env, cwd=home)
+
+    def test_ubuntu_command_not_found_hook(self):
+        rc, out, err = self.fresh_shell(UBUNTU_HOOK, UBUNTU_HELPER)
+        self.assertIn("Command 'pai' not found, but can be installed with", err, "the fixture behaves like Ubuntu")
+        self.assertNotIn("command not found", err, "the old wording check would have failed here")
+        self.assertTrue(oa.pai_missing(rc), "exit %s; %s" % (rc, err))
+
+    def test_plain_bash_and_a_found_command(self):
+        rc, _, err = self.fresh_shell("")
+        self.assertTrue(oa.pai_missing(rc), "exit %s; %s" % (rc, err))
+        self.assertIn("pai: command not found", err)
+        self.assertFalse(oa.pai_missing(0))
+        self.assertFalse(oa.pai_missing(1), "pai ran and failed: that is not a missing command")
 
 
 @helpers.needs_tmux
@@ -27,7 +74,8 @@ class FirstRun(unittest.TestCase):
                                 "--work", work], capture_output=True, text=True, timeout=900, stdin=subprocess.DEVNULL,
                                env={k: v for k, v in os.environ.items() if k not in ("TMUX", "TMUX_PANE")})
             self.assertEqual(p.returncode, 0, p.stdout[-3000:] + p.stderr[-2000:])
-            res = json.load(open(os.path.join(work, "onboarding-results.json")))
+            with open(os.path.join(work, "onboarding-results.json")) as f:
+                res = json.load(f)
             self.assertTrue(res["passed"])
             self.assertEqual(res["manual_prompts_answered_with_text"], 1, res["prompts"])
 
@@ -51,7 +99,8 @@ class Tasks(WB):
         self.assertIn("PREVIEW (nothing written)", p.stdout)
         self.assertFalse(os.path.exists(os.path.join(self.tasks, "fix-login.md")))
         self.assert_ok(self.new("--from", src, "--write"))
-        text = open(os.path.join(self.tasks, "fix-login.md")).read()
+        with open(os.path.join(self.tasks, "fix-login.md")) as f:
+            text = f.read()
         self.assertTrue(text.startswith("---\npriority: 4\nchecks: [verify]\nowner: me # mine\nstatus: todo\n---\n"), text)
         self.assertIn("# Fix login\n\nThe login button does nothing.\n", text)
         out = self.assert_ok(self.pai("task", "list"))

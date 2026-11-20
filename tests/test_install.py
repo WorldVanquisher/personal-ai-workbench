@@ -6,9 +6,11 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -129,6 +131,41 @@ class Install(unittest.TestCase):
         self.assertIn("/opt/x/bin", install.path_fix("/opt/x/bin", {}, windows=False)[0])
         self.assertTrue(install.on_path(b, {"PATH": os.pathsep.join(["/usr/bin", b])}))
         self.assertFalse(install.on_path(b, {"PATH": "/usr/bin"}))
+
+    @unittest.skipUnless(shutil.which("bash") and os.name != "nt", "runs the advice in a real bash")
+    def test_path_advice_works_when_pasted_into_bash(self):
+        # 059: spaces, quotes, $, a backtick, non-ASCII, inside and outside HOME; the advice is
+        # executed exactly as printed, then a new login-like shell reads the file it wrote.
+        home = self.t / "Ada's home"
+        home.mkdir()
+        for rel in (".local/bin", "My Tools/bin", 'odd "quoted" $dir/`tick`/bin', "café/bin", "it's/bin"):
+            for base in (str(home), "/opt/pai tools"):
+                d = os.path.join(base, rel)
+                env = {"HOME": str(home), "PATH": "/usr/bin:/bin", "SHELL": "/bin/bash"}
+                rc = home / ".bashrc"
+                if rc.exists():
+                    rc.unlink()
+                with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                    first, second = install.path_fix(d, env, windows=False, platform="linux")
+                p = subprocess.run(["bash", "--noprofile", "--norc", "-c", first], env=env, capture_output=True, text=True)
+                self.assertEqual(p.returncode, 0, (first, p.stderr))
+                p = subprocess.run(["bash", "--noprofile", "--norc", "-c", 'source ~/.bashrc; printf "%s" "$PATH"'],
+                                   env=env, capture_output=True, text=True)
+                self.assertEqual(p.stdout.split(":")[0] if ":" in p.stdout else p.stdout, d, (first, p.stdout))
+                now = second.split("for this one only: ", 1)[1].rstrip(")")
+                p = subprocess.run(["bash", "--noprofile", "--norc", "-c", now + '; printf "%s" "$PATH"'], env=env,
+                                   capture_output=True, text=True)
+                self.assertTrue(p.stdout.startswith(d + ":"), (now, p.stdout))
+
+    def test_path_advice_is_quoted_for_fish_and_powershell(self):
+        # no fish or PowerShell on the test host: the exact text is checked instead (unverified in those shells)
+        home = os.path.expanduser("~")
+        self.assertEqual(install.path_fix(os.path.join(home, "My Tools", "bin"), {"SHELL": "/usr/bin/fish"}, windows=False)[0],
+                         'fish_add_path "$HOME/My Tools/bin"')
+        self.assertEqual(install.path_fix("/opt/a$b/bin", {"SHELL": "/usr/bin/fish"}, windows=False)[0],
+                         'fish_add_path "/opt/a\\$b/bin"')
+        ps = install.path_fix(r"C:\Users\Ana Ng\$weird`bin", {}, windows=True)[0]
+        self.assertIn(r'"C:\Users\Ana Ng\`$weird``bin;"', ps)
 
     def test_defaults_are_user_local(self):
         p, b = install.defaults({"XDG_DATA_HOME": "/xdg"}, windows=False)

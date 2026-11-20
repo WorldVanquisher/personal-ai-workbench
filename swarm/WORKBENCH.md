@@ -20,12 +20,14 @@ prove is listed in [section 12](#12-tested-with-fakes-and-not-verified-live).
 ```sh
 cd ~/code/myapp                     # any directory inside the checkout, or one of its worktrees
 pai doctor                          # read-only: this pai (intact, on PATH), the checkout, system,
-                                    # git, tmux, gh, ps, agents, logins, SSH access; each problem with its fix
+                                    # git, tmux, gh, ps, agents, logins, SSH access, each backend's capabilities;
+                                    # grouped ESSENTIAL / OPTIONAL / INFO, then REPAIR commands to copy
 pai init                            # asks: default agent, its model and effort, remote, base,
                                     # task-notes folder, review checks, then (optional) a JEV key;
                                     # Enter keeps each suggestion, and it ends with your next commands
 pai task new "TITLE" --body "..."   # preview a task note; --write saves it (never overwrites)
 pai task list                       # the queue, in the order `pai run` takes it
+pai task export --out cards.json    # the queue as portable task cards; pai task import cards.json
 pai setup --dry-run                 # OS, architecture, worker backend, missing tools, install commands
 pai setup --install-missing         # runs only those commands; logins and folder trust stay yours
 ```
@@ -41,6 +43,17 @@ and `priority` (and `paths` with `--path`), then `# TITLE` and the body. `--from
 imports one Markdown file: its own front matter and text are kept, `status: todo` is added
 when it has none, and a `# heading` is added from the file name when it has none. A note
 whose status is not `todo` is saved but flagged, because `pai run` will not take it.
+
+**Portable task cards.** `pai task export [NAME ...]` previews the notes as one versioned card
+file (`pai-task-cards` version 1: title, description, acceptance criteria, status, priority,
+repository-relative paths; deterministic JSON that diffs cleanly); `--out FILE` writes it,
+never over an existing file. Run and personal fields (worker, branch, owner, email, ...) are
+left out unless `--include-private`, which puts them in a separate `private` group. Text that
+looks like a credential is reported by card, field and line, masked, and blocks `--out` until
+removed (or `--allow-flagged`). `pai task import FILE` previews each note as create, unchanged
+or CONFLICT (by path); `--write` creates only new notes and is refused while any conflicts
+(`--skip-existing` leaves those alone). Absolute or escaping paths and unknown format versions
+are refused.
 
 `pai init` lists each agent, whether it is installed, and whether pai can run it with
 Remote Control (Claude: yes, `rc` mode; Codex: not supported), plus "not set yet".
@@ -118,13 +131,15 @@ pai run --repo https://github.com/OWNER/REPO.git --checkout-dir /path/to/checkou
 ## 4. Watch, attach, answer trust prompts
 
 ```sh
-pai status                # per lane: process, task dispatch, Remote Control evidence
-pai status --json
+pai status                # per lane: lifecycle (queued, waiting-for-trust, delivered, exited, ...), why, evidence
+pai status --json         # the same, structured (schema pai_status_v1); --brief (automatic below 80 columns)
+pai inspect a             # one lane: why it is in its state, and the file or command behind each piece of evidence
 pai attach a              # opens lane a's window (pai remembers the socket); --print shows the tmux command
 pai logs a --tail 100     # screen and scrollback; --follow keeps printing
 pai trust                 # every lane waiting for folder trust, one after another, from this terminal
 ```
 
+Every lifecycle name, its identifiers and the minimum evidence behind it: [RUN-STATE.md](RUN-STATE.md).
 Five separate kinds of evidence per lane; none stands in for another:
 
 - **process**: `running`, `exited (status N)`, `no window`, `mismatched` (the window is not
@@ -255,6 +270,31 @@ and `pai next`; while one of those runs, they are refused and change nothing. A 
 an earlier pai that says `delivered` only because the tag was visible is shown as `unknown`
 unless the transcript shows the prompt; it is never resent.
 
+### Recover an interrupted run: preview first
+
+```sh
+pai recover                         # read-only preview, lane by lane: task, lifecycle, evidence, action
+pai recover --apply                 # restart exited or missing workers, deliver tasks never sent,
+                                    # record a delivery the transcript already shows
+pai recover --choose b=redispatch --apply      # an unknown dispatch: only on your explicit choice
+pai recover --choose b=mark-delivered --apply  #   (or b=leave to decide later)
+pai recover --history               # every recorded decision, with before- and after-state
+pai guide --recovery                # try it offline: the fake worker crashes once, then is recovered
+```
+
+To continue a task in a **fresh session** instead (another agent, a clean context, another
+HOME), hand it off: `pai recover --continue LANE` (preview), `--write`, then `pai run --continue
+NOTE [--agent codex]`. Goal, completed steps, evidence and open decisions travel in the task note;
+nothing is sent twice. See [CONTINUATION.md](CONTINUATION.md); try it offline with
+`pai guide --handoff` and `pai guide --handoff interrupted`.
+
+Actions marked AUTO happen with `--apply`; CHOOSE (an unknown dispatch) waits for `--choose`;
+HUMAN (a folder-trust prompt, an agent that accepts no input, a doubtful window) is yours and
+names the folder and repository. Each decision is written to
+`$PAI_SWARM_HOME/recovery/<repo key>-<run>.jsonl` before anything happens and completed after;
+an interrupted recovery is shown by the next preview. A second `pai recover --apply` (or
+`pai resume`, `pai run`) on the same run is refused while one is working.
+
 ## 7. SSH remotes
 
 Before a new run, a clone, `pai next` and `pai pr open`, pai runs one bounded
@@ -277,10 +317,22 @@ accepted for you. HTTPS remotes need no agent.
 ## 8. Review and publish
 
 ```sh
-pai pr plan a             # read-only: commits, checks, publication check, remote, PR
+pai pr draft a            # local owner-review page: diff, recorded checks, PR text, filter removals,
+                          # checklist and the publish commands; no network, index or refs touched
+pai pr draft a --out review.md     # save it (never over an existing file)
+pai pr plan a             # read-only: commits, checks, publication check, remote, PR (asks GitHub)
 pai pr check a            # run the approved checks at HEAD; record results in the note
 pai pr open a --draft     # SSH preflight, checks again, publication check, push (never forced), PR
 ```
+
+**The publication boundary.** Workers are told not to push or open pull requests, and no pai
+default or setting makes pai do it: `pai pr open` is the only command that pushes or opens a
+PR, and only when you run it. `pai pr draft` is where the owner reviews: it renders the
+branch, the proposed diff, the test evidence recorded for exactly this head, and the PR text
+after the metadata filter (configured trailer keys in `review.strip_trailers`, Claude/Anthropic
+co-author trailers, session trailers and footers, session links and credential-like text; each
+removal is listed first, human co-authors stay). Publishing (push, PR) and merging remain the
+owner's manual steps; the draft prints the commands without running them.
 
 Only commands from `[review.checks]` run; a note can request one by name, never supply a
 command. Results are tied to the exact commit and snapshot; `pr open` reruns them and

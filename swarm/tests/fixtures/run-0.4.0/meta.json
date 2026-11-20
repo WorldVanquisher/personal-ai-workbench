@@ -1,0 +1,32 @@
+{
+ "base": "ea4819b705360d202ff8630f6799646af27cc373",
+ "files": [
+  "state/tasks/@CDIR@-r040.json",
+  "state/rc/@CDIR@-r040.json",
+  "state/dispatch/@CDIR@-r040.json",
+  "state/locks/@LOCK@.json",
+  "state/workbench/worktrees.json",
+  "state/workbench/runs/repo/r040/manifest.json",
+  "state/workbench/runs/repo/r040/run.json",
+  "cfg/projects/repo.toml"
+ ],
+ "git": {
+  "GIT_AUTHOR_DATE": "2026-11-01T09:00:00Z",
+  "GIT_AUTHOR_EMAIL": "ada@example.org",
+  "GIT_AUTHOR_NAME": "Ada Human",
+  "GIT_COMMITTER_DATE": "2026-11-01T09:00:00Z",
+  "GIT_COMMITTER_EMAIL": "ada@example.org",
+  "GIT_COMMITTER_NAME": "Ada Human",
+  "GIT_CONFIG_GLOBAL": "/dev/null",
+  "GIT_CONFIG_NOSYSTEM": "1"
+ },
+ "made_by": "pai 0.4.0 (git b02acec), swarm/tests/fixtures/make_run_040.py",
+ "names": {
+  "cdir": "f032eccecf48",
+  "lock": "953f1af5c445329ad72fd07e"
+ },
+ "note": "---\nstatus: todo\npriority: 2\n---\n# Task first\n\nDo first.\n",
+ "root": "/var/tmp/pai-fx040",
+ "run": "r040",
+ "run_exit": 0
+}

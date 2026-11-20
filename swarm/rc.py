@@ -287,6 +287,12 @@ class Manifest:
                    PAI_TASK_REMOTE=rec["repo"]["remote"], PAI_TASK_BASE_SHA=rec["base_sha"],
                    PAI_TASK_BRANCH=rl["branch"], PAI_TASK_WORKTREE=w.worktree, PAI_TASK_NOTE=rl.get("note") or "",
                    PAI_AGENT=w.agent)
+        # where pai reads this agent's evidence (session records, transcript, rollout): the same for
+        # the agent, even when the tmux server was started from another environment (another HOME)
+        if w.agent == "claude" and "CLAUDE_CONFIG_DIR" not in self.env and os.environ.get("CLAUDE_CONFIG_DIR"):
+            env["CLAUDE_CONFIG_DIR"] = os.environ["CLAUDE_CONFIG_DIR"]
+        if w.agent == "codex" and "CODEX_HOME" not in self.env and os.environ.get("CODEX_HOME"):
+            env["CODEX_HOME"] = os.environ["CODEX_HOME"]
         unset = []
         if "SSH_AUTH_SOCK" not in self.env:
             if os.environ.get("SSH_AUTH_SOCK"):
@@ -417,9 +423,15 @@ def build_specs(m, want=None, interactive=False, input_fn=input):
         problems = assign_tasks(m)
         if interactive and not problems:
             ask_branches(m.workers, input_fn)
-        lanes = [gitprep.Lane(w.lane, w.branch, w.worktree, dict({"stem": w.branch, "note": w.task}, **agent_fields(w)))
+        cont = m.data.get("continues")  # `pai run --continue`: start at the handed-off head, keep its base
+        lanes = [gitprep.Lane(w.lane, w.branch, w.worktree, dict({"stem": w.branch, "note": w.task}, **agent_fields(w),
+                                                                 **({"start": cont["head"]} if cont else {})))
                  for w in m.workers]
-        return [gitprep.Spec(m.run_id, lanes=lanes, want="new", meta={"run": m.run_id, "gen": 1}, **common)], problems
+        meta = {"run": m.run_id, "gen": 1}
+        if cont:
+            meta["continues"] = {k: cont.get(k) for k in ("id", "from", "head", "branch", "agent")}
+        return [gitprep.Spec(m.run_id, lanes=lanes, want="new", meta=meta, pinned_base=cont["base"] if cont else None,
+                             **common)], problems
     if want == "new":
         return [], ["run %s was already started; rerun without --new to resume it, or use a new run_id" % m.run_id]
     problems = []
@@ -431,6 +443,10 @@ def build_specs(m, want=None, interactive=False, input_fn=input):
     groups = {}
     for w in m.workers:
         rec, rl = cur[w.lane]
+        if rl.get("handed_off"):  # continued in another session: never resumed here
+            w.branch, w.task = rl["branch"], rl.get("note")
+            log("HANDED OFF %-11s %s; not resumed" % (w.lane, describe_handoff(rl["handed_off"])))
+            continue
         if w.branch_source in ("command line", "prompt") and w.branch != rl["branch"]:
             problems.append("lane %s is recorded on branch %s; a resume never renames it" % (w.lane, rl["branch"]))
         problems += agent_mismatch(w, rl)
@@ -526,8 +542,12 @@ class Tmux:
 
 
 def process_table():
+    # Full command lines whatever the terminal: ps cuts `args` to $COLUMNS (procps honours it even
+    # when its output is a pipe), and a cut path no longer names the lane's program.
+    env = {k: v for k, v in os.environ.items() if k not in ("COLUMNS", "LINES")}
     try:
-        p = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,args="], capture_output=True, text=True, timeout=15)
+        p = subprocess.run(["ps", "-A", "-ww", "-o", "pid=,ppid=,args="], capture_output=True, text=True, timeout=15,
+                           env=env)
     except (OSError, subprocess.TimeoutExpired):
         return {}
     table = {}
@@ -784,6 +804,16 @@ def agent_problems(m):
             why = w.adapter.probe(path, w.mode, cache)
             if why:
                 problems.append("lane %s: %s" % (w.lane, why))
+        caps = w.adapter.capabilities()  # the same representation `pai doctor` shows
+        if m.dispatch and not caps["transcript"]["delivery_evidence"]:
+            problems.append("lane %s: %s keeps no transcript pai can read, so a dispatched task could never be shown "
+                            "delivered. Repair: `pai run --no-dispatch` and give it the task yourself (`pai paste`), or "
+                            "choose a backend with delivery evidence (%s)" % (
+                                w.lane, w.adapter.display, ", ".join(n for n in agents.names()
+                                                                     if agents.get(n).capabilities()["transcript"]["delivery_evidence"])))
+        if w.mode not in caps["launch"]["modes"]:
+            problems.append("lane %s: %s has no launch mode %s (it has: %s)" % (w.lane, w.adapter.display, w.mode,
+                                                                                ", ".join(caps["launch"]["modes"])))
     return problems
 
 
@@ -830,6 +860,10 @@ def show_plan(m, specs, plans, problems, tmux):
             log("lane      %-14s worker: %s%s" % (ln.lane, what, "; task note %s" % w.task if w.task else ""))
             log("          %-14s agent:  %s, program %s%s" % ("", w.describe_agent(), m.argv_program(w),
                                                             "" if w.adapter.has_rc(w.mode) else "; Remote Control: not supported"))
+            caps = w.adapter.capabilities()
+            log("          %-14s evidence: readiness from %s; delivery from %s" % (
+                "", caps["readiness"]["source"].replace("-", " "),
+                caps["transcript"]["location"] or "NOTHING (no transcript)"))
     for p in problems:
         log("REFUSED   %s" % p)
 
@@ -855,6 +889,9 @@ def ensure_workers(m, tmux, lanes):
     failed = 0
     wins, table, own = tmux.windows(m.session), process_table(), load_own(m)
     for w, rec, rl in lanes:
+        if rl.get("handed_off"):
+            log("HANDED OFF %-11s %s; not restarted" % (w.lane, describe_handoff(rl["handed_off"])))
+            continue
         gate = gitprep.verify_ready(w.worktree, rl["branch"], rec["base_sha"])
         lock = wtlock.read(w.worktree)
         if not wtlock.owned(lock, "rc", m.run_id, w.lane):
@@ -895,17 +932,26 @@ def ensure_workers(m, tmux, lanes):
     return failed
 
 
+def describe_handoff(h):
+    return "handed off at %s (head %s)%s" % (h.get("at"), (h.get("head") or "?")[:12], "; continued in %s" % h["continued_by"]
+                                              if h.get("continued_by") else "; continue it with `pai run --continue %s`"
+                                              % h.get("note"))
+
+
 def mark_notes(m, rec, lanes):
     """Write the assignment into each worker's task note (Obsidian)."""
     if not m.tasks_dir:
         return
+    cont = (rec.get("meta") or {}).get("continues")
     for w in lanes:
         rl = rec["lanes"][w.lane]
         path = os.path.join(m.tasks_dir, "%s.md" % rl["note"]) if rl.get("note") else None
         if path and os.path.isfile(path):
-            notes.Task(path).update(meta={"status": "running", "worker": w.lane, "rc_run": m.run_id,
-                                          "branch": rl["branch"], "base_sha": rec["base_sha"],
-                                          "remote": rec["repo"]["remote"], "worktree": w.worktree})
+            meta = {"status": "running", "worker": w.lane, "rc_run": m.run_id, "branch": rl["branch"],
+                    "base_sha": rec["base_sha"], "remote": rec["repo"]["remote"], "worktree": w.worktree}
+            if cont:  # this continuation is used: the same handed-off head is never continued twice from here
+                meta.update(continued_marker=cont["id"], continued_in="%s/%s" % (m.run_id, w.lane))
+            notes.Task(path).update(meta=meta)
 
 
 def cmd_up(m, a):
@@ -926,7 +972,7 @@ def cmd_up(m, a):
         show_plan(m, specs, plans, problems, tmux)
         log("\nrc up: REFUSED. Nothing was fetched, created, switched or started.")
         return 1
-    if new:  # the fetch below must not stop at a passphrase prompt
+    if new and not m.data.get("continues"):  # the fetch below must not stop at a passphrase prompt
         bad = ssh_preflight(m)
         if bad:
             for line in bad:
@@ -1048,7 +1094,8 @@ def lane_status(m, tmux, w, rec, rl, wins, table, own=None, disp=None):
           "note": rl.get("note"), "remote": rec["repo"]["remote"], "remote_url": rec["repo"]["remote_url"],
           "base_branch": rec["repo"]["base_branch"], "base_sha": rec["base_sha"], "fetched_at": rec["fetched_at"],
           "branch": rl["branch"], "worktree": w.worktree, "prepared": rl["state"],
-          "agent": {"name": w.agent, "mode": w.mode, "model": w.model, "program": m.argv_program(w)}}
+          "agent": {"name": w.agent, "mode": w.mode, "model": w.model, "program": m.argv_program(w)},
+          "handed_off": rl.get("handed_off"), "continues": (rec.get("meta") or {}).get("continues")}
     if os.path.isdir(w.worktree):
         st["on_branch"] = gitprep.current_branch(w.worktree)
         st["head"] = gitprep.rev(w.worktree, "HEAD")
@@ -1061,6 +1108,9 @@ def lane_status(m, tmux, w, rec, rl, wins, table, own=None, disp=None):
     own = load_own(m) if own is None else own
     proc = lane_process(m, tmux, w, wins, table, own)
     st["process"] = {k: v for k, v in proc.items() if k != "window"}
+    if proc["state"] == "running":
+        age = proc_age(proc["pid"])
+        st["process"]["age"] = int(age) if age is not None else None  # seconds since it started (Linux)
     win = proc.get("window") or {}
     st["tmux"] = {"socket": m.socket, "session": m.session, "window_id": win.get("window_id"),
                   "pane_id": win.get("pane_id")}
@@ -1103,29 +1153,39 @@ def lane_ok(m, r):
 
 
 def cmd_status(m, a, quiet_exit=False, pai=False):
+    import runstate
     tmux = Tmux(m.socket)
     rows, cur = collect_status(m, tmux)
     ok = bool(rows) and len(rows) == len(m.workers) and all(lane_ok(m, r) for r in rows)
+    summary = runstate.annotate(m, rows)
     if getattr(a, "json", False):
         for r in rows:
             r["dispatch"].pop("upgrade", None)  # internal: evidence a mutating command will record
-        json.dump({"run_id": m.run_id, "session": m.session, "socket": m.socket, "ok": ok, "lanes": rows},
-                  sys.stdout, indent=1)
+        json.dump({"schema": runstate.SCHEMA, "run": runstate.run_key(m), "run_id": m.run_id, "session": m.session,
+                   "socket": m.socket, "ok": ok, "summary": summary, "lanes": rows}, sys.stdout, indent=1)
         print()
+        return 0 if ok else 1
+    width = shutil.get_terminal_size((100, 24)).columns
+    if rows and (getattr(a, "brief", False) or width < 80):
+        runstate.brief(m, rows, summary, width, log)
         return 0 if ok else 1
     log("run       %s   tmux session %s (%s)%s" % (m.run_id, m.session, "exists" if tmux.has_session(m.session) else "absent",
                                                    "  socket %s" % m.socket if m.socket else ""))
     if not rows:
         log("No task has been started for this run. `%s` shows what would happen." % ("pai run --dry-run" if pai else "rc plan"))
         return 1
+    log("summary   %s" % runstate.summary_line(summary))
     for r in rows:
         p, branch_now = r["process"], r.get("on_branch")
         log("lane %s" % r["lane"])
+        log("  lifecycle %s: %s" % (r["lifecycle"]["state"], r["lifecycle"]["why"]))
+        log("  id        %s" % r["ids"]["task"])
         log("  agent     %s%s" % (m.worker(r["lane"]).describe_agent(), "  window %s pane %s" % (
             r["tmux"]["window_id"], r["tmux"]["pane_id"]) if r["tmux"]["window_id"] else ""))
         log("  task      %s%s" % (r["task_id"], "  note %s" % r["note"] if r["note"] else ""))
         log("  remote    %s %s" % (r["remote"], r["remote_url"]))
-        log("  base      %s @ %s (fetched %s)" % (r["base_branch"], r["base_sha"], r["fetched_at"]))
+        log("  base      %s @ %s (%s)" % (r["base_branch"], r["base_sha"], "fetched %s" % r["fetched_at"] if r["fetched_at"]
+                                             else "pinned from the handed-off session; nothing fetched"))
         log("  branch    %s%s" % (r["branch"], "" if "head" not in r else
                                   "  HEAD %s, %s commit(s) ahead of base, %d uncommitted path(s)%s" % (
                                       (r["head"] or "?")[:12], r["ahead"], r["uncommitted"],

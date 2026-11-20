@@ -4,11 +4,13 @@
     pai doctor     system, tools, agent install/login/Remote Control, SSH access (read-only)
     pai setup      what is missing and how it would be installed (--install-missing runs it)
     pai run        start a batch: one tmux window, worktree, branch and agent per lane
-    pai status     process, task dispatch and Remote Control evidence per lane
+    pai status     lifecycle, process, task dispatch and Remote Control evidence per lane
+    pai inspect    one lane: why it is in its state, and where each piece of evidence is
     pai attach     open a lane's window          pai logs     a lane's screen and scrollback
     pai trust      walk through every lane waiting for folder trust, from this terminal
     pai resume     restart missing workers and deliver undelivered tasks (no fetch)
-    pai pr         plan | check | open a lane's pull request
+    pai recover    preview recovering an interrupted run, lane by lane; --apply does it and logs it
+    pai pr         draft (local owner-review page; publishes nothing) | plan | check | open a lane's PR
     pai next       after a merged PR: the lane's next task on a new branch
     pai cleanup    preview, or --apply: close exited workers' windows
 
@@ -634,11 +636,34 @@ def current_project(a, strict=True):
         " Run `pai init` in your checkout first."), 2)
 
 
+def public_traces(project, run_id):
+    """What is left of a run whose records are not in this HOME: the task notes that name it."""
+    try:
+        folder = settings(project).get("tasks")
+        found = [t for t in notes.load_tasks(folder) if str(t.meta.get("rc_run") or "") == run_id] if folder and \
+            os.path.isdir(folder) else []
+    except Exception:  # noqa: BLE001  a hint only
+        return ""
+    if not found:
+        return ""
+    out = ["", "", "This HOME (%s) has no record of run %s, so pai cannot tell whether its tasks were delivered or what "
+           "state they reached. What is left of it in public:" % (wtlock.home(), run_id)]
+    for t in found:
+        out.append("  note %s: worker %s, branch %s from base %s (status %s)" % (
+            t.name, t.meta.get("worker") or "?", t.meta.get("branch") or "?", str(t.meta.get("base_sha") or "?")[:12],
+            t.status))
+    out.append("The branch holds the committed steps (and any HANDOFF.md); the note holds the goal. Treat the delivery "
+               "as unknown: run it again only after checking that branch (git log BASE..BRANCH), or restore the HOME "
+               "the run was started from (see swarm/CONTINUATION.md, Limits).")
+    return "\n".join(out)
+
+
 def select_run(a, project):
     ids = run_ids(project["name"])
     if a.run:
         if a.run not in ids:
-            raise Stop("pai: project %s has no run %s (runs: %s)" % (project["name"], a.run, ", ".join(ids) or "none"), 2)
+            raise Stop("pai: project %s has no run %s (runs: %s)%s" % (project["name"], a.run, ", ".join(ids) or "none",
+                                                                       public_traces(project, a.run)), 2)
         return load_run(project["name"], a.run)
     if not ids:
         raise Stop("pai: project %s has no run yet. Start one with `pai run`." % project["name"], 2)
@@ -709,6 +734,29 @@ def cmd_run(a):
     base = a.base or cfg.get("base_branch") or (infer_base(repo, remote) if exists else None)
     if not base and not dry:
         base = remote_default_branch(a.repo if remote_info else remote, repo if exists else os.sep)
+    cont = None
+    if getattr(a, "continue_note", None):  # a continuation is one lane, whatever the project's default
+        import continuation
+        if a.workers not in (None, 1):
+            raise Stop("pai run --continue: a continuation is one lane (no --workers %d). Nothing was changed." % a.workers, 2)
+        if a.task or a.branch:
+            raise Stop("pai run --continue: its task and branch come from the continuation (no --task or --branch). "
+                       "Nothing was changed.", 2)
+        a.workers = 1
+        mk, problems = continuation.for_run(cfg.get("tasks"), a.continue_note, os.path.join(
+            cfg.get("worktree_root") or os.path.join(os.path.dirname(repo), os.path.basename(repo) + "-pai-lanes"),
+            "a"), repo)
+        if mk and mk["lane"] != "a":
+            raise Stop("pai run --continue: the continuation is for lane %s; pai run lanes are a, b, ...: continue it "
+                       "with the same manifest tools (rc up). Nothing was changed." % mk["lane"], 2)
+        if problems:
+            raise Stop("pai run --continue: REFUSED, nothing was started:\n  " + "\n  ".join(problems), 1)
+        cont = dict(mk)
+        a.task = ["a=%s" % a.continue_note]
+        if not a.agent and mk.get("agent"):
+            a.agent = [mk["agent"]]  # the same agent as session 1 unless --agent says otherwise
+        log("continue  %s: %d completed step(s) on %s, head %s; base %s pinned (nothing fetched); agent %s" % (
+            mk["from"], len(mk.get("completed") or []), mk["branch"], mk["head"][:12], mk["base"][:12], a.agent[0]))
     # lanes and agents
     n = a.workers or (len(a.agent) if a.agent and len(a.agent) > 1 else None) or cfg.get("workers") or 1
     if not 1 <= n <= len(LANES):
@@ -768,6 +816,8 @@ def cmd_run(a):
         d["tasks"] = cfg["tasks"]
     if cfg.get("review"):
         d["review"] = cfg["review"]
+    if cont:
+        d["continues"] = cont
     path = run_manifest(name, run_id)
     try:
         m = rc.Manifest(path, data=d)  # every agent, mode and model is validated before anything else
@@ -844,7 +894,7 @@ def cmd_run(a):
     if problems or any(pl.blocked for pl in plans):
         rc.show_plan(m, specs, plans, problems, rc.Tmux(m.socket))
         raise Stop("\npai run: REFUSED. Nothing was fetched, created, written or started.", 1)
-    bad = rc.ssh_preflight(m)
+    bad = rc.ssh_preflight(m) if not cont else []  # a continuation fetches nothing
     if bad:
         raise Stop("\n".join(("REFUSED   " + x) if not x.startswith(("    ", "Run ")) else x for x in bad), 1)
     queue_hint(m)
@@ -855,6 +905,9 @@ def cmd_run(a):
     code = rc.exclusive(m, rc.cmd_up, ns(want="new", settle=a.wait if a.wait is not None else cfg.get("wait") or 10.0,
                                          no_dispatch=not d["dispatch"], jev_triage=a.jev_triage))
     remember_worktrees(m)
+    if cont:
+        import continuation
+        continuation.mark_continued(repo, cont, run_id, "a")
     log("\nrun %s: `pai status`, `pai attach LANE`, `pai trust` (folder-trust prompts), `pai cleanup`." % run_id)
     return code
 
@@ -947,6 +1000,14 @@ def card(title, body, priority, paths, source=None, source_name=None):
 def cmd_task(a):
     proj = current_project(a)
     folder = task_folder(proj)
+    if a.task_cmd in ("export", "import"):
+        import cards
+        if a.task_cmd == "export" and a.transfer:
+            import transfer
+            return transfer.cmd_export(proj, folder, a, log, lambda run_id: load_run(proj["name"], run_id))
+        if a.task_cmd == "export" and (a.run or a.lane or a.include_logs or a.without):
+            raise Stop("pai task export: --run, --lane, --include-logs and --without belong to --transfer", 2)
+        return cards.cmd_export(proj, folder, a, log) if a.task_cmd == "export" else cards.cmd_import(folder, a, log, proj)
     if a.task_cmd == "list":
         ts = notes.load_tasks(folder)
         todo = sorted((t for t in ts if t.status == "todo"), key=lambda t: (-t.priority, t.name))
@@ -994,7 +1055,31 @@ def cmd_task(a):
 
 def cmd_status(a):
     m = select_run(a, current_project(a))
-    return rc.cmd_status(m, ns(json=a.json), pai=True)
+    return rc.cmd_status(m, ns(json=a.json, brief=a.brief), pai=True)
+
+
+def cmd_inspect(a):
+    """One lane: its lifecycle, why, every piece of evidence with the file or command it comes
+    from, and what to do next. Read-only."""
+    import runstate
+    m = select_run(a, current_project(a))
+    m.worker(a.lane)
+    rows, _ = rc.collect_status(m, rc.Tmux(m.socket))
+    summary = runstate.annotate(m, rows)
+    row = next((r for r in rows if r["lane"] == a.lane), None)
+    if row is None:
+        log("lane %s of run %s: not-started (no task was prepared for it)" % (a.lane, m.run_id))
+        return 1
+    if a.json:
+        row["dispatch"].pop("upgrade", None)
+        json.dump({"schema": runstate.SCHEMA, "run": runstate.run_key(m), "lane": a.lane, "ids": row["ids"],
+                   "lifecycle": row["lifecycle"], "evidence": runstate.sources(m, row), "summary": summary},
+                  sys.stdout, indent=1)
+        print()
+    else:
+        for line in runstate.inspect_lines(m, row, shutil.get_terminal_size((100, 24)).columns):
+            log(line)
+    return 0 if not row["lifecycle"]["attention"] else 1
 
 
 def lane_window(m, lane):
@@ -1076,6 +1161,12 @@ def cmd_paste(a):
                           allow_unbracketed=a.allow_unbracketed)
     except panes.Refused as e:
         raise Stop("pai paste: lane %s: %s. Nothing was sent." % (a.lane, e), 1)
+    import pastes
+    try:
+        proc = rc.lane_process(m, tmux, w)
+    except Exception:  # noqa: BLE001  the record is evidence only
+        proc = {}
+    pastes.record(m, w, text, res, "cli", proc)
     how = {True: "as one bracketed paste", False: "unbracketed (the program did not ask for bracketed paste)",
            None: "bracketed if the program asked for it (this tmux cannot tell)"}[res["bracketed"]]
     log("lane %s: pasted %d characters, %d line(s), %s; %s." % (
@@ -1100,6 +1191,11 @@ def cmd_web(a):
     return console.main(proj, m, roots, port=a.port or 0, no_browser=a.no_browser)
 
 
+def cmd_guide(a):
+    import guide
+    return guide.main(a)
+
+
 def cmd_resume(a):
     m = select_run(a, current_project(a))
     if a.redispatch or a.mark_delivered:
@@ -1109,6 +1205,12 @@ def cmd_resume(a):
     code = rc.exclusive(m, rc.cmd_up, ns(want="resume", settle=a.wait, lane=[a.lane] if a.lane else None))
     remember_worktrees(m)
     return code
+
+
+def cmd_recover(a):
+    import recovery
+    m = select_run(a, current_project(a))
+    return recovery.main(m, a)
 
 
 def resolve_dispatch(m, a):
@@ -1189,6 +1291,11 @@ def cmd_trust(a):
 
 def cmd_pr(a):
     import review
+    if a.pr_cmd == "draft":
+        import draft
+        proj = current_project(a)
+        m = select_run(a, proj)
+        return draft.main(m, a, settings(proj).get("strip_trailers") or [])
     m = select_run(a, current_project(a))
     argv = [a.pr_cmd, m.path, "--lane", a.lane]
     for flag in ("title", "body_file"):
@@ -1314,6 +1421,8 @@ def cmd_doctor(a):
                 live += sum(1 for r in rc.collect_status(m, rc.Tmux(m.socket))[0] if r["rc"]["state"] == "verified")
         rows.append({"tool": "rc sessions", "used_by": "-", "state": "info",
                      "detail": "%d lane(s) of %s with verified Remote Control now" % (live, proj["name"]), "fix": None})
+    for r in rows:
+        r.setdefault("need", doctor.need(r))
     if a.json:
         json.dump(rows, sys.stdout, indent=1)
         print()
@@ -1690,7 +1799,10 @@ def parser():
     r.add_argument("--jev-triage", action="store_true", help="optional: ask JEV whether each assigned note is ready "
                    "(one request per note; advisory, never blocks)")
     r.add_argument("--wait", type=float, help="seconds to wait for lanes to start and take their task (config run.wait)")
-    tk = p("task", "task notes: list the queue, or create one note (preview unless --write)", run=False)
+    r.add_argument("--continue", dest="continue_note", metavar="NOTE", help="a fresh session continues the task note "
+                   "NOTE from its handed-off head (`pai recover --continue LANE --write` wrote it); one lane, any agent, "
+                   "base pinned, nothing fetched")
+    tk = p("task", "task notes: list, new, export and import portable cards (previews unless --write/--out)", run=False)
     tks = tk.add_subparsers(dest="task_cmd", required=True)
     tn = tks.add_parser("new", help="preview a task note in the project's task folder; --write saves it (never overwrites)")
     tn.add_argument("title", nargs="?", help="the task, in a short sentence (the note's # heading)")
@@ -1702,6 +1814,27 @@ def parser():
     tn.add_argument("--name", help="file name without .md (default: from the title)")
     tn.add_argument("--write", action="store_true", help="save it (refuses an existing note)")
     tks.add_parser("list", help="the notes in the task folder, in the order `pai run` takes them")
+    te = tks.add_parser("export", help="the notes as portable task cards: preview, or --out FILE (never overwrites)")
+    te.add_argument("names", nargs="*", metavar="NAME", help="only these notes (default: every note)")
+    te.add_argument("--status", help="only notes with this status (for example todo)")
+    te.add_argument("--out", help="write the card file here (refused if it exists)")
+    te.add_argument("--include-private", action="store_true", help="add run and personal fields, in a separate "
+                    "`private` group")
+    te.add_argument("--allow-flagged", action="store_true", help="write even though some text looks like a credential")
+    te.add_argument("--transfer", action="store_true", help="a transfer packet for handed-off task(s): the cards plus "
+                    "what the next session and its machine check (see swarm/transfer.py)")
+    te.add_argument("--run", help="with --transfer: the handed-off lanes of this run")
+    te.add_argument("--lane", action="append", default=[], help="with --transfer --run: only this lane (repeatable)")
+    te.add_argument("--include-logs", action="store_true", help="with --transfer: add the recorded check output, "
+                    "privacy-filtered (default: result and sha256 only)")
+    te.add_argument("--without", action="append", default=[], metavar="check:NAME",
+                    help="with --transfer: leave this evidence out; the packet says so (repeatable)")
+    ti = tks.add_parser("import", help="task cards into notes: preview (create / unchanged / CONFLICT), or --write")
+    ti.add_argument("file")
+    ti.add_argument("--write", action="store_true", help="create the new notes (refused while a note conflicts)")
+    ti.add_argument("--skip-existing", action="store_true", help="with --write: create the new ones, leave conflicts")
+    ti.add_argument("--other-project", action="store_true", help="import a transfer packet made for another project "
+                    "name (the repository must still be the same)")
     pa = p("paste", "text into a lane's agent in one piece (bracketed paste; no Enter unless --enter)", lane=True)
     pa.add_argument("file", nargs="?", help="a UTF-8 text file, or - (or nothing) to read stdin")
     pa.add_argument("--enter", action="store_true", help="also press Enter (never while a folder-trust prompt shows)")
@@ -1710,8 +1843,20 @@ def parser():
     wb = p("web", "the run in your browser: lane screens, typing, pasting, shells, notes (127.0.0.1; Ctrl-C stops it)")
     wb.add_argument("--port", type=int, help="loopback port (default: a free one)")
     wb.add_argument("--no-browser", action="store_true", help="print the link only")
-    st = p("status", "per lane: process, task dispatch, Remote Control evidence")
-    st.add_argument("--json", action="store_true")
+    gd = p("guide", "try the whole flow offline: a synthetic project, a FAKE worker, no account or network", run=False)
+    gd.add_argument("--dir", help="the demo folder to create (default: a new temporary folder)")
+    gd.add_argument("--cleanup", metavar="DIR", help="remove a folder that `pai guide` made (and nothing else)")
+    gd.add_argument("--recovery", action="store_true", help="the fake worker crashes on its first start; then "
+                    "`pai recover` previews and applies the recovery")
+    gd.add_argument("--handoff", nargs="?", const="clean", choices=("clean", "reverse", "interrupted"),
+                    help="stop a session and continue its task in a fresh one: clean (Claude to Codex, fresh HOME, via "
+                         "a transfer packet), reverse (Codex to Claude, the same way) or interrupted (uncertain "
+                         "delivery, no duplicate)")
+    st = p("status", "per lane: lifecycle, process, task dispatch, Remote Control evidence")
+    st.add_argument("--json", action="store_true", help="structured output (schema pai_status_v1)")
+    st.add_argument("--brief", action="store_true", help="one short block per lane (automatic below 80 columns)")
+    ins = p("inspect", "one lane: lifecycle, why, the evidence behind it and where each piece is read", lane=True)
+    ins.add_argument("--json", action="store_true")
     at = p("attach", "open a lane's tmux window", lane=True)
     at.add_argument("--print", action="store_true", help="only print the tmux command")
     lg = p("logs", "a lane's screen and scrollback", lane=True)
@@ -1724,14 +1869,28 @@ def parser():
     rs.add_argument("--wait", type=float, default=10.0)
     rs.add_argument("--redispatch", action="store_true", help="send a task whose dispatch is unknown again")
     rs.add_argument("--mark-delivered", action="store_true", help="record an unknown dispatch as delivered")
-    pr = p("pr", "plan | check | open a lane's pull request")
-    pr.add_argument("pr_cmd", choices=("plan", "check", "open"))
+    rv = p("recover", "preview recovering an interrupted run lane by lane; --apply does it and records each decision")
+    rv.add_argument("--apply", action="store_true", help="do the automatic actions and the ones you --choose")
+    rv.add_argument("--lane", action="append", help="only this lane (repeatable)")
+    rv.add_argument("--choose", action="append", metavar="LANE=ACTION",
+                    help="mark-delivered | redispatch (an unknown dispatch), restart, or leave")
+    rv.add_argument("--wait", type=float, default=15.0, help="seconds to wait for restarted lanes to take their task")
+    rv.add_argument("--history", action="store_true", help="the recorded recovery decisions of this run")
+    rv.add_argument("--json", action="store_true", help="the preview, structured")
+    rv.add_argument("--continue", dest="continue_lane", metavar="LANE", help="hand LANE's task to a fresh session: "
+                    "preview the continuation (goal, completed steps, evidence, open decisions)")
+    rv.add_argument("--write", action="store_true", help="with --continue: write it into the task note and hand the "
+                    "lane off (refused while its agent runs or its delivery is undecided)")
+    pr = p("pr", "draft (local, publishes nothing) | plan | check | open a lane's pull request")
+    pr.add_argument("pr_cmd", choices=("draft", "plan", "check", "open"))
     pr.add_argument("lane")
     pr.add_argument("--title")
     pr.add_argument("--body-file")
     pr.add_argument("--draft", action="store_true")
     pr.add_argument("--allow-ai-attribution", action="store_true")
     pr.add_argument("--jev-verify", action="store_true")
+    pr.add_argument("--out", help="draft: write the owner-review draft to this new file")
+    pr.add_argument("--keep-trailers", action="store_true", help="draft: show the PR text without the metadata filter")
     nx = p("next", "after a merged PR: the lane's next task", lane=True)
     nx.add_argument("--task")
     nx.add_argument("--branch")
@@ -1757,7 +1916,8 @@ def parser():
 COMMANDS = {"init": cmd_init, "doctor": cmd_doctor, "setup": cmd_setup, "run": cmd_run, "status": cmd_status,
             "attach": cmd_attach, "logs": cmd_logs, "trust": cmd_trust, "resume": cmd_resume, "pr": cmd_pr,
             "next": cmd_next, "cleanup": cmd_cleanup, "config": None, "jev": cmd_jev, "server": cmd_server,
-            "task": cmd_task, "paste": cmd_paste, "web": cmd_web}
+            "task": cmd_task, "paste": cmd_paste, "web": cmd_web, "guide": cmd_guide,
+            "inspect": cmd_inspect, "recover": cmd_recover}
 
 
 def main(argv=None):

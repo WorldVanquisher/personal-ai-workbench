@@ -19,6 +19,11 @@ If uv says its bin folder is not on your PATH, run `uv tool update-shell` (or th
 has the same pai as a `.tar.gz` and a `.zip`, each with a `.sha256`; [INSTALL.md](INSTALL.md)
 shows the three lines to verify and install one (no sudo, nothing piped into a shell).
 
+**Try the whole flow first, offline:** `pai guide` makes a disposable demo folder with a
+synthetic project, one task note and a FAKE worker (no account, credentials or network), and
+walks through plan, dispatch, status and handoff with the normal `pai` commands. It prints where
+everything landed; `pai guide --cleanup DIR` removes the folder. Needs git and tmux.
+
 ## 2. Check your machine
 
 ```sh

@@ -23,6 +23,12 @@ import helpers  # noqa: E402
 from test_workbench import WB, PAI, needs_311, wrapper, lines, alive  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# The settle window (PAI_DISPATCH_SETTLE: a lane must stay ready, with no trust prompt, this long
+# before anything is typed) defaults to 3 s. Only the tests whose trust prompt appears after the
+# first frame exercise it; they set the production value with production_settle(). Every other
+# test here uses a short test-local window, so it does not wait 3 s per dispatch for nothing.
+TEST_SETTLE = "0.5"
+PRODUCTION_SETTLE = "3"
 
 
 class Base(WB):
@@ -31,8 +37,13 @@ class Base(WB):
         for n in ("a", "b", "c"):
             self.note("task-%s" % n, priority=9 - ord(n) + ord("a"))
         wrapper(self.bin, "tmux-fault", "fake_tmux.py")
-        self.env.update(PAI_SWARM_TMUX=os.path.join(self.bin, "tmux-fault"), FAKE_TMUX_REAL=shutil.which("tmux"))
+        self.env.update(PAI_SWARM_TMUX=os.path.join(self.bin, "tmux-fault"), FAKE_TMUX_REAL=shutil.which("tmux"),
+                        PAI_DISPATCH_SETTLE=TEST_SETTLE)
         self.init()
+
+    def production_settle(self):
+        """For a test that exercises the settle window itself: the default 3 s, as shipped."""
+        self.env["PAI_DISPATCH_SETTLE"] = PRODUCTION_SETTLE
 
     # -- fixtures
     def faults(self, **kw):
@@ -112,7 +123,8 @@ class AfterTrust(Base):
         self.assertEqual((self.pastes("a"), len(self.received("a"))), (1, 1), "repeated resumes resend nothing")
 
     def test_codex_trust_prompt_after_the_first_frame_gets_no_keystroke(self):
-        # Codex drew its idle footer first and asked for trust 2 s later.
+        # Codex drew its idle footer first and asked for trust 2 s later: the settle window catches it.
+        self.production_settle()
         self.behavior(codex_trust_late={"a": 2.0})
         p = self.pai("run", "--workers", "1", "--agent", "codex", "--yes", "--wait", "6")
         out = p.stdout + p.stderr
@@ -274,6 +286,7 @@ class Policy(Base):
         self.assertEqual(len(self.received("a")), 1)
 
     def test_a_ready_lane_does_not_wait_for_lanes_at_a_trust_prompt(self):
+        self.production_settle()  # lane c's trust prompt appears 2 s after its first frame
         self.behavior(trust=["a"], codex_trust_late={"c": 2.0})
         p = self.pai("run", "--workers", "3", "--agent", "claude", "--agent", "codex", "--agent", "codex",
                      "--yes", "--wait", "10")

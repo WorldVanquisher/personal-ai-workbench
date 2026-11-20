@@ -81,8 +81,10 @@ class Doctor(unittest.TestCase):
             os.chmod(p, 0o755)
 
     def run_cli(self, *args, **env):
+        # The distribution is controlled here, so the platform is too: Linux, and not WSL (detection
+        # would otherwise read this host's kernel string). A test that wants WSL passes PAI_SWARM_WSL=1.
         e = {"PATH": self.bin, "HOME": self.tmp, "FAKE_STATE": self.state, "PAI_SWARM_OS_RELEASE": self.osr,
-             "TMPDIR": self.tmp}
+             "TMPDIR": self.tmp, "PAI_SWARM_PLATFORM": "Linux", "PAI_SWARM_WSL": "0"}
         e.update(env)
         return subprocess.run([sys.executable, "-B", CLI] + list(args), capture_output=True, text=True, env=e,
                               stdin=subprocess.DEVNULL)
@@ -98,14 +100,57 @@ class Doctor(unittest.TestCase):
         with open(p) as f:
             return [json.loads(l) for l in f]
 
+    def test_a_controlled_distribution_is_not_mistaken_for_wsl(self):
+        # 054: a host that looks like WSL (WSL_DISTRO_NAME here; on WSL also its kernel string) does
+        # not leak into a test that names its distribution; asking for WSL is explicit.
+        self.os_release("ubuntu", "debian")
+
+        def platform_row(**env):
+            p = self.run_cli("doctor", "--json", **env)
+            return next(r["detail"] for r in json.loads(p.stdout) if r["tool"] == "platform")
+        self.assertTrue(platform_row(WSL_DISTRO_NAME="Ubuntu").startswith("linux (ubuntu"))
+        self.assertTrue(platform_row(PAI_SWARM_WSL="1").startswith("wsl (ubuntu"))
+
+    def test_essential_and_optional_are_separate_with_copyable_repairs(self):
+        # 051, 052: gh (pr open, next) is optional; tmux is essential; repairs come from this platform
+        self.have("git", "tmux", "ps", "claude")
+        self.have("sudo", "pacman", installer=True)
+        p = self.run_cli("doctor")
+        self.assertEqual(p.returncode, 0, "only an optional tool is missing: " + p.stdout)
+        out = p.stdout
+        self.assertLess(out.index("ESSENTIAL (pai run needs these):"), out.index("OPTIONAL (only the feature named needs it):"))
+        self.assertIn("(only for: pr open, pr plan, next)", out)
+        self.assertIn("REPAIR (copy and run in this shell; doctor ran none of them):", out)
+        sudo = "" if os.geteuid() == 0 else "sudo "  # as root (a container, `unshare -r`) no sudo is proposed
+        self.assertIn("  %spacman -S --needed --noconfirm github-cli   # optional" % sudo, out)
+        # the documented way to keep 0.4.x's rule (fail on any gap) reads the rows (COMPATIBILITY.md)
+        old_rule = ("import json,sys; sys.exit(any(r['state'] not in ('ok', 'info') for r in json.load(sys.stdin)))")
+        js = self.run_cli("doctor", "--json")
+        self.assertEqual(js.returncode, 0)
+        self.assertEqual(subprocess.run([sys.executable, "-c", old_rule], input=js.stdout, text=True).returncode, 1,
+                         "the old rule still fails on the optional gap")
+        os.remove(os.path.join(self.bin, "tmux"))
+        p = self.run_cli("doctor")
+        self.assertEqual(p.returncode, 1, "an essential tool is missing")
+        self.assertIn("  %spacman -S --needed --noconfirm tmux\n" % sudo, p.stdout)
+        self.assertEqual(self.installs(), [], "doctor ran none of them")
+        win = self.run_cli("doctor", "--json", PAI_SWARM_PLATFORM="Windows")
+        rows = {r["tool"]: r for r in json.loads(win.stdout)}
+        self.assertEqual(rows["tmux"]["fix"], "wsl --install -d Ubuntu   # then install and run pai inside WSL (no native "
+                                              "Windows tmux)")
+        mac = {r["tool"]: r for r in json.loads(self.run_cli("doctor", "--json", PAI_SWARM_PLATFORM="Darwin").stdout)}
+        self.assertIsNone(mac["tmux"]["fix"], "no command is proposed that cannot run: Homebrew is absent")
+        self.assertIn("Homebrew is not installed (https://brew.sh)", mac["tmux"]["detail"])
+        self.assertNotIn("brew install", self.run_cli("doctor", PAI_SWARM_PLATFORM="Darwin").stdout)
+
     def test_everything_present_and_logged_in(self):
         self.have("git", "tmux", "ps", "claude", "gh")
         rows, code = self.rows()
         self.assertEqual(code, 0)
         self.assertEqual(set(rows.values()), {"ok", "info"})
         self.assertEqual(rows["platform"], "info")
-        self.assertEqual(sorted(rows), ["claude", "claude login", "claude remote control", "gh", "gh login", "git",
-                                        "platform", "ps", "tmux"])
+        self.assertEqual(sorted(rows), ["backend claude", "claude", "claude login", "claude remote control", "gh",
+                                        "gh login", "git", "platform", "ps", "tmux"])
         self.assertIn("doctor changed nothing", self.run_cli("doctor").stdout)
 
     def test_missing_binaries_are_not_confused_with_missing_logins(self):
@@ -157,7 +202,7 @@ class Doctor(unittest.TestCase):
         self.assertEqual(len([c for c in calls if c[0] == "bash"]), 1)
         rows, _ = self.rows()
         self.assertEqual((rows["tmux"], rows["gh"], rows["claude"]), ("ok", "ok", "ok"))
-        self.assertEqual(p.returncode, 1, "installed, but gh still needs the owner's login")
+        self.assertEqual(p.returncode, 0, "installed; gh's login is optional (only pr open, pr plan, next need it)")
         self.assertIn("Owner steps (never automated)", p.stdout)
         self.assertIn("gh login: gh auth login", p.stdout)
         self.assertEqual([c for c in calls if "login" in c], [], "setup never runs a login")

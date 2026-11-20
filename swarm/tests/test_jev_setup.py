@@ -16,6 +16,12 @@ from test_workbench import WB, PAI, needs_311  # noqa: E402
 KEY = "tsk-fake-0123456789abcdef"
 
 
+def read(path):
+    """The file's text, read with the handle closed."""
+    with open(path) as f:
+        return f.read()
+
+
 class Endpoint(http.server.BaseHTTPRequestHandler):
     mode = "ok"
     requests = []
@@ -57,9 +63,11 @@ class JevSetup(WB):
         self.secret = os.path.join(self.tmp, "secret-store")
         tool = os.path.join(self.bin, "secret-tool")
         with open(tool, "w") as f:
-            f.write("#!%s\nimport os, sys\np = %r\nif sys.argv[1] == 'store':\n    open(p, 'w').write(sys.stdin.read())\n"
-                    "    open(p + '.argv', 'w').write(' '.join(sys.argv))\nelif sys.argv[1] == 'lookup':\n"
-                    "    sys.exit(0 if os.path.exists(p) and print(open(p).read()) is None else 1)\n" % (sys.executable, self.secret))
+            f.write("#!%s\nimport os, sys\np = %r\n"
+                    "def put(path, text):\n    with open(path, 'w') as f:\n        f.write(text)\n"
+                    "if sys.argv[1] == 'store':\n    put(p, sys.stdin.read())\n    put(p + '.argv', ' '.join(sys.argv))\n"
+                    "elif sys.argv[1] == 'lookup':\n    if not os.path.exists(p):\n        sys.exit(1)\n"
+                    "    with open(p) as f:\n        print(f.read())\n" % (sys.executable, self.secret))
         os.chmod(tool, 0o755)
         self.env.update(TYPESAFE_BASE_URL="http://127.0.0.1:%d" % self.server.server_port, PAI_SECRET_TOOL=tool,
                         JEV_TIMEOUT="1")
@@ -99,8 +107,8 @@ class JevSetup(WB):
         self.assertIn("It may be billed", text)
         self.assertIn("JEV check: ok", text)
         self.assertIn('usage reported by the API: {"questions": 2, "input_tokens": 120}', text)
-        self.assertEqual(open(self.secret).read(), KEY, "the credential store got it, on stdin")
-        self.assertNotIn(KEY, open(self.secret + ".argv").read(), "never on a command line")
+        self.assertEqual(read(self.secret), KEY, "the credential store got it, on stdin")
+        self.assertNotIn(KEY, read(self.secret + ".argv"), "never on a command line")
         self.assertNotIn(KEY.encode(), self.everything_written(), "not in pai config, state, worktrees or notes")
         self.assertEqual(len(Endpoint.requests), 1)
         r = Endpoint.requests[0]
@@ -121,7 +129,7 @@ class JevSetup(WB):
             f.write("existing-key")
         code, text = self.init_tty(b"")  # a second init (now updating) that skips
         self.assertIn("Your existing key (secret-tool) is kept as it is", text)
-        self.assertEqual(open(self.secret).read(), "existing-key")
+        self.assertEqual(read(self.secret), "existing-key")
         self.assertEqual(Endpoint.requests, [])
 
     def test_failures_are_told_apart_never_retried_and_leave_pai_usable(self):

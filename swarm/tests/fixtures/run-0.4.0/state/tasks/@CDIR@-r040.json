@@ -1,0 +1,35 @@
+{
+ "base_sha": "ea4819b705360d202ff8630f6799646af27cc373",
+ "created": "2026-11-20T01:53:28Z",
+ "fetched_at": "2026-11-20T01:53:28Z",
+ "lanes": {
+  "a": {
+   "agent": "claude",
+   "branch": "pai/r040/a",
+   "effort": null,
+   "mode": "local",
+   "model": null,
+   "note": "first",
+   "prepared_at": "2026-11-20T01:53:28Z",
+   "started_at": "2026-11-20T01:53:28Z",
+   "state": "started",
+   "stem": "pai/r040/a",
+   "worktree": "@ROOT@/lanes/a"
+  }
+ },
+ "meta": {
+  "gen": 1,
+  "run": "r040"
+ },
+ "mode": "rc",
+ "repo": {
+  "base_branch": "main",
+  "common_dir": "@ROOT@/repo/.git",
+  "remote": "origin",
+  "remote_url": "@ROOT@/origin.git",
+  "tracking_ref": "refs/remotes/origin/main"
+ },
+ "schema": "pai_swarm_task_v1",
+ "task_id": "r040",
+ "tracking_before": "ea4819b705360d202ff8630f6799646af27cc373"
+}

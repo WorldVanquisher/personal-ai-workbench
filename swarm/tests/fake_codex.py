@@ -56,6 +56,12 @@ with open(os.path.join(ctl, "starts.jsonl"), "a") as f:
                         "env": {k: v for k, v in os.environ.items() if k.startswith(("PAI_TASK_", "PAI_RC_"))}}) + "\n")
 if lane in behavior.get("codex_exit", {}):
     sys.exit(int(behavior["codex_exit"][lane]))
+if lane in behavior.get("codex_exit_once", {}):  # crash on the first start only, so a restart works
+    flag = os.path.join(ctl, "codex-exited-once-%s" % lane)
+    if not os.path.exists(flag):
+        open(flag, "w").close()
+        print("fake codex: crashing on its first start (fake)")
+        sys.exit(int(behavior["codex_exit_once"][lane]))
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 signal.signal(signal.SIGHUP, lambda *_: sys.exit(0))
 trust_file = os.path.join(ctl, "codex-trust.json")
@@ -94,8 +100,8 @@ def record(kind, payload):
             f.write(json.dumps({"timestamp": stamp(), "type": kind, "payload": payload}) + "\n")
 
 
-def footer():
-    print("? for shortcuts   100% context left")
+def footer():  # "codex_footer": {lane: text} replaces it (a changed footer: pai must not guess readiness)
+    print(behavior.get("codex_footer", {}).get(lane) or "? for shortcuts   100% context left")
     sys.stdout.flush()
 
 

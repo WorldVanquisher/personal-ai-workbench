@@ -56,6 +56,40 @@ def check(name, ok, detail=""):
     return ok
 
 
+def skip(name, why):
+    """A check this environment cannot stage: reported as SKIPPED with the reason, never as passed."""
+    RESULTS.append({"check": name, "ok": None, "skipped": why})
+    print("SKIP  %s (%s)" % (name, why), flush=True)
+
+
+# A shell reports a command it cannot find with exit status 127 (POSIX). The message differs:
+# bash says "pai: command not found", Ubuntu's command-not-found hook "Command 'pai' not found,
+# ...", zsh "command not found: pai". So the checks below test the status, and keep stderr only
+# as the diagnostic.
+COMMAND_NOT_FOUND = 127
+
+
+def read(path, mode="r"):
+    """The file's content, read with the handle closed."""
+    with open(path, mode, **({} if "b" in mode else {"encoding": "utf-8"})) as f:
+        return f.read()
+
+
+def write(path, data):
+    with open(path, "wb" if isinstance(data, bytes) else "w", **({} if isinstance(data, bytes) else {"encoding": "utf-8"})) as f:
+        f.write(data)
+
+
+def jsonl(path):
+    """Parsed JSON lines of a file, [] when it does not exist."""
+    return [json.loads(l) for l in read(path).splitlines() if l.strip()] if os.path.exists(path) else []
+
+
+def pai_missing(rc):
+    """True when a fresh shell could not find `pai` (exit status 127, whatever it printed)."""
+    return rc == COMMAND_NOT_FOUND
+
+
 def sh(argv, env, cwd=None, timeout=180, input=None):
     p = subprocess.run(argv, env=env, cwd=cwd, capture_output=True, text=True, timeout=timeout, input=input,
                        stdin=None if input is not None else subprocess.DEVNULL)
@@ -75,7 +109,7 @@ def next_version_tree(work):
     dest = os.path.join(work, "src-next")
     shutil.copytree(ROOT, dest, ignore=shutil.ignore_patterns(".git", "dist", "__pycache__"))
     init = os.path.join(dest, "pai", "__init__.py")
-    text = open(init, encoding="utf-8").read()
+    text = read(init)
     m = re.search(r'__version__ = "(\d+)\.(\d+)\.(\d+)"', text)
     new = "%s.%s.%d" % (m.group(1), m.group(2), int(m.group(3)) + 1)
     with open(init, "w", encoding="utf-8") as f:
@@ -187,7 +221,7 @@ def browser_tools(fresh, env0, repo, ctl, note, work):
     """pai paste, pai web and pai edit, from the installed pai, against the run just started."""
     def received():
         path = os.path.join(ctl, "received.jsonl")
-        return [json.loads(l)["text"] for l in open(path)] if os.path.exists(path) else []
+        return [r["text"] for r in jsonl(path)]
 
     def wait(fn, timeout=15):
         end = time.time() + timeout
@@ -227,7 +261,7 @@ def browser_tools(fresh, env0, repo, ctl, note, work):
         rc, out2 = stop(p)
     check("pai web stops on Ctrl-C", rc == 0 and "stopped" in out2, out2[-300:])
 
-    before = open(note, "rb").read()
+    before = read(note, "rb")
     p, port, link, out = served("pai edit %s --no-browser" % shlex.quote(note), env0, repo)
     try:
         st, hdrs, _ = request(port, "GET", link) if port else (0, {}, None)
@@ -238,7 +272,7 @@ def browser_tools(fresh, env0, repo, ctl, note, work):
               st == 303 and b'id="text"' in page and "Add a smoke line" in doc.get("text", ""), out[-400:])
     finally:
         rc, out2 = stop(p)
-    check("pai edit stops on Ctrl-C and the note is unchanged", rc == 0 and open(note, "rb").read() == before, out2[-300:])
+    check("pai edit stops on Ctrl-C and the note is unchanged", rc == 0 and read(note, "rb") == before, out2[-300:])
 
 
 def main(argv=None):
@@ -259,7 +293,7 @@ def main(argv=None):
         META.update(mode="uv tool install" if a.uv else "archive", source=a.uv or a.archive or "built from this checkout",
                     platform=sys.platform, python=sys.version.split()[0])
         if a.uv:
-            version = re.search(r'__version__ = "([^"]+)"', open(os.path.join(ROOT, "pai", "__init__.py")).read()).group(1)
+            version = re.search(r'__version__ = "([^"]+)"', read(os.path.join(ROOT, "pai", "__init__.py"))).group(1)
         else:
             tgz = os.path.abspath(a.archive) if a.archive else build(ROOT, os.path.join(work, "dist"))
             nxt_src, nxt = next_version_tree(work)
@@ -296,8 +330,8 @@ def main(argv=None):
             m = re.search(r"run `(export PATH=[^`]+)`", o + e)
             check("uv names the missing PATH and the exact line to add", "is not on your PATH" in (o + e) and m, o + e)
             rc, o2, e2 = fresh("pai --version")
-            check("before the fix, a fresh shell says `pai: command not found`", rc != 0 and "command not found" in e2,
-                  o2 + e2)
+            check("before the fix, a fresh shell cannot find `pai` (exit 127)", pai_missing(rc),
+                  "exit %s; %s" % (rc, o2 + e2))
             if m:
                 with open(os.path.join(home, ".bashrc"), "a") as f:
                     f.write(m.group(1) + "\n")
@@ -315,13 +349,13 @@ def main(argv=None):
             summer = ["sha256sum", "-c"] if shutil.which("sha256sum") else ["shasum", "-a", "256", "-c"]
             rc, o, e = sh(summer + [name + ".sha256"], env0, cwd=dl)
             check("published .sha256 verifies with %s" % " ".join(summer), rc == 0 and "OK" in o, o + e)
-            side = open(os.path.join(dl, name + ".sha256")).read()
+            side = read(os.path.join(dl, name + ".sha256"))
             check("sidecar format is '<sha256>  <file>'", re.fullmatch(r"[0-9a-f]{64}  %s\n" % re.escape(name), side), side)
             bad = os.path.join(work, "bad")
             os.makedirs(bad)
-            data = bytearray(open(tgz, "rb").read())
+            data = bytearray(read(tgz, "rb"))
             data[len(data) // 2] ^= 0xFF
-            open(os.path.join(bad, name), "wb").write(bytes(data))
+            write(os.path.join(bad, name), bytes(data))
             shutil.copy(tgz + ".sha256", bad)
             rc, o, e = sh(summer + [name + ".sha256"], env0, cwd=bad)
             check("a corrupted archive fails the checksum", rc != 0 and "FAILED" in (o + e), o + e)
@@ -334,7 +368,8 @@ def main(argv=None):
             fix = [l.strip() for l in o.splitlines() if l.strip().startswith("echo 'export PATH=")]
             check("install names the missing PATH and the exact line to add", "is not on PATH" in o and fix, o)
             rc, o2, e2 = fresh("pai --version")
-            check("before the fix, a fresh shell says `pai: command not found`", rc != 0 and "command not found" in e2, o2 + e2)
+            check("before the fix, a fresh shell cannot find `pai` (exit 127)", pai_missing(rc),
+                  "exit %s; %s" % (rc, o2 + e2))
             if fix:
                 sh(["bash", "-c", fix[0]], env0, cwd=home)
             rc, o2, e2 = fresh("pai --version")
@@ -354,7 +389,7 @@ def main(argv=None):
                                          GIT_COMMITTER_EMAIL="new@example.org"), cwd=cwd)
         git("init", "-q", "--bare", "-b", "main", origin)
         git("clone", "-q", origin, repo)
-        open(os.path.join(repo, "README.md"), "w").write("demo\n")
+        write(os.path.join(repo, "README.md"), "demo\n")
         git("add", "README.md", cwd=repo)
         git("commit", "-q", "-m", "init", cwd=repo)
         git("push", "-q", "origin", "main", cwd=repo)
@@ -380,12 +415,12 @@ def main(argv=None):
         check("pai task new previews and writes nothing", rc == 0 and "PREVIEW" in o2 and not os.path.exists(note), o2 + e2)
         rc, o2, e2 = fresh('pai task new "Add a smoke line" --body "Append the line smoke to NOTES.md and commit it." '
                            '--write', cwd=repo)
-        check("pai task new --write saves a todo note", rc == 0 and os.path.isfile(note) and "status: todo" in open(note).read(),
+        check("pai task new --write saves a todo note", rc == 0 and os.path.isfile(note) and "status: todo" in read(note),
               o2 + e2)
-        before = open(note, "rb").read() if os.path.isfile(note) else b""
+        before = read(note, "rb") if os.path.isfile(note) else b""
         rc, o2, e2 = fresh('pai task new "Add a smoke line" --body "other" --write', cwd=repo)
         check("an existing note is never overwritten", rc == 1 and "already exists" in (o2 + e2)
-              and open(note, "rb").read() == before, o2 + e2)
+              and read(note, "rb") == before, o2 + e2)
         rc, o2, _ = fresh("pai task list", cwd=repo)
         check("pai task list shows the queue", rc == 0 and "add-a-smoke-line" in o2 and "1 todo" in o2, o2)
         refs = git("for-each-ref", cwd=repo)[1]
@@ -398,8 +433,7 @@ def main(argv=None):
             lane = json.loads(o3)["lanes"][0]
         except (ValueError, IndexError, KeyError):
             lane = {}
-        got = [json.loads(l) for l in open(os.path.join(ctl, "received.jsonl"))] if os.path.exists(
-            os.path.join(ctl, "received.jsonl")) else []
+        got = jsonl(os.path.join(ctl, "received.jsonl"))
         check("pai run: the fake agent took the note as its prompt, and status shows the evidence",
               (lane.get("dispatch") or {}).get("state") == "delivered" and "transcript" in lane["dispatch"].get("evidence", "")
               and len(got) == 1 and "add-a-smoke-line" in got[0]["text"], (o2 + e2)[-600:] + o3[-400:])
@@ -407,10 +441,10 @@ def main(argv=None):
             time.time() - setup, 1)
         browser_tools(fresh, env0, repo, ctl, note, work)
 
-        cfg_bytes = {p: open(p, "rb").read() for p in cfgs}
-        note_bytes = open(note, "rb").read() if os.path.isfile(note) else None
-        unchanged = lambda: (all(open(p, "rb").read() == b for p, b in cfg_bytes.items())  # noqa: E731
-                             and os.path.isfile(note) and open(note, "rb").read() == note_bytes)
+        cfg_bytes = {p: read(p, "rb") for p in cfgs}
+        note_bytes = read(note, "rb") if os.path.isfile(note) else None
+        unchanged = lambda: (all(read(p, "rb") == b for p, b in cfg_bytes.items())  # noqa: E731
+                             and os.path.isfile(note) and read(note, "rb") == note_bytes)
         if a.uv:
             rc, o2, e2 = sh([uv, "tool", "install", a.uv], env0, cwd=home, timeout=600)
             rc2, v, _ = fresh("pai --version")
@@ -421,8 +455,8 @@ def main(argv=None):
                   rc == 2 and "uv tool install --force" in e2 and unchanged(), o2 + e2)
             rc, o2, e2 = sh([uv, "tool", "uninstall", "pai-workbench"], env0, cwd=home, timeout=120)
             rc2, _, e3 = fresh("pai --version")
-            check("uv tool uninstall removes pai and leaves the configuration and the task note",
-                  rc == 0 and rc2 != 0 and "command not found" in e3 and unchanged(), o2 + e2 + e3)
+            check("uv tool uninstall removes pai (a fresh shell exits 127) and leaves the configuration and the task note",
+                  rc == 0 and pai_missing(rc2) and unchanged(), "exit %s; %s" % (rc2, o2 + e2 + e3))
             return finish(work, sock, env0, version)
 
         # -- reinstall, upgrade, failures
@@ -447,14 +481,19 @@ def main(argv=None):
               rc == 2 and "does not match its SHA256SUMS" in e2 and v.strip() == "pai %s" % nxt, o2 + e2 + v)
         versions = os.path.join(home, ".local", "share", "pai-workbench", "versions")
         shutil.rmtree(os.path.join(versions, version))  # make the older version a real copy again
-        os.chmod(versions, 0o555)
-        try:
-            rc, o2, e2 = sh([os.path.join(bundle, "bin", "pai"), "install"], env0, cwd=dl)
-        finally:
-            os.chmod(versions, 0o755)
-        rc2, v, _ = fresh("pai --version")
-        check("a failed install (unwritable folder) leaves the previous version answering",
-              rc == 2 and "unchanged" in e2 and v.strip() == "pai %s" % nxt, o2 + e2 + v)
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            # root writes into a mode-0555 folder anyway, so this failure cannot be staged here
+            skip("a failed install (unwritable folder) leaves the previous version answering",
+                 "running as root (a container or `unshare -r`): an unwritable folder cannot be made")
+        else:
+            os.chmod(versions, 0o555)
+            try:
+                rc, o2, e2 = sh([os.path.join(bundle, "bin", "pai"), "install"], env0, cwd=dl)
+            finally:
+                os.chmod(versions, 0o755)
+            rc2, v, _ = fresh("pai --version")
+            check("a failed install (unwritable folder) leaves the previous version answering",
+                  rc == 2 and "unchanged" in e2 and v.strip() == "pai %s" % nxt, o2 + e2 + v)
         rc, o2, _ = sh([os.path.join(versions, nxt, "bin", "pai"), "doctor"], dict(env0, PATH=base_path), cwd=repo)
         check("pai doctor names the missing PATH entry and its fix", "is not on PATH" in o2 and "export PATH=" in o2, o2)
     except BaseException:
@@ -468,11 +507,14 @@ def finish(work, sock, env0, version):
         sh(["tmux", "-S", sock, "kill-server"], env0)
     res = {"version": version, **META, "checks": RESULTS, "seconds": TIMES, "prompts": PROMPTS,
            "manual_prompts_answered_with_text": sum(1 for p in PROMPTS if p["typed"]),
-           "passed": bool(RESULTS) and all(r["ok"] for r in RESULTS)}
+           "passed": bool(RESULTS) and all(r["ok"] is not False for r in RESULTS),
+           "skipped": [r["check"] for r in RESULTS if r["ok"] is None]}
     with open(os.path.join(work, "onboarding-results.json"), "w") as f:
         json.dump(res, f, indent=1)
-    print("\n%d/%d checks passed; times %s; prompts %d (typed %d)" % (
-        sum(r["ok"] for r in RESULTS), len(RESULTS), TIMES, len(PROMPTS), res["manual_prompts_answered_with_text"]))
+    print("\n%d/%d checks passed%s; times %s; prompts %d (typed %d)" % (
+        sum(1 for r in RESULTS if r["ok"] is True), len(RESULTS),
+        ", %d skipped" % len(res["skipped"]) if res["skipped"] else "", TIMES, len(PROMPTS),
+        res["manual_prompts_answered_with_text"]))
     return 0 if res["passed"] else 1
 
 

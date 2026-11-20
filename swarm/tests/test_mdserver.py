@@ -23,6 +23,12 @@ TOKEN = "test-token-not-secret"
 needs_linux = unittest.skipUnless(sys.platform.startswith("linux") and sys.version_info >= (3, 11), "Linux, Python 3.11+")
 
 
+def read(path, mode="r"):
+    """The file's content, read with the handle closed."""
+    with open(path, mode) as f:
+        return f.read()
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="pai-md-test-"))
@@ -107,13 +113,13 @@ class Live(Base):
             self.assertIn(st, (400, 403, 404), bad)
         st, body = self.post("/api/save", {"root": 0, "path": "link.md", "text": "x", "base": "x", "confirm": "x"})
         self.assertIn(st, (400, 403))
-        self.assertEqual(open(self.outside).read(), "# secret outside the root\n")
+        self.assertEqual(read(self.outside), "# secret outside the root\n")
         files = json.loads(self.req("GET", "/api/files?root=0")[2])["files"]
         self.assertEqual(files, ["note.md"])
 
     def test_preview_and_diff_never_write(self):
         self.login()
-        before = (open(self.note, "rb").read(), os.stat(self.note).st_mtime_ns)
+        before = (read(self.note, "rb"), os.stat(self.note).st_mtime_ns)
         doc = json.loads(self.req("GET", "/api/file?root=0&path=note.md")[2])
         st, body = self.post("/api/preview", {"text": doc["text"] + "\nmore\n"})
         self.assertEqual(st, 200)
@@ -121,7 +127,7 @@ class Live(Base):
         st, d = self.post("/api/diff", {"root": 0, "path": "note.md", "text": doc["text"] + "more\n", "base": doc["base"]})
         self.assertEqual((st, d["stale"]), (200, False))
         self.assertIn("+more", d["diff"])
-        self.assertEqual((open(self.note, "rb").read(), os.stat(self.note).st_mtime_ns), before)
+        self.assertEqual((read(self.note, "rb"), os.stat(self.note).st_mtime_ns), before)
 
     def test_a_save_needs_the_confirmed_revision_and_keeps_line_endings_and_front_matter(self):
         self.login()
@@ -133,10 +139,10 @@ class Live(Base):
         st, d = self.post("/api/diff", base)
         st, body = self.post("/api/save", dict(base, confirm=d["proposed"], text=new + "sneaked in\n"))
         self.assertEqual(st, 400, "a confirmation covers one exact revision only")
-        self.assertIn(b"First line.\r\n", open(self.note, "rb").read())
+        self.assertIn(b"First line.\r\n", read(self.note, "rb"))
         st, body = self.post("/api/save", dict(base, confirm=d["proposed"]))
         self.assertEqual(st, 200, body)
-        raw = open(self.note, "rb").read()
+        raw = read(self.note, "rb")
         self.assertEqual(raw, b"---\r\ntitle: Note\r\nstatus: todo\r\n---\r\n# Hello\r\n\r\nFirst line, edited.\r\n")
         self.assertEqual([f for f in os.listdir(self.docs) if f.endswith(".tmp")], [])
 
@@ -145,7 +151,7 @@ class Live(Base):
         doc = json.loads(self.req("GET", "/api/file?root=0&path=note.md")[2])
         with open(self.note, "ab") as f:  # SSH, an agent or another browser changes the file
             f.write(b"Written by someone else.\r\n")
-        newer = open(self.note, "rb").read()
+        newer = read(self.note, "rb")
         draft = doc["text"] + "my draft\n"
         st, d = self.post("/api/diff", {"root": 0, "path": "note.md", "text": draft, "base": doc["base"]})
         self.assertTrue(d["stale"])
@@ -154,7 +160,7 @@ class Live(Base):
                                            "confirm": hashlib.sha256(draft.encode()).hexdigest()})
         self.assertEqual(st, 409)
         self.assertIn("your draft is kept", body["error"])
-        self.assertEqual(open(self.note, "rb").read(), newer)
+        self.assertEqual(read(self.note, "rb"), newer)
 
     def test_malicious_markdown_is_rendered_inert(self):
         evil = ("<script>alert(1)</script>\n<img src=x onerror=alert(1)>\n[a](javascript:alert(1)) [b](JaVa&#115;cript:x) "
@@ -207,7 +213,7 @@ class Pack(Base):
         found = []
         for fn in ("/proc/net/tcp", "/proc/net/tcp6"):
             try:
-                rows = open(fn).read().splitlines()[1:]
+                rows = read(fn).splitlines()[1:]
             except OSError:
                 continue
             for r in rows:
@@ -241,7 +247,7 @@ class Pack(Base):
         self.assertEqual(oct(os.stat(token).st_mode & 0o777), "0o600")
         p = self.pai("server", "start")
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
-        self.assertNotIn(open(token).read().strip(), p.stdout, "the token is never printed by start")
+        self.assertNotIn(read(token).strip(), p.stdout, "the token is never printed by start")
         self.assertEqual(self.listening(), ["0100007F"], "listening on 127.0.0.1 only")
         self.assertIn("running at http://127.0.0.1:%d/" % self.port, self.pai("server", "status").stdout)
         p = self.pai("server", "stop")

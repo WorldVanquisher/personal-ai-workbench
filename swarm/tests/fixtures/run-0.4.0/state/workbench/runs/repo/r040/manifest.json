@@ -1,0 +1,27 @@
+{
+ "branch_template": "pai/{run_id}/{lane}",
+ "dispatch": true,
+ "repository": {
+  "base_branch": "main",
+  "github": null,
+  "path": "@ROOT@/repo",
+  "remote": "origin",
+  "url": "@ROOT@/origin.git"
+ },
+ "run_id": "r040",
+ "schema": "pai_rc_manifest_v1",
+ "tasks": "@ROOT@/tasks",
+ "tmux": {
+  "session": "pai-{run_id}",
+  "socket": "@ROOT@/t.sock"
+ },
+ "workers": [
+  {
+   "agent": "claude",
+   "lane": "a",
+   "mode": "local",
+   "name": "repo r040 a"
+  }
+ ],
+ "worktree_root": "@ROOT@/lanes"
+}
