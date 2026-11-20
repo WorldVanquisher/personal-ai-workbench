@@ -24,8 +24,9 @@ never commits, pushes or opens anything twice.
 Approval is a hard gate. Before any push or PR step, on every run (the first one, a retry that
 reads the journal, or one that adopts a commit an interrupted run made), the commit itself is
 checked against the approved preview: its only parent is the previewed HEAD, it changes exactly
-the approved paths, each approved file holds exactly the previewed content, and its message is
-the reviewed one. Anything else (a hook that added a file, a different staged version, an
+the approved paths, each approved path is exactly the previewed tree entry (type, mode and
+content: a symbolic link is its target path, mode 120000), and its message is the reviewed one.
+Directories, submodules and special files are refused at preview, before anything is committed. Anything else (a hook that added a file, a different staged version, an
 edited message) stops publication with exit 1: nothing is pushed and no PR is opened, the local
 commit stays as it is, and the mismatch is listed. A journal entry never stands in for this check.
 """
@@ -33,7 +34,9 @@ import hashlib
 import json
 import os
 import re
+import posixpath
 import shlex
+import stat as stat_mod
 import subprocess
 import sys
 import tempfile
@@ -78,13 +81,86 @@ def status(wt):
     return res
 
 
-def blob(wt, path):
-    """The working-tree content id of `path` (git hash-object, not written), None when absent."""
-    full = os.path.join(wt, path)
-    if not os.path.lexists(full):
+KINDS = {"100644": "file", "100755": "executable file", "120000": "symbolic link", "160000": "submodule",
+         "040000": "directory"}
+
+
+def kind(mode):
+    return "%s (%s)" % (mode, KINDS.get(mode, "unknown type")) if mode else "absent"
+
+
+def _git_input(wt, args, data):
+    """git with `data` (bytes) on stdin and the same clean environment as gitprep.git; stdout or None."""
+    env = {k: v for k, v in os.environ.items() if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR")}
+    env.update(GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0", LC_ALL="C")
+    try:
+        p = subprocess.run([gitprep.git_bin(), "-C", wt] + list(args), input=data, capture_output=True, timeout=60,
+                           env=env)
+    except (OSError, subprocess.TimeoutExpired):
         return None
+    return p.stdout.decode("utf-8", "replace") if p.returncode == 0 else None
+
+
+def _config_bool(wt, key, default=True):
+    out = (git_ro(wt, "config", "--bool", key) or "").strip()
+    return default if not out else out == "true"
+
+
+def _index_mode(wt, path):
+    out = git_ro(wt, "ls-files", "-s", "-z", "--", ":(literal)" + path) or ""
+    for item in out.split("\0"):
+        meta, _, name = item.partition("\t")
+        if name == path and meta:
+            return meta.split()[0]
+    return None
+
+
+def entry(wt, path):
+    """What `git add` would record for `path` from the working tree, computed without writing
+    anything: {"mode": "100644" | "100755" | "120000", "blob": object id}, None when the path is
+    absent, or {"mode": None, "blob": None, "unsupported": WHAT} for a directory (or submodule) or a
+    special file. A symbolic link is its target path, stored as mode 120000 (never the bytes of
+    the file it points to); a file's executable bit counts only where core.fileMode is on, and
+    where core.symlinks is off a link checked out as a file keeps the index's 120000, as in Git."""
+    full = os.path.join(wt, path)
+    try:
+        st = os.lstat(full)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return None
+    if stat_mod.S_ISLNK(st.st_mode):
+        out = _git_input(wt, ["hash-object", "--no-filters", "--stdin"], os.readlink(os.fsencode(full)))
+        return {"mode": "120000", "blob": out.strip() if out else None}
+    if not stat_mod.S_ISREG(st.st_mode):
+        return {"mode": None, "blob": None,
+                "unsupported": "a directory or a submodule" if stat_mod.S_ISDIR(st.st_mode) else "a special file"}
     out = git_ro(wt, "hash-object", "--no-filters", "--", path)
-    return out.strip() if out else None
+    mode = "100755" if st.st_mode & stat_mod.S_IXUSR else "100644"
+    if not _config_bool(wt, "core.fileMode") or not _config_bool(wt, "core.symlinks"):
+        was = _index_mode(wt, path)
+        if was == "120000" and not _config_bool(wt, "core.symlinks"):
+            mode = "120000"
+        elif not _config_bool(wt, "core.fileMode"):
+            mode = was if was in ("100644", "100755") else "100644"
+    return {"mode": mode, "blob": out.strip() if out else None}
+
+
+def blob(wt, path):
+    """The working-tree content id of `path` as Git would store it unfiltered (a link: its target), None when absent."""
+    return (entry(wt, path) or {}).get("blob")
+
+
+def tree_entry(wt, sha, path):
+    """{"mode", "blob"} of `path` in commit `sha` (the tree entry itself, not followed), None when absent."""
+    d, name = posixpath.split(path)
+    out = git_ro(wt, "ls-tree", "-z", "%s:%s" % (sha, d) if d else "%s^{tree}" % sha)
+    for item in (out or "").split("\0"):
+        meta, _, n = item.partition("\t")
+        if n == name and meta:
+            mode, _typ, oid = meta.split()
+            return {"mode": mode, "blob": oid}
+    return None
 
 
 def remote_branch(wt, remote, branch, offline):
@@ -169,7 +245,11 @@ def preview(path, paths, title, body="", message=None, branch=None, base="main",
     rows = []
     for p in approved:
         xy = st.get(p)
-        rows.append({"path": p, "status": xy or "unchanged", "blob": blob(wt, p),
+        e = entry(wt, p) or {}
+        if e.get("unsupported"):
+            problems.append("approved path %s is %s: publish commits regular files and symbolic links only; approve "
+                            "the files inside it, or commit it yourself" % (p, e["unsupported"]))
+        rows.append({"path": p, "status": xy or "unchanged", "blob": e.get("blob"), "mode": e.get("mode"),
                      "partly_staged": bool(xy and xy[0] not in " ?" and xy[1] not in " ")})
         if not xy:
             warnings.append("approved path %s has no change to commit" % p)
@@ -254,10 +334,14 @@ def drift(plan, now, journal):
         out.append("the branch is now %s, not %s" % (now["branch"], plan["branch"]))
     if now["remote"]["push_url"] != plan["remote"]["push_url"]:
         out.append("the remote's push URL changed (%s)" % now["remote"]["push_url"])
-    was = {r["path"]: r["blob"] for r in plan["paths"]["approved"]}
+    was = {r["path"]: r for r in plan["paths"]["approved"]}
     for r in now["paths"]["approved"]:
-        if r["blob"] != was.get(r["path"]):
+        before = was.get(r["path"]) or {}
+        if r["blob"] != before.get("blob"):
             out.append("%s changed since the preview" % r["path"])
+        elif "mode" in before and r.get("mode") != before["mode"]:  # plans made before modes were recorded lack it
+            out.append("%s changed type or mode since the preview: %s, now %s" % (
+                r["path"], kind(before["mode"]), kind(r.get("mode"))))
     if not commit and now["paths"]["staged_unrelated"] != plan["paths"]["staged_unrelated"]:
         out.append("other staged paths changed: %s" % ", ".join(now["paths"]["staged_unrelated"]))
     return out
@@ -303,10 +387,16 @@ def commit_mismatch(plan, sha):
     for r in rows:
         if r["path"] in missing:
             continue
-        have = (git_ro(wt, "rev-parse", "--verify", "-q", "%s:%s" % (sha, r["path"])) or "").strip() or None
+        got = tree_entry(wt, sha, r["path"]) or {}
+        have, have_mode = got.get("blob"), got.get("mode")
+        # the previewed mode; a plan made before modes were recorded: the working tree's, which drift()
+        # has just shown to hold the previewed content
+        want_mode = r["mode"] if "mode" in r else (entry(wt, r["path"]) or {}).get("mode")
+        if have_mode != want_mode:
+            out.append("%s in the commit is %s, not the previewed %s" % (r["path"], kind(have_mode), kind(want_mode)))
         if have == r["blob"]:
             continue
-        if have and r["blob"] and blob(wt, r["path"]) == r["blob"]:
+        if have and r["blob"] and want_mode != "120000" and have_mode == want_mode and blob(wt, r["path"]) == r["blob"]:
             # a clean filter (line endings, attributes) stores other bytes than the working file:
             # compare with what `git add` stores for the previewed file, which is still on disk
             if (git_ro(wt, "hash-object", "--", r["path"]) or "").strip() == have:

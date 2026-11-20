@@ -309,6 +309,93 @@ class WorktreePR(helpers.Fixture):
         head = git(self.wt, "rev-parse", "HEAD")
         self.assert_refused_and_nothing_left(p, remote_before, head, "its message is not the reviewed one")
 
+    # -- the tree entry Git records: type, mode and content (symbolic links are their target path)
+
+    def link_blob(self, target):
+        return subprocess.run(["git", "-C", self.wt, "hash-object", "--stdin"], input=target, capture_output=True,
+                              text=True, check=True).stdout.strip()
+
+    def test_an_approved_symbolic_link_is_previewed_and_published_as_a_link(self):
+        os.symlink("new note.md", os.path.join(self.wt, "docs", "latest.md"))  # an ordinary relative link
+        paths = ("docs/new note.md", "README.md", "docs/latest.md")
+        p = self.preview("--out", self.plan, paths=paths)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        with open(self.plan) as f:
+            rows = {r["path"]: r for r in json.load(f)["paths"]["approved"]}
+        self.assertEqual((rows["docs/latest.md"]["mode"], rows["docs/latest.md"]["blob"]),
+                         ("120000", self.link_blob("new note.md")), "the link's target, not the bytes it points to")
+        self.assertEqual(rows["README.md"]["mode"], "100644")
+        p = self.pai("publish", self.plan, "--yes", "--draft")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        head = git(self.wt, "rev-parse", "HEAD")
+        self.assertEqual(git(self.wt, "ls-tree", head, "docs/latest.md").split("\t")[0],
+                         "120000 blob %s" % self.link_blob("new note.md"))
+        self.assertEqual(git(self.origin, "rev-parse", "refs/heads/feat/y"), head)
+        self.assertEqual(len(self.pr_creates()), 1)
+        p = self.pai("publish", self.plan, "--yes", "--draft")
+        self.assertEqual(p.returncode, 0, p.stdout)
+        self.assertIn("reused", p.stdout, "a retry of a valid commit stays idempotent")
+        self.assertEqual(len(self.pr_creates()), 1)
+
+    def test_a_hook_cannot_change_an_approved_files_mode_or_type(self):
+        self.assertEqual(self.preview("--out", self.plan).returncode, 0)
+        remote_before = self.remote_refs()
+        hook = self.hook("pre-commit", "#!/bin/sh\ngit update-index --chmod=+x README.md\n")
+        p = self.pai("publish", self.plan, "--yes", "--draft")
+        head = git(self.wt, "rev-parse", "HEAD")
+        self.assertEqual(git(self.wt, "ls-tree", head, "README.md").split()[0], "100755", "the hook made it executable")
+        self.assert_refused_and_nothing_left(p, remote_before, head, "(made by this run)",
+                                             "README.md in the commit is 100755 (executable file), not the previewed "
+                                             "100644 (file)")
+        os.remove(hook)
+        p = self.pai("publish", self.plan, "--yes", "--draft")
+        self.assert_refused_and_nothing_left(p, remote_before, head, "(recorded in the journal by an earlier run)",
+                                             "100755 (executable file)")
+        # the same plan, a fresh start: a hook turns the approved file into a symbolic link
+        git(self.wt, "reset", "-q", "--soft", self.c0)
+        git(self.wt, "rm", "-q", "--cached", "docs/new note.md")
+        os.remove(self.plan + ".journal")
+        self.hook("pre-commit", "#!/bin/sh\noid=$(printf 'elsewhere' | git hash-object -w --stdin)\n"
+                                "git update-index --cacheinfo 120000,$oid,README.md\n")
+        p = self.pai("publish", self.plan, "--yes", "--draft")
+        head = git(self.wt, "rev-parse", "HEAD")
+        self.assertEqual(git(self.wt, "ls-tree", head, "README.md").split()[0], "120000")
+        self.assert_refused_and_nothing_left(p, remote_before, head, "(made by this run)",
+                                             "README.md in the commit is 120000 (symbolic link), not the previewed "
+                                             "100644 (file)")
+
+    def test_a_clean_filter_still_publishes(self):
+        """Git stores the filtered bytes, not the working file's: still the approved content."""
+        git(self.repo, "config", "filter.upper.clean", "tr a-z A-Z")
+        info = os.path.join(git(self.repo, "rev-parse", "--git-common-dir"), "info")
+        self.write_abs(os.path.join(info if os.path.isabs(info) else os.path.join(self.repo, info), "attributes"),
+                       "README.md filter=upper\n")
+        self.assertEqual(self.preview("--out", self.plan).returncode, 0)
+        p = self.pai("publish", self.plan, "--yes", "--draft")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        head = git(self.wt, "rev-parse", "HEAD")
+        self.assertEqual(git(self.wt, "show", "%s:README.md" % head), "HELLO\nMORE")
+        self.assertEqual(git(self.origin, "rev-parse", "refs/heads/feat/y"), head)
+        self.assertEqual(self.pai("publish", self.plan, "--yes", "--draft").returncode, 0, "and its retry")
+
+    def test_a_mode_change_after_the_preview_is_drift(self):
+        self.assertEqual(self.preview("--out", self.plan).returncode, 0)
+        os.chmod(os.path.join(self.wt, "README.md"), 0o755)
+        p = self.pai("publish", self.plan, "--yes", "--ready")
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("DRIFT       README.md changed type or mode since the preview: 100644 (file), now 100755 "
+                      "(executable file)", p.stdout)
+        self.assertEqual(git(self.wt, "rev-parse", "HEAD"), self.c0, "nothing committed")
+
+    def test_a_directory_is_refused_at_preview_before_any_commit(self):
+        p = self.preview("--out", self.plan, paths=("docs", "README.md"))
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("REFUSED     approved path docs is a directory or a submodule: publish commits regular files "
+                      "and symbolic links only", p.stdout)
+        self.assertFalse(os.path.exists(self.plan), "a refused preview writes no plan, so nothing can be published")
+        self.assertEqual(git(self.wt, "rev-parse", "HEAD"), self.c0)
+        self.assertEqual(self.pr_creates(), [])
+
 
 if __name__ == "__main__":
     unittest.main()
