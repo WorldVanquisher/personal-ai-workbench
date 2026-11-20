@@ -150,6 +150,27 @@ def append(path, event):
     return event
 
 
+def add_items(path, new):
+    """Append items to an existing queue (ids must be new); the queue file is rewritten
+    atomically and records the addition under "additions" (a key older pai versions ignore, so
+    they still read the queue). Existing items, states and log events stay as they are."""
+    doc = load(path)
+    have = {i["id"] for i in doc["items"]}
+    dup = [i["id"] for i in new if i["id"] in have]
+    if dup:
+        raise QueueError("%s already has item(s) %s; nothing was added" % (path, ", ".join(dup)))
+    doc["items"] = doc["items"] + [{"id": i["id"], "title": i["title"]} for i in new]
+    doc["additions"] = (doc.get("additions") or []) + [{"at": now(), "ids": [i["id"] for i in new]}]
+    tmp = "%s.%d.tmp" % (path, os.getpid())
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(doc, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+    return doc
+
+
 def state(doc, evs):
     """{id: {"state", "reason", "evidence", "at", "session"}} after replaying the events."""
     st = {i["id"]: {"state": "todo", "reason": None, "evidence": None, "at": None, "session": None} for i in doc["items"]}
@@ -347,6 +368,10 @@ def add_parser(sub):
     k = qs.add_parser("check", help="compare a handoff's per-ID rows and totals with the queue log")
     k.add_argument("file")
     k.add_argument("handoff")
+    ad = qs.add_parser("add", help="append new items to an existing queue (preview unless --write)")
+    ad.add_argument("file")
+    ad.add_argument("--from", dest="source", required=True, help="text or Markdown file with lines like `R2-101. Title`")
+    ad.add_argument("--write", action="store_true")
     r = qs.add_parser("restart", help="a copyable prompt to resume in a fresh session")
     r.add_argument("file")
     return p
@@ -485,6 +510,20 @@ def _main(a, out, err):
         rows, totals, _ = parse_handoff(text)
         out("ok: %d row(s) and the totals line agree with the queue log (%s)" % (
             len(rows), ", ".join("%s %d" % (k, v) for k, v in sorted(totals.items()))))
+        return 0
+    if a.qcmd == "add":
+        with open(a.source, encoding="utf-8") as f:
+            new = parse_list(f.read())
+        if not new:
+            raise QueueError("%s has no numbered items" % a.source)
+        if not a.write:
+            doc = load(a.file)
+            dup = [i["id"] for i in new if i["id"] in {x["id"] for x in doc["items"]}]
+            out("would add %d item(s) to %s%s; add --write" % (len(new), a.file,
+                " (already there: %s)" % ", ".join(dup) if dup else ""))
+            return 1 if dup else 0
+        add_items(a.file, new)
+        out("added %d item(s): %s .. %s" % (len(new), new[0]["id"], new[-1]["id"]))
         return 0
     if a.qcmd == "restart":
         out(restart_prompt(a.file, doc, st, evs))

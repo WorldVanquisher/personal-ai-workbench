@@ -34,7 +34,9 @@ MAX_BYTES = 2 * 1024 * 1024
 STATIC = {"/static/app.css": ("app.css", "text/css; charset=utf-8"),
           "/static/app.js": ("app.js", "text/javascript; charset=utf-8"),
           "/static/console.css": ("console.css", "text/css; charset=utf-8"),
-          "/static/console.js": ("console.js", "text/javascript; charset=utf-8")}
+          "/static/console.js": ("console.js", "text/javascript; charset=utf-8"),
+          "/static/worktrees.css": ("worktrees.css", "text/css; charset=utf-8"),
+          "/static/worktrees.js": ("worktrees.js", "text/javascript; charset=utf-8")}
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'none'; "
        "form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 

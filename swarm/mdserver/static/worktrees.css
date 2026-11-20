@@ -1,0 +1,39 @@
+/* PAI Worktrees page: extends app.css (same tokens, same focus ring). */
+.work { min-width: 0; }
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 12px; flex-wrap: wrap; }
+.tabs button { background: transparent; border-bottom: 3px solid transparent; color: var(--muted); }
+.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--text); }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 8px 0 12px; font-size: 13px; }
+.facts dt { color: var(--muted); font-weight: 600; } .facts dd { margin: 0; overflow-wrap: anywhere; font-family: var(--ef-mono); }
+.facts.wide { font-size: 14px; }
+.facts dd.bad { color: var(--del); font-weight: 700; } .facts dd.good { color: var(--add); font-weight: 700; }
+label { display: block; font-weight: 600; font-size: 14px; margin: 6px 0; }
+label input[type="text"], label input[type="number"], label textarea { display: block; width: 100%; margin-top: 3px; font-weight: 400; }
+label.inline { display: flex; gap: 8px; align-items: center; font-weight: 400; }
+textarea.short { min-height: 5.5em; resize: vertical; } textarea.mid { min-height: 14em; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.side { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 16px; align-items: start; }
+.sections { list-style: none; padding: 0; margin: 0 0 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+.sections button { font-size: 13px; padding: 4px 12px 4px 10px; text-align: left; }
+.sections .manual button { box-shadow: inset 4px 0 0 #161616; }
+.sections .generated button { box-shadow: inset 4px 0 0 var(--add); }
+.sections .inherited button { box-shadow: inset 4px 0 0 #6b4fbb; }
+.gen { border: 1px solid var(--border); padding: 8px 12px; margin-bottom: 12px; }
+.gen summary { font-weight: 700; cursor: pointer; font-family: var(--ef-ui); }
+.rules { border: 1px solid var(--border); margin: 8px 0; } .rules ul { list-style: none; padding: 0; margin: 0; }
+.rules li { margin: 4px 0; }
+.cmd { font-family: var(--ef-mono); background: var(--bg); padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.ready { font-weight: 700; } .ready.good { color: var(--add); } .ready.bad { color: var(--del); }
+.attempts { font-size: 13px; font-family: var(--ef-mono); }
+table.split { border-collapse: collapse; width: 100%; font-size: 13px; }
+table.split th, table.split td { border: 1px solid var(--border); padding: 4px 6px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.problem { color: var(--del); font-weight: 600; }
+.section-mark { font-size: 12px; color: var(--muted); }
+h3 { font-family: var(--ef-ui); font-size: 14px; margin: 14px 0 4px; }
+@media (max-width: 899px) {
+  .panes { grid-template-columns: 1fr; }
+  .panes.show-edit .preview, .panes.show-preview textarea { display: none; }
+  .view-tabs { display: flex; }
+  .side, .grid2 { grid-template-columns: 1fr; }
+}
+@media (min-width: 900px) { .view-tabs { display: none; } }

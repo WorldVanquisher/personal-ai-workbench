@@ -1901,6 +1901,12 @@ def parser():
     jv.add_argument("--yes", action="store_true", help="send the check request without asking")
     sv = p("server", "EXPERIMENTAL Markdown server: start | status | stop | token | uninstall", run=False)
     sv.add_argument("server_cmd", choices=("start", "status", "stop", "token", "uninstall"))
+    wk = sub.add_parser("worktree", add_help=False, help="list | refresh | verify | preview | publish | init: one "
+                        "worktree after a merge, its PR, its AGENTS.md")
+    wk.add_argument("rest", nargs=argparse.REMAINDER)
+    sp = sub.add_parser("plan", add_help=False, help="propose | check | assign | accept: split a goal into worker "
+                        "slices and queue them")
+    sp.add_argument("rest", nargs=argparse.REMAINDER)
     cf = p("config", "edit | show --effective | check the workbench defaults", run=False)
     cf.add_argument("config_cmd", choices=("edit", "show", "check"))
     cf.add_argument("--global", dest="global_", action="store_true", help="the defaults shared by every project")
@@ -1917,11 +1923,18 @@ COMMANDS = {"init": cmd_init, "doctor": cmd_doctor, "setup": cmd_setup, "run": c
             "attach": cmd_attach, "logs": cmd_logs, "trust": cmd_trust, "resume": cmd_resume, "pr": cmd_pr,
             "next": cmd_next, "cleanup": cmd_cleanup, "config": None, "jev": cmd_jev, "server": cmd_server,
             "task": cmd_task, "paste": cmd_paste, "web": cmd_web, "guide": cmd_guide,
-            "inspect": cmd_inspect, "recover": cmd_recover}
+            "inspect": cmd_inspect, "recover": cmd_recover, "worktree": None, "plan": None}
 
 
 def main(argv=None):
-    a = parser().parse_args(sys.argv[1:] if argv is None else argv)
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] in ("worktree", "plan"):  # their own parsers, `--help` included
+        if argv[0] == "worktree":
+            import refresh
+            return refresh.main(argv[1:])
+        import splitplan
+        return splitplan.main(argv[1:])
+    a = parser().parse_args(argv)
     try:
         return (COMMANDS[a.cmd] or cmd_config)(a)
     except Stop as e:

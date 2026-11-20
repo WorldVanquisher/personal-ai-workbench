@@ -82,7 +82,43 @@ It serves only that file, on this machine only, and never writes over a version 
 on disk meanwhile. It also runs on native Windows. On a server, add `--no-browser --port 8765`
 and use an SSH tunnel as above.
 
-## 6. Upgrade and uninstall
+## 6. After your PR is merged: a fresh worktree
+
+A merge on GitHub changes nothing on your machine, and a fetch alone only moves
+`origin/main`: your worktree keeps its old files. pai prints the commands; you run them.
+
+```sh
+pai worktree refresh     # in your repository; prints Bash and PowerShell commands and changes nothing
+```
+
+After a squash merge (GitHub's usual choice) it proposes a **new** worktree from the fetched main:
+
+```bash
+git -C ~/code/app fetch origin +refs/heads/main:refs/remotes/origin/main
+BASE=$(git -C ~/code/app rev-parse origin/main) && echo "fetched origin/main = $BASE"
+git -C ~/code/app worktree add -b postmerge/20261120 ~/code/app-20261120 "$BASE"
+pai worktree verify ~/code/app-20261120 --base "$BASE"
+```
+
+```powershell
+git -C 'C:\code\app' fetch origin +refs/heads/main:refs/remotes/origin/main
+$BASE = git -C 'C:\code\app' rev-parse origin/main; "fetched origin/main = $BASE"
+git -C 'C:\code\app' worktree add -b postmerge/20261120 'C:\code\app-20261120' $BASE
+pai worktree verify 'C:\code\app-20261120' --base $BASE
+```
+
+- **Check the SHAs before giving the worktree to an agent.** `pai worktree verify` prints the
+  worktree's HEAD next to the base you fetched and exits with 1 unless HEAD contains it.
+- **Uncommitted changes are never touched:** no reset, stash or overwrite. For such a worktree
+  (`pai worktree refresh --worktree PATH`) pai proposes a new worktree beside it; the old one
+  keeps its files and branch until you decide what to do with them.
+- A clean worktree that is only behind main gets a fast-forward instead (`git merge --ff-only`,
+  which refuses rather than merges).
+- `pai worktree list` shows every worktree, its branch, its uncommitted paths and whether it
+  contains the last fetched main. `pai worktree web` shows the same in your browser, with the
+  worktree's AGENTS.md, a split plan and a PR preview (experimental).
+
+## 7. Upgrade and uninstall
 
 - **Upgrade:** the install line with the new version (for example `@v0.4.1`). Your
   configuration and task notes stay.

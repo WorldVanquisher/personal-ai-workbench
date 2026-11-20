@@ -135,8 +135,12 @@ pai queue init work.json --from items.md --checkpoint R2-010 --write
 pai queue mark work.json R2-001 done --evidence "tests/test_x.py 5 OK"
 pai queue mark work.json R2-002 blocked --reason "owner decision: due-date schema"
 pai queue next work.json
+pai queue add work.json --from more.md --write    # new ids only; recorded under "additions"
 pai queue restart work.json
 ```
+
+`queue add` appends items to an existing queue without touching the items, states or
+log it already has; older pai versions still read the result.
 
 **`handoff new` behaviour:**
 - **Exclusive creation:** concurrent runs never collide or overwrite.

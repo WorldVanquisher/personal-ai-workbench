@@ -21,7 +21,7 @@ import sys
 # handoff, install) always stay with the pai package. The workbench needs tmux, so on native
 # Windows only PAI's own commands run.
 WORKBENCH = {"run", "status", "attach", "logs", "trust", "resume", "pr", "next", "cleanup", "setup", "config", "jev",
-             "server", "task", "paste", "web", "guide", "inspect", "recover"}
+             "server", "task", "paste", "web", "guide", "inspect", "recover", "worktree", "plan"}
 PACKAGE = os.path.dirname(os.path.abspath(__file__))
 NATIVE_WINDOWS = os.name == "nt"
 

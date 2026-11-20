@@ -383,6 +383,25 @@ pai jev check         # ONE real request with a fixed synthetic task; may be bil
 `TIMEOUT` or `UNEXPECTED REPLY`, and the `usage` the API returned. Any failure leaves pai
 working with JEV off.
 
+**Supported configurations.** JEV (TypeSafe System One, `POST /v1/systemone`) answers typed
+questions (`choice`, `score`, `noul`, `box`) about a text you send; it does not write text.
+
+| Setting | Remote (default) | Local endpoint |
+| --- | --- | --- |
+| Endpoint | `https://api.typesafe.ai` | `TYPESAFE_BASE_URL=http://127.0.0.1:PORT` (a proxy or test server you run) |
+| Key | `TYPESAFE_API_KEY`, else the credential store (`pai init`) | the same; any value your endpoint accepts |
+| Credential store | libsecret / macOS Keychain | `PAI_JEV_CREDENTIAL_STORE=none` skips it (CI, containers) |
+| Timeout | `JEV_TIMEOUT` seconds (default 30) | the same |
+
+Where pai uses it, all optional: intake triage and completion review (`--jev-verify`), and
+`pai worktree init --jev`, which asks one `noul` question per rule of its rule library ("does
+this rule help this goal in this scope?"). That call sends only the worktree's goal, its scope
+folder names and the rule texts: no file contents, no paths, no task note. Without JEV, or
+when it is not configured, times out, cannot be reached, answers with an error or answers
+malformed, the deterministic template choice is used and the output says which (`JEV skipped`,
+`timeout`, `unavailable`, `error`, `malformed`). Its scores only order proposals; nothing is
+applied without `--accept`.
+
 **Cost estimate** (checked 2026-11-12, TypeSafe's own pages):
 
 - Price: Jev 1.14 / 1.13 "$42 / $0.042" per billion / per million tokens; "You pay per input
@@ -432,6 +451,9 @@ Not verified against the real programs:
 - real SSH, GitHub, merges, and installers on each listed OS (the planner is tested on
   simulated systems only);
 - a real JEV request;
+- `pai worktree publish` and `pai worktree web`'s publish against real GitHub (tested with a
+  local bare remote and the fake gh); PowerShell on Windows itself (the generated PowerShell
+  commands were run with PowerShell 7.4 on Linux);
 - `pai paste` and `pai web` with the real Claude Code and Codex (bracketed paste, typing and
   the keys were checked byte for byte against a recording terminal program and the fake
   agents), and `pai web` / `pai edit` in a desktop browser on macOS or Windows.
@@ -443,3 +465,71 @@ Not verified against the real programs:
 `pai edit` and `pai web` above need no setup and come with every installation. The
 longer-running server for several folders is for a checkout only (an installed archive or uv
 package says so and changes nothing). Optional, never installed or started by anything else: `pai setup --experimental server --root DIR --dry-run`, then `pai server start|status|stop|token|uninstall`. Loopback only; SSH tunnel or Tailscale Serve (never Funnel). See [mdserver/README.md](mdserver/README.md).
+
+## 14. Worktrees after a merge, their instructions, splits and PRs (experimental)
+
+These commands work on any repository's worktrees, with or without a `pai run`.
+
+**Refresh after a merge.** `pai worktree refresh [--worktree PATH | --new PATH]` prints the
+commands (Bash and PowerShell) that fetch main explicitly and then either add a fresh worktree
+at the fetched SHA or fast-forward a clean one; it runs none of them. `pai worktree verify PATH
+--base SHA` checks the worktree itself (a fetch only moves refs) and exits 1 unless its HEAD
+contains the base. A worktree with uncommitted changes, a detached HEAD or an operation in
+progress always gets the new-worktree path; nothing resets, stashes or overwrites it. See the
+quick start, section 6.
+
+**Instructions per worktree.** `pai worktree init PATH --goal TEXT [--scope DIR] [--lane ID]
+[--check NAME=CMD] [--accept RULE] [--jev]` previews a pai-managed section of the worktree's
+AGENTS.md (`--file CLAUDE.md` for a Claude-only lane); `--write` writes it. Only the part between
+`<!-- pai:managed:begin ... -->` and `<!-- pai:managed:end -->` is pai's: everything you wrote
+stays byte for byte, BOM and line endings included, and the same inputs give the same bytes.
+The section names the goal, the folders the worker may change, the owner, the checks and how to
+report, the owner-only actions, and the repository's own rules with their `file:line` source;
+a repository rule that asks for an owner-only action (push, deploy, ...) is marked as a conflict
+there and in the preview. Never the main checkout, never through a symbolic link.
+`--export-profile FILE` saves the accepted rules and checks (no goal, no paths) for `--profile`.
+
+**Split a goal.** `pai plan propose --parent ID --goals FILE --out PLAN.json` reads one slice per
+line (`- id: goal | paths: ... | verify: ... | prereqs: ... | needs: ...`), keeps the parent ID,
+numbers the slices (`ID-001`, ...) and gives each a worker: the lane whose AGENTS.md scope owns
+the slice's first path, else the least-loaded one. `pai plan check` refuses missing verification,
+scope or prerequisites, two slices writing the same path, a path another lane owns, unknown or
+circular dependencies. Edit the JSON or `pai plan assign PLAN SLICE WORKER`, then
+`pai plan accept PLAN --queues DIR --write` puts each slice into its worker's `pai queue`
+(a slice that waits for another is queued as blocked); a rerun never queues a slice twice.
+`pai plan check PLAN --queues DIR` shows each slice's queue state and which waiting slice can start.
+
+**A PR from any worktree.** `pai worktree preview PATH --path FILE ... --title T [--body-file F]
+--out PLAN.json` changes nothing; it shows the base (its last fetched SHA), HEAD, the branch's
+SHA on the remote (`git ls-remote`), any PR for that head and base, the approved paths apart from
+the staged and the unexpected ones, cache files, and the title, body and commit message with the
+publication check (no AI attribution, no session links, no credentials). `pai worktree publish
+PLAN.json --yes --draft|--ready` re-checks for drift, commits only the approved literal paths with
+the reviewed message and your hooks (other staged changes stay staged), pushes without force,
+reads the remote SHA back and only then opens or reuses the PR. It records each step in
+`PLAN.json.journal`: a rerun after an interruption continues and never commits, pushes or opens
+twice. Nothing is merged.
+
+**In the browser.** `pai worktree web [--queues DIR]` (127.0.0.1, one-time link, as `pai web`):
+a worktree chooser, the instruction file with its manual, generated and inherited parts, side by
+side with a preview, proposals shown as a diff before they reach the editor, confirmed saves
+that refuse a file changed on disk, an undo of the last save made there; the refresh commands
+with expected and actual SHAs and a "Check again" history; the split preview; and the PR
+preview, whose publish needs the reviewed preview, draft or ready chosen, and a confirmation.
+
+### Troubleshooting
+
+- **JEV shows `skipped`:** no key. Set `TYPESAFE_API_KEY` or run `pai init`; `pai jev status`
+  says where pai looks. `timeout` or `unavailable`: check `TYPESAFE_BASE_URL` and the network,
+  or raise `JEV_TIMEOUT`. `error` (401/403): the key is wrong or revoked; `pai jev check` tells
+  which. `malformed`: the endpoint is not System One. Every case falls back to the templates.
+- **`FAILED push`:** Git could not authenticate or the remote refused. Check `git push` by hand
+  (`ssh -T git@github.com`, or your credential helper). Nothing was forced; rerun
+  `pai worktree publish PLAN.json --yes --draft|--ready` to continue after the commit.
+- **`could not ask GitHub` / `the PR was not opened`:** `gh auth status`, then `gh auth login`.
+  The branch is already pushed; the rerun opens the PR without pushing again.
+- **`is not a GitHub remote`:** the remote URL is not GitHub's (a mirror, an SSH alias): preview
+  again with `--github OWNER/REPO`, or publish with `--no-pr`.
+- **`DRIFT`:** a file, HEAD, the staged set or the remote changed after the preview. Preview again.
+- **`the fetch updated refs, not this worktree`:** you fetched but did not create or move the
+  worktree; run the remaining refresh commands, then verify again.
