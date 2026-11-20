@@ -409,8 +409,9 @@ def fetch_base(repo, remote, base_branch, timeout=180):
     return sha, before
 
 
-def verify_ready(worktree, branch, base_sha, exact=False):
-    """The start gate: problems that forbid starting a worker in this worktree."""
+def verify_ready(worktree, branch, base_sha, exact=False, start=None):
+    """The start gate: problems that forbid starting a worker in this worktree. A new branch must
+    be exactly at its start: the base, or a continuation's handed-off head."""
     if not os.path.isdir(worktree):
         return ["worktree %s does not exist" % worktree]
     cur, head = current_branch(worktree), rev(worktree, "HEAD")
@@ -419,8 +420,9 @@ def verify_ready(worktree, branch, base_sha, exact=False):
         problems.append("worktree is on %s, not the task branch %s" % (cur or "a detached HEAD", branch))
     if not head:
         problems.append("worktree HEAD is not a commit")
-    elif exact and head != base_sha:
-        problems.append("new branch is at %s, not the pinned base %s" % (head[:12], base_sha[:12]))
+    elif exact and head != (start or base_sha):
+        problems.append("new branch is at %s, not %s %s" % (head[:12], "the handed-off head" if start else
+                                                            "the pinned base", (start or base_sha)[:12]))
     elif not is_ancestor(worktree, base_sha, head):
         problems.append("pinned base %s is not an ancestor of %s" % (base_sha[:12], branch))
     ops = in_progress(worktree)
@@ -499,8 +501,11 @@ class Lane:
 
 class Spec:
     def __init__(self, task_id, mode, repo, lanes, remote="origin", base_branch="main",
-                 github=None, url=None, worktree_root=None, want=None, meta=None, lock_owner=None):
+                 github=None, url=None, worktree_root=None, want=None, meta=None, lock_owner=None, pinned_base=None):
         self.task_id, self.mode, self.repo, self.lanes = task_id, mode, canon(repo), lanes
+        # A continuation (`pai run --continue`) keeps the handed-off session's base: no fetch, and
+        # each lane's new branch starts at its `start` commit (lane extra) instead of the base.
+        self.pinned_base = pinned_base
         self.remote, self.base_branch, self.github, self.url = remote, base_branch, github, url
         self.worktree_root = canon(worktree_root) if worktree_root else None
         self.want = want  # None, "new" or "resume": what the caller expects this start to be
@@ -635,7 +640,8 @@ def plan(spec, probe=True):
             P.append("the task was recorded against %s %s (%s); the repository or manifest now says %s %s (%s)"
                      % (r["remote"], r["base_branch"], r["remote_url"], spec.remote, spec.base_branch, pl.remote_url))
         want = {l.lane: (l.branch, l.worktree) for l in spec.lanes}
-        have = {k: (v["branch"], v["worktree"]) for k, v in rec["lanes"].items() if v["state"] != "retired"}
+        have = {k: (v["branch"], v["worktree"]) for k, v in rec["lanes"].items()
+                if v["state"] != "retired" and not v.get("handed_off")}  # a handed-off lane is never resumed
         if want != have:
             P.append("lanes, branches or worktrees differ from the recorded task %s; a changed assignment "
                      "is a new task: use a new task id" % spec.task_id)
@@ -675,7 +681,18 @@ def plan(spec, probe=True):
             ln.problems.append(
                 "branch %s already exists (at %s)%s; a new task needs a new branch and an existing one is "
                 "never reused" % (ln.branch, tip[:12], " and belongs to task %s" % owner if owner else ""))
-    if pl.path == "new" and probe and pl.remote_url and not pl.blocked:
+    if pl.path == "new" and spec.pinned_base:
+        if not rev(spec.repo, spec.pinned_base):
+            P.append("the continuation's base %s is not in this repository" % spec.pinned_base[:12])
+        for ln in spec.lanes:
+            start = ln.extra.get("start")
+            if start and not rev(spec.repo, start):
+                ln.problems.append("the handed-off head %s is not in this repository (fetch or copy that branch "
+                                   "yourself first)" % start[:12])
+            elif start and not is_ancestor(spec.repo, spec.pinned_base, start):
+                ln.problems.append("the handed-off head %s does not contain the base %s" % (start[:12],
+                                                                                          spec.pinned_base[:12]))
+    if pl.path == "new" and probe and pl.remote_url and not pl.blocked and not spec.pinned_base:
         pl.remote_tip, pl.remote_error = ls_remote(spec.repo, spec.remote, spec.base_branch)
         if pl.remote_error:
             P.append("remote %s is not reachable for %s (%s); the fetch would fail and no worker would start"
@@ -687,10 +704,11 @@ def plan(spec, probe=True):
 
 def _prepare_lane(spec, rec, ln):
     rl, base = rec["lanes"][ln.lane], rec["base_sha"]
-    cmds = {"add": (spec.repo, ["worktree", "add", "-b", ln.branch, ln.worktree, base]),
+    start = rl.get("start") or base  # a continuation's branch starts at the handed-off head
+    cmds = {"add": (spec.repo, ["worktree", "add", "-b", ln.branch, ln.worktree, start]),
             # --no-overwrite-ignore: without it git silently replaces an ignored file that the
             # target commit tracks, although `git status` calls the worktree clean.
-            "switch": (ln.worktree, ["switch", "--no-overwrite-ignore", "-c", ln.branch, base]),
+            "switch": (ln.worktree, ["switch", "--no-overwrite-ignore", "-c", ln.branch, start]),
             "attach": (spec.repo, ["worktree", "add", ln.worktree, ln.branch]),
             "checkout": (ln.worktree, ["switch", "--no-overwrite-ignore", ln.branch])}
     if ln.action in cmds:
@@ -707,7 +725,7 @@ def _prepare_lane(spec, rec, ln):
                     if "would be overwritten" in err else "")
             raise Blocked(["lane %s: `git %s` failed: %s.%s The task record keeps what was done; run the "
                            "same command again to resume." % (ln.lane, " ".join(args), err, hint)])
-    problems = verify_ready(ln.worktree, ln.branch, base, exact=ln.action != "keep")
+    problems = verify_ready(ln.worktree, ln.branch, base, exact=ln.action != "keep", start=rl.get("start"))
     if problems:
         raise Blocked(["lane %s: %s" % (ln.lane, p) for p in problems])
     if rl["state"] in ("planned", "preparing"):
@@ -732,17 +750,24 @@ def apply(spec, expect_base=None, fetch_timeout=180, log=lambda s: None):
                 wtlock.acquire(ln.worktree, kind, spec.lock_owner, ln.lane)
                 if not mine:
                     fresh.append(ln)
-            if rec is None:
+            if rec is None and spec.pinned_base:
+                base, before = rev(spec.repo, spec.pinned_base), None
+                if not base:
+                    raise Blocked(["the continuation's base %s is not in this repository" % spec.pinned_base[:12]])
+                log("continuation: base pinned to %s, the handed-off session's base (nothing fetched)" % base)
+            elif rec is None:
                 base, before = fetch_base(spec.repo, spec.remote, spec.base_branch, fetch_timeout)
                 if expect_base and base != expect_base:
                     raise Blocked(["%s/%s is %s after the fetch, not the expected %s; no worker was started"
                                    % (spec.remote, spec.base_branch, base, expect_base)])
                 log("fetched %s %s: %s%s" % (spec.remote, spec.base_branch, base, "" if before == base else
                                             " (local tracking ref was %s)" % (before or "absent")))
+            if rec is None:
                 rec = {"schema": SCHEMA, "task_id": spec.task_id, "mode": spec.mode, "created": now(),
                        "repo": {"common_dir": pl.common_dir, "remote": spec.remote, "remote_url": pl.remote_url,
                                 "base_branch": spec.base_branch, "tracking_ref": pl.tracking_ref},
-                       "base_sha": base, "fetched_at": now(), "tracking_before": before, "meta": spec.meta,
+                       "base_sha": base, "fetched_at": None if spec.pinned_base else now(), "tracking_before": before,
+                       "meta": spec.meta,
                        "lanes": {l.lane: dict(l.extra, branch=l.branch, worktree=l.worktree, state="planned")
                                  for l in spec.lanes}}
                 save_record(rec, create=True)

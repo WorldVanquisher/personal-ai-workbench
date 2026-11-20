@@ -20,6 +20,11 @@
     <button id="reload" type="button" class="ghost">Reload from disk (discards the draft)</button>
   </div>
   <div id="error" class="banner" role="alert" hidden></div>
+  <div id="restore" class="banner" role="alert" hidden>
+    <strong>An unsaved draft of this note is kept in this browser</strong> (<span id="restore-when"></span>).
+    <button id="restore-yes" type="button">Restore the draft</button>
+    <button id="restore-no" type="button" class="ghost">Discard it</button>
+  </div>
   <div class="layout">
     <nav class="picker panel" aria-label="Markdown files">
       <h2>FILES</h2>

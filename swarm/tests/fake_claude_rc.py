@@ -19,7 +19,12 @@ $FAKE_RC_DIR/behavior.json may list lanes under "exit" (exit code, at once), "no
 folder is recorded as trusted in this fake's own $CLAUDE_CONFIG_DIR/fake-trust.json; the
 answer is a line: "yes" trusts, anything else exits like "No, exit"), "no_hint" (the idle
 input box without the "? for shortcuts" hint: Claude Code shows that hint only while its
-footer has nothing else to show) and "stale_record" (the record's updatedAt is an hour old).
+footer has nothing else to show), "stale_record" (the record's updatedAt is an hour old),
+"dialog" (the record says waiting for a permission prompt: the agent accepts no input),
+"no_transcript" (prompts are received but never written to the transcript) and
+"exit_once" ({lane: code}: exit with that code on the first start only, so a restart works) and
+"exit_on_prompt" (the first submitted prompt is received and logged, then the fake exits with 1
+before its transcript records it: a worker that dies inside the dispatch confirm window).
 `--help`, `auth status` and `remote-control --help` answer like Claude Code does.
 """
 import json
@@ -71,6 +76,12 @@ with open(os.path.join(ctl, "starts.jsonl"), "a") as f:
 if lane in behavior.get("exit", {}):
     print("fake claude: exiting at once")
     sys.exit(int(behavior["exit"][lane]))
+if lane in behavior.get("exit_once", {}):
+    flag = os.path.join(ctl, "exited-once-%s" % lane)
+    if not os.path.exists(flag):
+        open(flag, "w").close()
+        print("fake claude: crashing on its first start (fake)")
+        sys.exit(int(behavior["exit_once"][lane]))
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 signal.signal(signal.SIGHUP, lambda *_: sys.exit(0))
 
@@ -105,6 +116,8 @@ record = {"pid": pid, "cwd": os.getcwd(), "kind": "interactive", "status": "idle
           else "fake-bridge-%d" % pid}
 if lane in behavior.get("stale_record", []):
     record["updatedAt"] -= 3600 * 1000
+if lane in behavior.get("dialog", []):  # a dialog is open: Claude's record says waiting, input is not accepted
+    record.update(status="waiting", waitingFor="permission prompt (fake)")
 
 
 def save_record(**kw):
@@ -132,8 +145,15 @@ while True:
         time.sleep(0.2)
         continue
     save_record(status="busy", statusUpdatedAt=int(time.time() * 1000))
+    if lane in behavior.get("exit_on_prompt", []):
+        with open(os.path.join(ctl, "received.jsonl"), "a") as f:
+            f.write(json.dumps({"lane": lane, "agent": "claude", "pid": pid, "text": line.rstrip("\n"),
+                                "time": time.time()}) + "\n")
+        print("received: %s (fake: exiting before the transcript records it)" % line.strip())
+        sys.stdout.flush()
+        sys.exit(1)
     os.makedirs(os.path.dirname(transcript), exist_ok=True)
-    with open(transcript, "a") as f:
+    with open(transcript if lane not in behavior.get("no_transcript", []) else os.devnull, "a") as f:
         f.write(json.dumps({"type": "user", "sessionId": session_id, "cwd": os.getcwd(),
                             "timestamp": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
                             "message": {"role": "user", "content": line.rstrip("\n")}}) + "\n")

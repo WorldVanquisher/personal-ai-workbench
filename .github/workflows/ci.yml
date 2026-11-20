@@ -50,9 +50,18 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
+      # tools/strict_unittest.py also fails on a resource leaked into a finalizer (a file left
+      # open), which `-W error::ResourceWarning -m unittest` only prints as "Exception ignored".
+      # Scoped to where the suite has been verified clean (Linux); macOS and Windows keep the
+      # previous command until a run shows them clean too.
       - name: Unit and synthetic tests
         timeout-minutes: 8
-        run: python -B -W error::ResourceWarning -m unittest discover -s tests -v
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            python -B tools/strict_unittest.py tests -v
+          else
+            python -B -W error::ResourceWarning -m unittest discover -s tests -v
+          fi
 
       - name: Build both release archives
         timeout-minutes: 3

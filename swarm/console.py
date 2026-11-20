@@ -14,18 +14,28 @@ It runs in the foreground until Ctrl-C and stores nothing. Same protections as `
 127.0.0.1 only, a sign-in link that works once, an HttpOnly SameSite=Strict session cookie,
 a CSRF header on every write, Host/Origin checks, and a strict Content-Security-Policy.
 
+Each lane shows the same lifecycle name, explanation and next step as `pai status`, an Inspect
+view (the evidence behind it and where each piece is read, as `pai inspect`), and the run has a
+"Resume run" action: the `pai recover` preview first, then (on a separate, confirmed click) only
+its automatic actions. A paste first shows where it would go and how big it is.
+
 What it never does: answer an agent's folder-trust prompt (a paste is refused while one is on
-the screen; you answer it yourself, by typing), send a task (that is `pai run`/`pai resume`),
-or push, merge or publish anything. The browser names a lane, never a tmux pane: pai looks the
+the screen; you answer it yourself, by typing), resend an unknown dispatch or choose for you
+(that stays `pai recover --choose` in a terminal), or push, merge or publish anything. The browser names a lane, never a tmux pane: pai looks the
 pane up itself, so only this run's lanes and their shells are reachable.
 """
+import contextlib
+import io
 import os
 import sys
 import time
+import types
 
 import agents
 import panes
 import rc
+import recovery
+import runstate
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MD_DIR = os.path.join(HERE, "mdserver")
@@ -50,7 +60,8 @@ class Console:
             raise server.Refused(404, "no such lane")
         w = next((w for w in self.m.workers if w.lane == lane), None)
         if not w:
-            raise server.Refused(404, "run %s has no lane %r" % (self.m.run_id, lane))
+            raise server.Refused(404, "run %s has no lane %r (its lanes are %s): reload this page to see the run's "
+                                      "lanes as they are now" % (self.m.run_id, lane, ", ".join(x.lane for x in self.m.workers)))
         return w
 
     def agent_pane(self, w, fresh=False):
@@ -61,8 +72,9 @@ class Console:
         win = proc.get("window") or {}
         if proc["state"] in ("no-window", "ambiguous", "mismatched") or not win.get("pane_id"):
             self._panes.pop(w.lane, None)
-            raise server.Refused(404, "lane %s has no window (%s); `pai resume --lane %s` starts it again"
-                                 % (w.lane, proc.get("detail", proc["state"]), w.lane))
+            raise server.Refused(404, "lane %s has no window to show (%s). Next: Resume run (preview) here, or "
+                                      "`pai recover --run %s --lane %s`" % (w.lane, proc.get("detail", proc["state"]),
+                                                                            self.m.run_id, w.lane))
         self._panes[w.lane] = (win["pane_id"], time.time())
         return win["pane_id"]
 
@@ -76,15 +88,16 @@ class Console:
                 return pane
         return None
 
-    def target(self, d):
-        """(pane id, trust check or None) for {"lane", "target": "agent"|"shell"}."""
+    def target(self, d, fresh=False):
+        """(pane id, trust check or None) for {"lane", "target": "agent"|"shell"}. fresh: look the
+        pane up again instead of using the cached id (before anything is written to it)."""
         w = self.worker(d.get("lane"))
         if d.get("target") == "shell":
             pane = self.shell_pane(w.lane)
             if not pane:
                 raise server.Refused(404, "lane %s has no shell yet (Open a shell)" % w.lane)
             return pane, None
-        return self.agent_pane(w), w.adapter.waiting_for_trust
+        return self.agent_pane(w, fresh=fresh), w.adapter.waiting_for_trust
 
     # ---------------------------------------------------------------- GET routes
     def lanes(self, q, sid):
@@ -92,6 +105,7 @@ class Console:
         if not self.m:
             return dict(base, run=None, lanes=[], hint="No run yet: `pai run` starts one; then reload this page.")
         rows, _ = rc.collect_status(self.m, self.tmux)
+        summary = runstate.annotate(self.m, rows)  # the same names and explanations as `pai status`
         out = []
         for r in rows:
             note = r.get("note") or ""  # the task note's name in the run's task folder, without .md
@@ -104,8 +118,53 @@ class Console:
             out.append({"lane": r["lane"], "agent": agents.get(r["agent"]["name"]).display, "phase": r["phase"],
                         "process": r["process"]["state"], "dispatch": r["dispatch"]["state"], "branch": r["branch"],
                         "worktree": r["worktree"], "note": note, "note_link": note_link,
-                        "trust": r["phase"] == "waiting-for-trust", "shell": bool(self.shell_pane(r["lane"]))})
-        return dict(base, run=self.m.run_id, session=self.m.session, shell_session=self.shells, lanes=out)
+                        "trust": r["phase"] == "waiting-for-trust", "shell": bool(self.shell_pane(r["lane"])),
+                        "task": r["ids"]["task"], "lifecycle": r["lifecycle"],
+                        "recovery": {k: v for k, v in recovery.plan_lane(self.m, r).items()
+                                     if k in ("action", "would", "human", "choices")}})
+        return dict(base, run=self.m.run_id, run_key=runstate.run_key(self.m), session=self.m.session,
+                    shell_session=self.shells, lanes=out, summary=summary,
+                    summary_line=runstate.summary_line(summary), not_started=summary["not_started"])
+
+    def inspect(self, q, sid):
+        """`pai inspect LANE` for the browser: lifecycle, why, evidence with its source, next."""
+        w = self.worker((q.get("lane") or [""])[0])
+        rows, _ = rc.collect_status(self.m, self.tmux)
+        runstate.annotate(self.m, rows)
+        row = next((r for r in rows if r["lane"] == w.lane), None)
+        if row is None:
+            return {"lane": w.lane, "lifecycle": {"state": "not-started", "why": "no task was prepared for it",
+                                                  "next": []}, "evidence": []}
+        return {"lane": w.lane, "task": row["ids"]["task"], "lifecycle": row["lifecycle"],
+                "evidence": runstate.sources(self.m, row)}
+
+    def recover_preview(self, q, sid):
+        """`pai recover` (preview) for the browser: nothing changes."""
+        if not self.m:
+            raise server.Refused(404, "no run yet")
+        rows, _ = rc.collect_status(self.m, self.tmux)
+        summary = runstate.annotate(self.m, rows)
+        plans = recovery.build(self.m, rows, {})
+        return {"run": runstate.run_key(self.m), "changed": False, "summary_line": runstate.summary_line(summary),
+                "interrupted": recovery.unfinished(self.m), "lanes": plans,
+                "apply": [p["lane"] for p in plans if p["action"] in recovery.AUTOMATIC],
+                "cli": "pai recover --run %s" % self.m.run_id}
+
+    def recover_apply(self, d, sid):
+        """`pai recover --apply` for the browser: only the automatic actions (restart, deliver,
+        record-delivered); an unknown dispatch, a trust prompt and other human actions are left
+        for the terminal. Same session mutex as the command line; its report is returned."""
+        if not self.m:
+            raise server.Refused(404, "no run yet")
+        if d.get("confirm") is not True:
+            raise server.Refused(400, "confirm: true is required (the preview comes first)")
+        a = types.SimpleNamespace(wait=float(d.get("wait") or 10.0), choose=None, lane=None, apply=True, history=False,
+                                  json=False)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = recovery.main(self.m, a)
+        self._panes.clear()  # restarted lanes have new panes
+        return {"code": code, "report": buf.getvalue()}
 
     def screen(self, q, sid):
         d = {"lane": (q.get("lane") or [""])[0], "target": (q.get("target") or ["agent"])[0]}
@@ -118,16 +177,38 @@ class Console:
         return s
 
     # ---------------------------------------------------------------- POST routes
+    def paste_preview(self, d, sid):
+        """Where a paste would go and how big it is, before anything is sent."""
+        w = self.worker(d.get("lane"))
+        text = d.get("text")
+        if not isinstance(text, str):
+            raise server.Refused(400, "text must be a string")
+        pane, trust = self.target(d, fresh=True)
+        res = panes.preview(self.tmux, pane, text, trust=trust, allow_unbracketed=bool(d.get("allow_unbracketed")))
+        res.update(lane=w.lane, target=d.get("target") or "agent", pane=pane,
+                   program=w.adapter.display if d.get("target") != "shell" else "shell",
+                   submit=bool(d.get("enter")))
+        return res
+
     def paste(self, d, sid):
-        pane, trust = self.target(d)
+        pane, trust = self.target(d, fresh=True)  # never into a pane id that may be stale
         text = d.get("text")
         if not isinstance(text, str):
             raise server.Refused(400, "text must be a string")
         try:
-            return panes.paste(self.tmux, pane, text, trust=trust, enter=bool(d.get("enter")),
-                               allow_unbracketed=bool(d.get("allow_unbracketed")))
+            res = panes.paste(self.tmux, pane, text, trust=trust, enter=bool(d.get("enter")),
+                              allow_unbracketed=bool(d.get("allow_unbracketed")))
         except panes.Refused as e:
             raise server.Refused(409, "%s: %s" % (e.code, e))
+        if d.get("target") != "shell":  # what reached the agent is evidence a later handoff needs
+            import pastes
+            w = self.worker(d.get("lane"))
+            try:
+                proc = rc.lane_process(self.m, self.tmux, w)
+            except Exception:  # noqa: BLE001
+                proc = {}
+            pastes.record(self.m, w, text, res, "console", proc)
+        return res
 
     def keys(self, d, sid):
         pane, _ = self.target(d)
@@ -163,9 +244,11 @@ class Console:
 
     def install(self, httpd, app):
         app.pages = {"/": "console.html", "/notes": "index.html"}
-        app.get_routes.update({"/api/lanes": self.lanes, "/api/screen": self.screen})
-        app.post_routes.update({"/api/paste": self.paste, "/api/keys": self.keys, "/api/shell/open": self.open_shell,
-                                "/api/shell/close": self.close_shell})
+        app.get_routes.update({"/api/lanes": self.lanes, "/api/screen": self.screen, "/api/inspect": self.inspect,
+                               "/api/recover": self.recover_preview})
+        app.post_routes.update({"/api/paste": self.paste, "/api/paste/preview": self.paste_preview,
+                                "/api/keys": self.keys, "/api/shell/open": self.open_shell,
+                                "/api/shell/close": self.close_shell, "/api/recover": self.recover_apply})
 
 
 def main(project, m, roots, port=0, no_browser=False, opener=None, out=None):

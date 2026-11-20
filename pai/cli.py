@@ -1,10 +1,10 @@
-"""Command line: `python3 -m pai {init,doctor,check,context,handoff,install} …`."""
+"""Command line: `python3 -m pai {init,doctor,check,context,handoff,install,queue} …`."""
 
 import argparse
 import os
 import sys
 
-from pai import __version__, config, context, doctor, handoff, initcfg, install
+from pai import __version__, config, context, doctor, handoff, initcfg, install, privacy, workqueue
 
 INIT_EPILOG = """examples:
   preview (writes nothing):
@@ -24,7 +24,7 @@ def _parser():
     p.add_argument("--config", help="configuration file (default: $PAI_CONFIG, else %s)" % (
         config.DEFAULT_CONFIG.replace("%", "%%") if config.PACKAGED else "pai.local.toml in the pai directory"))
     p.add_argument("--version", action="version", version=f"pai {__version__}")
-    sub = p.add_subparsers(dest="cmd", required=True, metavar="{init,doctor,check,context,handoff,install}")
+    sub = p.add_subparsers(dest="cmd", required=True, metavar="{init,doctor,check,context,handoff,install,queue}")
 
     i = sub.add_parser("init", help="create a local configuration from explicit paths (preview unless --write)",
                        epilog=INIT_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -79,6 +79,11 @@ def _parser():
     n.add_argument("--blocker", action="append", default=[], metavar="TEXT")
     n.add_argument("--next", action="append", default=[], metavar="TEXT")
     n.add_argument("--proposal", action="append", default=[], metavar="TEXT")
+    n.add_argument("--preview", action="store_true", help="print the draft and what the privacy filter removes; "
+                   "write nothing")
+    n.add_argument("--keep-private", action="store_true", help="keep agent session links and credential-like text "
+                   "(removed by default, so a handoff can be shared)")
+    workqueue.add_parser(sub)
     return p
 
 
@@ -114,6 +119,8 @@ def main(argv=None):
             return _init(a)
         if a.cmd == "install":
             return install.main(a)
+        if a.cmd == "queue":
+            return workqueue.main(a)
         if a.cmd == "doctor":
             r = doctor.run(a.config, a.project, a.agents)
             print("\n".join(r.lines))
@@ -138,7 +145,27 @@ def main(argv=None):
             return 1 if problems else 0
         if a.cmd == "handoff" and a.hcmd == "new":
             states = {s: getattr(a, s) for s in handoff.STATES}
-            path = handoff.create(project, a.task_id, states, a.summary, a.evidence, a.blocker, a.next, a.proposal)
+            summary, lists = a.summary, [a.evidence, a.blocker, a.next, a.proposal]
+            if not a.keep_private:  # session links and credentials stay out of a shared handoff by default
+                removed = []
+
+                def clean(value, field):
+                    text, rem = privacy.scrub(value or "")
+                    removed.extend((field, r) for r in rem)
+                    return text if value is not None else None
+                states = {k: clean(v, k) for k, v in states.items()}
+                summary = clean(summary, "summary")
+                lists = [[clean(x, "%s %d" % (name, i)) for i, x in enumerate(items, 1)]
+                         for name, items in zip(("evidence", "blocker", "next", "proposal"), lists)]
+                for field, r in removed:
+                    print(f"removed  {field}: {r['kind']} ({r['sample']})", file=sys.stderr)
+            if a.preview:
+                print("PREVIEW (nothing written; %s)" % ("privacy filter off: --keep-private" if a.keep_private else
+                                                        "the privacy filter's removals are listed above"))
+                print(handoff.render(project, a.task_id, "(set when written)",
+                                     {k: v for k, v in states.items() if v}, summary, *lists), end="")
+                return 0
+            path = handoff.create(project, a.task_id, states, summary, *lists)
             print(path)
             return 0
     except (config.ConfigError, handoff.HandoffError) as e:

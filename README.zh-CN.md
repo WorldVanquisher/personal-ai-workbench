@@ -40,7 +40,7 @@ pai status               # 每条 lane：进程、信任提示、输入框、任
 pai web                  # 在浏览器里查看同一次运行（Ctrl-C 停止）
 ```
 
-单独运行 `pai` 会再次显示这条路径；`pai --help` 列出所有命令。如果某条 lane 在等 agent 首次使用时的“是否信任此文件夹”提示，`pai status` 会说明，`pai trust` 会逐个打开提示让你回答，任务随后送达。升级就是用新压缩包重复上面三行：任何一步失败，旧版本都照常可用；你的配置和任务笔记不会被改动。
+`pai guide` 会在一个可删除的文件夹里，用一个假的 worker 离线走完这整条路径（不需要账号或网络）。单独运行 `pai` 会再次显示这条路径；`pai --help` 列出所有命令。如果某条 lane 在等 agent 首次使用时的“是否信任此文件夹”提示，`pai status` 会说明，`pai trust` 会逐个打开提示让你回答，任务随后送达。升级就是用新压缩包重复上面三行：任何一步失败，旧版本都照常可用；你的配置和任务笔记不会被改动。
 
 **获取压缩包。** 从 [v0.4.0 发布页](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.4.0) 下载 `pai-workbench-0.4.0.tar.gz` 和它的 `.sha256`（`.zip` 内容相同，供 Windows 使用）。也可以在源码 checkout 里构建同样的压缩包：`python3 -B tools/build_bundle.py --out dist`。
 
@@ -69,6 +69,9 @@ pai web                  # 在浏览器里查看同一次运行（Ctrl-C 停止�
 
 - [INSTALL.md](INSTALL.md)：用 uv 或压缩包安装、升级、Windows；[REFERENCE.md](REFERENCE.md)：核心命令。
 - `swarm/WORKBENCH.md`（压缩包和 checkout 里都有）：工作台指南，包括平台安装、配置、文件夹信任、SSH、清理和 JEV 费用。
+- 提交审阅前检查改动：`python3 -B tools/verify.py` 运行核心和工作台测试套件（文件句柄泄漏也算失败），构建两种压缩包并做冒烟测试，然后运行 headless 测试、从刚构建的压缩包开始的新用户验收、QUICKSTART 演练、浏览器控制台演练和安装包检查（安装、升级、卸载）。测试目录自动发现（`--list`）；缺少所需工具（tmux、uv、setuptools）的步骤会标为跳过；汇总给出每一步的耗时和每个被跳过的测试及原因。`--quick` 只运行核心套件和压缩包检查。
+- `swarm/RUN-STATE.md`（运行状态名称、标识符以及每种状态背后的证据）和 `swarm/BACKENDS.md`（每个代理后端提供的能力，以及如何新增一个）；两者都随压缩包发布。
+- [docs/1.0/](docs/1.0/)：给所有者的 1.0 提案：验收清单、平台、兼容性承诺、实验功能政策、能力矩阵、从 0.4.x 迁移、真实代理冒烟清单、待办列表（英文）。
 - [SESSION_START.md](SESSION_START.md)：agent 会话的开场提示；[RELEASE_NOTES.md](RELEASE_NOTES.md)：变更与测试记录。
 
 许可证：MIT，见 [LICENSE](LICENSE)。

@@ -23,6 +23,7 @@ launcher's folder is not on PATH, the exact command that adds it is printed inst
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 
@@ -109,22 +110,38 @@ def _home_relative(path, posix=True):
     return path
 
 
+def _dq(text, specials):
+    """`text` for inside a double-quoted shell string: each of `specials` escaped with a backslash."""
+    return "".join("\\" + c if c in specials else c for c in text)
+
+
+def _sq(text):
+    """A POSIX single-quoted word (any character, a ' included)."""
+    return "'" + text.replace("'", "'\\''") + "'"
+
+
 def path_fix(bin_dir, env=None, windows=None, platform=None):
-    """Lines telling the user exactly how to put bin_dir on PATH for new terminals."""
+    """Lines telling the user exactly how to put bin_dir on PATH for new terminals, quoted for
+    that shell: spaces, quotes and $ in the folder name are safe to copy."""
     env = os.environ if env is None else env
     windows = os.name == "nt" if windows is None else windows
     if windows:
+        ps = "".join("`" + c if c in '`"$' else c for c in bin_dir)  # PowerShell double-quote escapes
         return ["[Environment]::SetEnvironmentVariable(\"Path\", \"%s;\" + [Environment]::GetEnvironmentVariable("
-                "\"Path\", \"User\"), \"User\")" % bin_dir,
+                "\"Path\", \"User\"), \"User\")" % ps,
                 "(PowerShell; then open a new terminal. cmd.exe for this window only: set \"PATH=%s;%%PATH%%\")" % bin_dir]
     shown = _home_relative(bin_dir)
+    home = shown.startswith("$HOME")
+    rest = shown[len("$HOME"):] if home else shown
     shell = os.path.basename(env.get("SHELL") or "")
     if shell == "fish":
-        return ["fish_add_path %s" % shown.replace("$HOME", "~"), "(then open a new terminal)"]
+        if home and re.fullmatch(r"[A-Za-z0-9_./+-]*", rest):
+            return ["fish_add_path ~%s" % rest, "(then open a new terminal)"]
+        return ['fish_add_path "%s%s"' % ("$HOME" if home else "", _dq(rest, '"$\\')), "(then open a new terminal)"]
     rc = {"zsh": "~/.zshrc", "bash": "~/.bash_profile" if (platform or sys.platform) == "darwin" else "~/.bashrc"}.get(
         shell, "~/.profile")
-    line = 'export PATH="%s:$PATH"' % shown
-    return ["echo '%s' >> %s" % (line, rc), "(then open a new terminal; for this one only: %s)" % line]
+    line = 'export PATH="%s%s:$PATH"' % ("$HOME" if home else "", _dq(rest, '"$`\\'))
+    return ["echo %s >> %s" % (_sq(line), rc), "(then open a new terminal; for this one only: %s)" % line]
 
 
 def _launcher(bin_dir, windows):

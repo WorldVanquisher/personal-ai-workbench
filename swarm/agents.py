@@ -33,6 +33,7 @@ import subprocess
 import time
 
 MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/+\[\]-]{0,99}")
+CAPS_SCHEMA = "pai_backend_capabilities_v1"
 NAME_RE = re.compile(r"[a-z][a-z0-9-]{0,23}")
 
 
@@ -125,6 +126,39 @@ class Adapter:
     no_rc_reason = ""
     efforts = ()         # reasoning-effort values this adapter can pass (documented controls only)
     example_model = ""
+    readiness = "screen"     # where input readiness comes from: "session-record" (then the screen) or "screen"
+    transcript = None        # the agent's own record of submitted prompts pai can read, or None (then a
+    transcript_root = None   #   dispatched task could never be shown delivered); where it lives
+    login_check = None       # the read-only command that tells whether the agent is logged in
+
+    def capabilities(self):
+        """What pai can launch and observe for this backend: the one representation `pai doctor`
+        and run planning both read (schema pai_backend_capabilities_v1)."""
+        return {"schema": CAPS_SCHEMA, "backend": self.name, "display": self.display,
+                "launch": {"program": self.program, "modes": list(self.modes), "default_mode": self.default_mode(),
+                           "remote_control_modes": list(self.rc_modes), "model": True, "efforts": list(self.efforts)},
+                "readiness": {"source": self.readiness, "screen_markers": list(self.ready_markers)},
+                "trust": {"detected_from": "the visible screen", "markers": list(self.trust_markers),
+                          "answered_by": "a person, never pai"},
+                "input": {"paste": "one bracketed paste when the program asks for it, then Enter only if allowed",
+                          "enter_blocked_by": ["a folder-trust prompt on screen"] + (
+                              ["its session record no longer idle"] if self.readiness == "session-record" else [])},
+                "transcript": {"kind": self.transcript, "location": self.transcript_root,
+                               "delivery_evidence": bool(self.transcript)},
+                "login": {"check": self.login_check}}
+
+    def gaps(self):
+        """What this backend lacks compared with the full contract, in words (for doctor)."""
+        out = []
+        if not self.rc_modes:
+            out.append("no Remote Control mode")
+        if self.readiness != "session-record":
+            out.append("input readiness from the screen only (no session record)")
+        if not self.transcript:
+            out.append("no transcript pai can read: a dispatched task could never be shown delivered")
+        if not self.login_check:
+            out.append("no login check")
+        return out
 
     def effort_problem(self, effort):
         if effort is None or effort in self.efforts:
@@ -215,6 +249,9 @@ class Claude(Adapter):
     ready_markers = ("? for shortcuts",)
     efforts = ("low", "medium", "high", "xhigh", "max")  # `claude --help`: --effort <level>, 2.1.323
     example_model = "sonnet"
+    readiness = "session-record"
+    transcript, transcript_root = "claude-projects-jsonl", "$CLAUDE_CONFIG_DIR/projects/<worktree>/<session>.jsonl"
+    login_check = "claude auth status"
 
     def argv(self, program, mode, name, model, effort=None):
         argv = list(program) + (["--remote-control"] if mode == "rc" else []) + ["--name", name]
@@ -305,6 +342,9 @@ class Codex(Adapter):
 
     efforts = ("minimal", "low", "medium", "high")  # config key model_reasoning_effort, passed with -c
     example_model = "gpt-5-codex"
+    readiness = "screen"
+    transcript, transcript_root = "codex-rollout-jsonl", "$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl"
+    login_check = "codex login status"
 
     def argv(self, program, mode, name, model, effort=None):
         return list(program) + (["--model", model] if model else []) + (
@@ -360,6 +400,20 @@ ADAPTERS = {a.name: a for a in (Claude(), Codex())}
 
 def get(name):
     return ADAPTERS.get(name)
+
+
+def register(adapter):
+    """Add an adapter in this process only (tests: swarm/tests/fake_backend.py). The command line
+    never calls this, so `pai run --agent` and `pai doctor` only ever know the built-in ones."""
+    if adapter.name in ADAPTERS:
+        raise ValueError("backend %s exists" % adapter.name)
+    ADAPTERS[adapter.name] = adapter
+
+
+def unregister(name):
+    if name in ("claude", "codex"):
+        raise ValueError("the built-in backends stay")
+    ADAPTERS.pop(name, None)
 
 
 def names():

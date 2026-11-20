@@ -1,0 +1,41 @@
+# pai workbench project defaults. Edit: `pai config edit`; check: `pai config check`.
+# Precedence: command-line flag > project file > global file > built-in default.
+# One-time actions (--yes, cleanup --apply, --stop-running, setup --install-missing) are never
+# defaults. API keys never belong here.
+
+[project]   # the checkout
+name = "repo"   # project name (set by pai init)
+repo = "@ROOT@/repo"   # the checkout this project is (set by pai init)
+common_dir = "@ROOT@/repo/.git"   # its Git directory (set by pai init; identifies it from any worktree)
+# github = "OWNER/REPO"   # OWNER/REPO for gh (pr open, next); from the remote URL when it is GitHub
+
+[run]   # pai run / resume / next
+default_agent = "claude"   # agent for every lane when `pai run` has no --agent: claude, codex
+workers = 2   # pai run --workers
+remote = "origin"   # remote a new run fetches (pai run --remote)
+base = "main"   # base branch a new run starts from (pai run --base); unset: the remote's default
+tasks = "@ROOT@/tasks"   # Obsidian folder of task notes; unset: no queue
+worktree_root = "@ROOT@/lanes"   # lane worktrees live here, one per lane, reused across runs
+tmux_socket = "pai-repo"   # tmux socket name (or path) for this project's workers
+# wait = 10.0   # seconds pai run/resume/next wait for lanes to start and take their task (built-in: 10.0)
+# dispatch = true   # send each lane its task when it is ready (pai run --no-dispatch turns it off once) (built-in: true)
+
+[review]   # pai pr check / open
+# required_checks = ["verify"]   # checks that always run before pr open
+# check_timeout_min = 45   # minutes before a check is stopped (built-in: 45)
+
+[review.checks]   # NAME = [command argv]; only these ever run; task notes cannot add commands
+# verify = ["make", "verify"]
+
+[logs]   # pai logs
+# tail = 60   # pai logs --tail (built-in: 60)
+
+[agents.claude]   # used only for claude lanes; nothing carries over between agents
+# mode = "rc"   # launch mode (rc, local)
+# model = "sonnet"   # model; unset: the agent's own default
+# effort = "xhigh"   # reasoning effort; unset: the agent's own default (low, medium, high, xhigh, max)
+
+[agents.codex]   # used only for codex lanes; nothing carries over between agents
+# mode = "local"   # launch mode (local)
+# model = "gpt-5-codex"   # model; unset: the agent's own default
+# effort = "medium"   # reasoning effort; unset: the agent's own default (minimal, low, medium, high)

@@ -172,7 +172,15 @@ them. Then run `doctor`: it must report the new version and an intact bundle. Wi
 nothing to copy; a 0.1.0 configuration works unchanged. If yours is still the
 `pai.local.toml` inside the old bundle, move it to the `PAI_CONFIG` location
 once. Delete the old folder when satisfied. Handoffs and notes live in your
-vault, so upgrades never touch them.
+vault, so upgrades never touch them. Preview first: `bin/pai install --dry-run` prints the
+version the launcher runs now and what would change, and writes nothing.
+
+**Uninstall (archives):** remove the launcher (`~/.local/bin/pai`, a symlink; Windows:
+`PREFIX\bin\pai.cmd`) and the install folder (`~/.local/share/pai-workbench`; Windows:
+`%LOCALAPPDATA%\pai-workbench`). That removes the program only. Your configuration
+(`~/.config/pai`, `~/.config/pai-workbench`), task notes, handoffs and the workbench's run state
+(`~/.cache/pai-swarm`, or `PAI_SWARM_HOME`) stay until you delete them yourself. The same holds
+for `uv tool uninstall pai-workbench`. (Checked offline by `tools/package_check.py`, item 085.)
 
 **Several devices:** each device runs its own `pai init` with its own absolute
 paths, because the repository and the synchronized vault usually sit in

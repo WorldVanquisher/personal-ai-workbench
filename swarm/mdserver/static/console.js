@@ -5,6 +5,8 @@
 const $ = (id) => document.getElementById(id);
 let csrf = "", info = null, lane = null, target = "agent", scrollback = false, live = false;
 let queue = [], flushing = false, lastKey = "", polling = null, quick = null;
+let lastStatus = "", staged = null, opener = null, pendingPaste = null;
+const AUTO = ["restart", "deliver", "record-delivered"];
 
 async function api(method, url, body) {
   const opt = { method, headers: { "X-PAI-CSRF": csrf }, credentials: "same-origin" };
@@ -108,8 +110,13 @@ async function refresh() {
   const url = "/api/screen?lane=" + encodeURIComponent(lane) + "&target=" + target + (scrollback ? "&history=1" : "");
   const r = await api("GET", url);
   if (r.status === 404 && target === "shell") { shellShown(false); return; }
+  if (r.status === 404) { // a closed pane or a stale lane address: say so, with the next action
+    $("gone-text").textContent = r.data.error || "the lane is not available";
+    $("gone").hidden = false; $("term").hidden = true; setLive(false); return;
+  }
   if (r.status !== 200) { showError(r.data.error || "the lane is not available"); return; }
   showError("");
+  if (!$("gone").hidden) { $("gone").hidden = true; $("term").hidden = false; }
   if (target === "shell") shellShown(true);
   $("trust").hidden = !r.data.trust;
   const key = JSON.stringify([lane, target, scrollback, r.data.text, r.data.cursor, live]);
@@ -135,34 +142,99 @@ async function loadLanes() {
   $("run").textContent = info.project + (info.run ? " · run " + info.run : "");
   $("notes").hidden = !info.roots.length;
   $("hint").hidden = !info.hint; $("hint").textContent = info.hint || "";
+  if (info.summary_line !== undefined && $("summary").textContent !== info.summary_line) $("summary").textContent = info.summary_line;
+  $("recover").hidden = !info.lanes.some((l) => l.lifecycle && (l.lifecycle.attention || AUTO.includes(l.recovery.action)));
   const ul = $("lanes"); ul.textContent = "";
   for (const l of info.lanes) {
     const li = document.createElement("li"), b = document.createElement("button");
     b.type = "button";
+    const lc = l.lifecycle || { state: l.phase, why: "" };
     const title = document.createElement("span"); title.textContent = "lane " + l.lane + " · " + l.agent;
-    title.appendChild(badge(l.trust ? "TRUST?" : l.phase, l.trust ? "warn" : (l.process === "running" ? "" : "off")));
+    title.appendChild(badge(lc.attention ? lc.state.toUpperCase() : lc.state, lc.state === "waiting-for-trust" ? "warn" :
+      lc.attention ? "attn" : (l.process === "running" ? "" : "off")));
     const meta = document.createElement("span"); meta.className = "meta";
     meta.textContent = (l.note ? l.note + " · " : "") + "dispatch " + l.dispatch + " · " + l.branch;
     b.append(title, meta);
+    b.setAttribute("aria-label", "lane " + l.lane + ", " + l.agent + ", " + lc.state + ": " + lc.why);
     if (l.lane === lane) b.setAttribute("aria-current", "true");
-    b.addEventListener("click", () => select(l.lane));
+    b.addEventListener("click", () => select(l.lane, true));
     li.appendChild(b); ul.appendChild(li);
   }
   if (!lane && info.lanes.length) select(info.lanes[0].lane);
   else if (lane) laneHead();
 }
+function laneStatus(l) {
+  const lc = l.lifecycle; if (!lc) return;
+  const text = lc.state + "|" + lc.why + "|" + (lc.next || []).join("|");
+  if (text === lastStatus) return; // announce a change once, not every poll
+  lastStatus = text;
+  const box = $("lane-status"); box.textContent = "";
+  const name = document.createElement("span"); name.className = "name"; name.textContent = lc.state.toUpperCase() + ": ";
+  box.append(name, document.createTextNode(lc.why));
+  if (lc.next && lc.next.length) {
+    const nxt = document.createElement("div"); nxt.append(document.createTextNode("Next: "));
+    const c = document.createElement("code"); c.textContent = lc.next[0]; nxt.appendChild(c); box.appendChild(nxt);
+  }
+}
+async function loadInspect() {
+  const panel = $("inspect-panel");
+  if (panel.hidden || !lane) return;
+  const r = await api("GET", "/api/inspect?lane=" + encodeURIComponent(lane));
+  panel.textContent = "";
+  if (r.status !== 200) { panel.textContent = r.data.error || "not available"; return; }
+  for (const e of r.data.evidence) {
+    const dt = document.createElement("dt"), dd = document.createElement("dd"), src = document.createElement("div");
+    dt.textContent = e.kind; dd.textContent = (e.state == null ? "" : e.state) + ": " + (e.detail || "");
+    src.className = "src"; src.textContent = "from " + e.source; dd.appendChild(src); panel.append(dt, dd);
+  }
+}
+function openPanel(id, focusId, from) { opener = from || document.activeElement; $(id).hidden = false; $(focusId).focus(); }
+function closePanel(id) { $(id).hidden = true; if (opener && opener.focus) opener.focus(); opener = null; }
+async function recoverPreview(from) {
+  const r = await api("GET", "/api/recover");
+  if (r.status !== 200) return showError(r.data.error || "no recovery preview");
+  $("recover-cli").textContent = r.data.cli;
+  const ul = $("recover-lanes"); ul.textContent = "";
+  for (const e of r.data.interrupted) {
+    const li = document.createElement("li");
+    li.textContent = "INTERRUPTED: an earlier recovery of lane " + e.lane + " (" + e.action + ", " + e.ts + ") did not finish; before it: " +
+      e.before.lifecycle; ul.appendChild(li);
+  }
+  for (const p of r.data.lanes) {
+    const li = document.createElement("li"), tag = AUTO.includes(p.action) ? "AUTO" : p.human ? "HUMAN" :
+      p.action === "choose" ? "CHOOSE" : "";
+    li.textContent = "lane " + p.lane + " · task " + p.task + " · now " + p.lifecycle + " → " + p.action + (tag ? " [" + tag + "]" : "") +
+      ": " + p.would;
+    for (const c of p.choices || []) { const code = document.createElement("code"); code.textContent = " pai recover " + c.split("   ")[0]; li.append(document.createElement("br"), code); }
+    ul.appendChild(li);
+  }
+  $("recover-apply").disabled = !r.data.apply.length;
+  $("recover-apply").textContent = r.data.apply.length ? "Apply recovery: " + r.data.apply.length + " automatic action(s)" : "Nothing to apply automatically";
+  $("recover-report").hidden = true;
+  openPanel("recover-panel", "recover-title", from);
+}
+async function recoverApply() {
+  if (!confirm("Apply the automatic recovery actions now? Restarted workers get their tasks; nothing is resent that was delivered.")) return;
+  $("recover-apply").disabled = true; $("recover-report").hidden = false; $("recover-report").textContent = "Working…";
+  const r = await api("POST", "/api/recover", { confirm: true, wait: 10 });
+  $("recover-report").textContent = r.status === 200 ? r.data.report : (r.data.error || "not applied");
+  lastKey = ""; loadLanes(); soon();
+}
 function current() { return info && info.lanes.find((l) => l.lane === lane); }
 function laneHead() {
   const l = current(); if (!l) return;
+  laneStatus(l);
   $("lane-title").textContent = "LANE " + l.lane + " · " + l.agent + " · " + l.worktree;
   const n = $("note-link");
   n.hidden = !l.note_link;
   if (l.note_link) n.href = "/notes#open=" + l.note_link.root + ":" + encodeURIComponent(l.note_link.path);
 }
-function select(name) {
+function select(name, byUser) {
+  if (name !== lane) { lastStatus = ""; setStaged(null); $("inspect-panel").hidden = true; $("inspect").setAttribute("aria-pressed", "false"); }
   lane = name; lastKey = ""; $("lane").hidden = false;
   document.querySelectorAll("#lanes button").forEach((b) => b.removeAttribute("aria-current"));
   loadLanes(); laneHead(); tab(target);
+  if (byUser) $("lane-title").focus(); // keyboard and screen-reader users land on the lane they chose
 }
 function tab(which) {
   target = which; lastKey = "";
@@ -196,6 +268,35 @@ async function flush() {
   if (r.status !== 200) result(r.data.error);
   if (queue.length) flush(); else soon();
 }
+function setStaged(state) { // the input box holds pasted text (staged) or it was submitted
+  staged = state;
+  const box = $("inbox");
+  box.hidden = !state; box.className = "inbox" + (state ? " " + state.kind : "");
+  $("inbox-text").textContent = !state ? "" : state.kind === "staged"
+    ? " in lane " + state.lane + "'s input box (" + state.chars + " characters): not submitted. Read it on the screen, then submit it."
+    : " to lane " + state.lane + " (" + state.chars + " characters).";
+  $("inbox-submit").hidden = !state || state.kind !== "staged";
+}
+function sizeText(n) { return n < 1024 ? n + " bytes" : (n / 1024).toFixed(1) + " KB"; }
+function composeSize() {
+  const t = $("compose").value, bytes = new TextEncoder().encode(t).length, lines = t ? t.split("\n").length : 0;
+  $("compose-size").textContent = t ? t.length + " characters, " + lines + " line(s), " + sizeText(bytes) : "";
+}
+async function stagePaste(enter) { // preview where the paste goes and how big it is, before sending it
+  const text = $("compose").value;
+  if (!lane || !text) return;
+  const r = await api("POST", "/api/paste/preview", { lane, target, text, enter });
+  if (r.status !== 200) { result(r.data.error || "cannot paste here"); return; }
+  const d = r.data;
+  pendingPaste = { text, enter, anyway: false };
+  let msg = "Paste into lane " + d.lane + " · " + d.program + " (" + d.target + " pane " + d.pane + "): " + d.chars +
+    " characters, " + d.lines + " line(s), " + sizeText(d.bytes) + " of at most " + sizeText(d.limit) + ". " +
+    (enter ? "Enter is pressed after it (submitted)." : "Nothing is submitted (it stays in the input box).");
+  if (!d.ok && (d.code === "not-bracketed" || d.code === "bracketed-unknown")) { msg += " Warning: " + d.why; pendingPaste.anyway = true; }
+  else if (!d.ok) { result("Not pasted: " + d.why); pendingPaste = null; return; }
+  $("staging-text").textContent = msg;
+  openPanel("staging", "staging-confirm");
+}
 async function sendPaste(text, enter, anyway) {
   if (!lane || !text) return false;
   const r = await api("POST", "/api/paste", { lane, target, text, enter, allow_unbracketed: !!anyway });
@@ -210,6 +311,7 @@ async function sendPaste(text, enter, anyway) {
   const d = r.data;
   result("Pasted " + d.pasted + " characters, " + d.lines + " line(s)" + (d.enter ? "; Enter pressed." : "; nothing submitted.") +
     (d.notes.length ? " (" + d.notes.join("; ") + ")" : ""));
+  setStaged({ kind: d.enter ? "submitted" : "staged", lane, chars: d.pasted });
   soon();
   return true;
 }
@@ -226,7 +328,7 @@ function onKey(e) {
     if (c === "v") return; // Ctrl-V: the browser pastes, and the paste goes in one piece (below)
     if (/[a-z@[\]\\^_]/.test(c)) k = "C-" + c;
   } else if (e.altKey && !e.ctrlKey && e.key.length === 1 && e.key !== ";") k = "M-" + e.key;
-  if (k) { e.preventDefault(); push({ key: k }); }
+  if (k) { e.preventDefault(); push({ key: k }); if (k === "Enter" && staged && staged.kind === "staged") setStaged(Object.assign({}, staged, { kind: "submitted" })); }
 }
 function takeTyped() { const v = $("kbd").value; $("kbd").value = ""; if (v) push({ text: v }); }
 
@@ -246,7 +348,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   $("live").addEventListener("click", () => setLive(!live));
   document.querySelectorAll("[data-key]").forEach((b) => {
     b.addEventListener("mousedown", (e) => e.preventDefault()); // keep live typing focused
-    b.addEventListener("click", () => push({ key: b.dataset.key }));
+    b.addEventListener("click", () => {
+      push({ key: b.dataset.key });
+      if (b.dataset.key === "Enter" && staged && staged.kind === "staged") setStaged(Object.assign({}, staged, { kind: "submitted" }));
+    });
   });
   $("tab-agent").addEventListener("click", () => tab("agent"));
   $("tab-shell").addEventListener("click", () => tab("shell"));
@@ -267,9 +372,26 @@ window.addEventListener("DOMContentLoaded", async () => {
     const s = await api("POST", "/api/shell/close", { lane });
     result(s.status === 200 && s.data.closed ? "Shell closed." : (s.data.error || "No shell to close.")); tab("shell");
   });
-  $("send").addEventListener("click", async () => { if (await sendPaste($("compose").value, false)) $("compose").value = ""; });
-  $("send-enter").addEventListener("click", async () => { if (await sendPaste($("compose").value, true)) $("compose").value = ""; });
+  $("send").addEventListener("click", () => stagePaste(false));
+  $("send-enter").addEventListener("click", () => stagePaste(true));
+  $("compose").addEventListener("input", composeSize);
+  $("staging-confirm").addEventListener("click", async () => {
+    const p = pendingPaste; closePanel("staging"); pendingPaste = null;
+    if (p && await sendPaste(p.text, p.enter, p.anyway)) { $("compose").value = ""; composeSize(); }
+  });
+  $("staging-cancel").addEventListener("click", () => { pendingPaste = null; closePanel("staging"); result("Nothing was pasted."); });
+  $("staging").addEventListener("keydown", (e) => { if (e.key === "Escape") { pendingPaste = null; closePanel("staging"); } });
+  $("inbox-submit").addEventListener("click", () => { push({ key: "Enter" }); setStaged(Object.assign({}, staged, { kind: "submitted" })); });
+  $("inspect").addEventListener("click", () => {
+    const on = $("inspect-panel").hidden; $("inspect-panel").hidden = !on; $("inspect").setAttribute("aria-pressed", String(on));
+    loadInspect();
+  });
+  $("recover").addEventListener("click", (e) => recoverPreview(e.currentTarget));
+  $("gone-recover").addEventListener("click", (e) => recoverPreview(e.currentTarget));
+  $("recover-apply").addEventListener("click", recoverApply);
+  $("recover-close").addEventListener("click", () => closePanel("recover-panel"));
+  $("recover-panel").addEventListener("keydown", (e) => { if (e.key === "Escape") closePanel("recover-panel"); });
   await loadLanes();
-  setInterval(() => { if (!document.hidden) loadLanes().catch(() => {}); }, 4000);
+  setInterval(() => { if (!document.hidden) { loadLanes().catch(() => {}); loadInspect().catch(() => {}); } }, 4000);
   poll();
 });

@@ -322,6 +322,32 @@ class HandoffTests(unittest.TestCase):
         self.assertIn("## Knowledge-update proposals (UNAPPROVED)", text)
 
 
+    def test_cli_handoff_keeps_session_links_and_tokens_out_by_default(self):
+        link = "https://claude.ai/code/session_01" + "Ab3" * 8
+        token = "ghp_" + "Q7w8E9r0" * 5
+        args = ["--config", str(self.f.cfg), "handoff", "new", "demo", "--task-id", "PRIV-1", "--summary",
+                "fixed the export; transcript at %s" % link, "--evidence", "push used %s" % token,
+                "--evidence", "Claude Monet's palette test passes"]
+        rc, out, err = run_cli(*args, "--preview")
+        self.assertEqual(rc, 0)
+        self.assertIn("PREVIEW (nothing written", out)
+        self.assertIn("removed  summary: Claude session link", err)
+        self.assertIn("removed  evidence 1: GitHub token", err)
+        self.assertNotIn(link, out + err)
+        self.assertNotIn(token, out + err)
+        self.assertIn("Claude Monet's palette test passes", out, "ordinary text is kept")
+        self.assertEqual(handoff.listing(self.f.project())[0].count("PRIV-1"), 0, "the preview wrote nothing")
+        rc, out, err = run_cli(*args)
+        self.assertEqual(rc, 0)
+        text = Path(out.strip()).read_text()
+        self.assertNotIn(link, text)
+        self.assertNotIn(token, text)
+        self.assertIn("<removed: Claude session link>", text)
+        self.assertIn("<removed: GitHub token>", text)
+        rc, out, _ = run_cli(*args[:5], "--task-id", "PRIV-2", "--summary", "see %s" % link, "--keep-private")
+        self.assertIn(link, Path(out.strip()).read_text(), "kept only when asked")
+
+
 class StaticTests(unittest.TestCase):
     def test_no_network_process_or_model_imports(self):
         banned = {"subprocess", "socket", "urllib", "http", "requests", "ssl", "asyncio"}
@@ -343,6 +369,21 @@ class StaticTests(unittest.TestCase):
         self.assertNotIn("/home/", text)
         self.assertNotIn("/srv/", text)
         self.assertIn("pai.local.toml", (ROOT / ".gitignore").read_text())
+
+
+
+
+class LauncherRouting(unittest.TestCase):
+    def test_doctor_option_values_are_not_a_project_name(self):
+        from pai import launch
+        wb = launch.workbench_command
+        self.assertEqual(wb(["doctor"]), "doctor")
+        self.assertEqual(wb(["doctor", "--agent", "codex"]), "doctor", "`codex` is --agent's value")
+        self.assertEqual(wb(["doctor", "--json", "--agent", "codex", "--agent", "claude"]), "doctor")
+        self.assertEqual(wb(["doctor", "--project", "demo"]), "doctor")
+        self.assertIsNone(wb(["doctor", "demo"]), "PAI's own `doctor PROJECT`")
+        self.assertIsNone(wb(["doctor", "--agent", "claude", "demo"]))
+        self.assertIsNone(wb(["doctor", "--agents"]))
 
 
 if __name__ == "__main__":

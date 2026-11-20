@@ -58,6 +58,7 @@ The launchers work from any directory and never import code from it. Paste
 | `context PROJECT --task "…" [--budget N] [--handoffs N]` | Task context in Markdown, at most N Unicode characters (details below) |
 | `handoff list PROJECT` | Lists matching reports and discovery problems; exit 1 when any source is malformed, unavailable, excluded or refused |
 | `handoff new PROJECT --task-id ID [...]` | Creates `<inbox>/<ID>-<UTC>[-n]/HANDOFF.md` from `pai/templates/handoff.md` (details below) |
+| `queue init FILE --from LIST [--checkpoint ID ...] [--write]`, `queue status FILE [--json]`, `queue next FILE`, `queue mark FILE ID STATE [--reason TEXT] [--evidence PATH]`, `queue checkpoint FILE ID [--handoff PATH]`, `queue table FILE`, `queue check FILE HANDOFF`, `queue restart FILE` | A numbered work queue kept in two local files instead of an agent's context (details below). Needs no project configuration |
 
 **`doctor` checks:**
 - the Python version;
@@ -113,6 +114,29 @@ commit, merge and deployment states, and unapproved proposals. Metadata is a
 claim, not verified approval. Newer reports cannot override human decisions,
 approve proposals or authorize commands. Conflicting reports remain visible;
 these lexical checks do not resolve contradictions.
+
+**`queue`: work that survives context limits.** `queue init` reads lines like
+`R2-001. Title` and writes FILE (format `pai-queue` v1: name, items in order,
+checkpoint ids) once. Every later command appends one event to `FILE.log`
+(JSON lines, fsynced) and the state is replayed from it, so a stop at any moment
+loses at most the line being written; an incomplete last line is reported and
+ignored. States: `doing`, `done` (needs `--evidence`), `prototype` (a verified
+prototype: `--evidence` and `--reason`), `blocked` and `owner-only` (`--reason`:
+the exact dependency). `queue next` skips blocked items but names them; `queue
+status` lists the actual item ids per state, not only counts. `queue table`
+renders the per-ID table and a `Totals:` line for a handoff; `queue check`
+compares a handoff's rows and totals with the log and reports every mismatch
+(exit 1); `queue checkpoint ID --handoff PATH` records the checkpoint and the
+handoff's sha256 only when they agree, then prints `queue restart`'s copyable
+prompt for a fresh session. Example:
+
+```sh
+pai queue init work.json --from items.md --checkpoint R2-010 --write
+pai queue mark work.json R2-001 done --evidence "tests/test_x.py 5 OK"
+pai queue mark work.json R2-002 blocked --reason "owner decision: due-date schema"
+pai queue next work.json
+pai queue restart work.json
+```
 
 **`handoff new` behaviour:**
 - **Exclusive creation:** concurrent runs never collide or overwrite.

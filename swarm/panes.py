@@ -89,14 +89,25 @@ def screen(tmux, pane_id, history=False):
     return dict(meta, text=p.stdout.decode("utf-8", "replace"))
 
 
-def paste(tmux, pane_id, text, trust=None, enter=False, allow_unbracketed=False, buffer="pai-paste"):
-    """Paste `text` into the pane in one piece. `trust` is a function(screen text) -> bool that
-    says the folder-trust prompt is visible (the lane's agent adapter), or None for a plain shell.
-    Returns a dict describing what was sent; raises Refused (nothing sent) otherwise."""
-    text, removed = clean(text)
+def preview(tmux, pane_id, text, trust=None, allow_unbracketed=False):
+    """What paste() would do with `text` in this pane, without sending anything: {'ok', 'code',
+    'why', 'chars', 'lines', 'bytes', 'limit', 'bracketed', 'removed'}. The same checks as
+    paste(), in the same order."""
+    cleaned, removed = clean(text)
+    data = cleaned.encode("utf-8")
+    res = {"chars": len(cleaned), "lines": cleaned.count("\n") + 1 if cleaned else 0, "bytes": len(data),
+           "limit": MAX_PASTE, "removed": removed, "bracketed": None, "ok": True, "code": None, "why": None}
+    try:
+        res["bracketed"] = _checks(tmux, pane_id, cleaned, data, trust, allow_unbracketed)[0]["bracketed"]
+    except Refused as e:
+        res.update(ok=False, code=e.code, why=str(e))
+    return res
+
+
+def _checks(tmux, pane_id, text, data, trust, allow_unbracketed):
+    """(pane info, visible-screen function, line count, notes); raises Refused."""
     if not text:
         raise Refused("empty", "nothing to paste")
-    data = text.encode("utf-8")
     if len(data) > MAX_PASTE:
         raise Refused("too-large", "the text is %d bytes; at most %d are pasted at once" % (len(data), MAX_PASTE))
     meta = info(tmux, pane_id)
@@ -125,6 +136,16 @@ def paste(tmux, pane_id, text, trust=None, enter=False, allow_unbracketed=False,
                                            "Paste anyway with pai paste --allow-unbracketed" % lines)
     if meta["bracketed"] is None and lines > 1:
         notes.append("this tmux cannot tell whether the program asked for bracketed paste; pasted on your word")
+    return meta, visible, lines, notes
+
+
+def paste(tmux, pane_id, text, trust=None, enter=False, allow_unbracketed=False, buffer="pai-paste"):
+    """Paste `text` into the pane in one piece. `trust` is a function(screen text) -> bool that
+    says the folder-trust prompt is visible (the lane's agent adapter), or None for a plain shell.
+    Returns a dict describing what was sent; raises Refused (nothing sent) otherwise."""
+    text, removed = clean(text)
+    data = text.encode("utf-8")
+    meta, visible, lines, notes = _checks(tmux, pane_id, text, data, trust, allow_unbracketed)
     if removed:
         notes.append("%d control character(s) removed" % removed)
     buf = "%s-%s" % (buffer, pane_id.lstrip("%"))

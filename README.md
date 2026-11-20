@@ -61,7 +61,8 @@ pai status               # per lane: process, trust prompt, input, task dispatch
 pai web                  # the same run in your browser (Ctrl-C stops it)
 ```
 
-`pai` alone prints this path again; `pai --help` lists every command. When a lane waits for
+`pai guide` runs this whole path once, offline, in a disposable folder with a FAKE worker (no
+account or network needed). `pai` alone prints this path again; `pai --help` lists every command. When a lane waits for
 an agent's first-use folder-trust prompt, `pai status` says so and `pai trust` opens each
 prompt for you to answer; the task follows. Upgrading is the same three lines with the new
 archive: the previous version keeps working if anything fails, and your configuration and
@@ -114,6 +115,18 @@ Windows steps for the core.
 - [INSTALL.md](INSTALL.md): installing with uv or from the archives, upgrades, Windows; [REFERENCE.md](REFERENCE.md): its commands.
 - `swarm/WORKBENCH.md` (in the archive and in a checkout): the workbench guide, including platform setup,
   configuration, folder trust, SSH, cleanup and JEV costs.
+- Checking a change before review: `python3 -B tools/verify.py` runs the core and workbench
+  suites (failing on leaked files too), builds both archives and smoke-tests them, then the
+  headless run tests, the new-user acceptance from the built archive, the QUICKSTART
+  walkthrough, the console walkthrough and the package check (install, upgrade, uninstall).
+  Test folders are discovered (`--list`); steps whose tools are missing (tmux, uv, setuptools)
+  are reported as skipped; the summary gives each step's time and every skipped test with its
+  reason. `--quick` runs only the core suite and the archives.
+- `swarm/RUN-STATE.md` (lifecycle names, identifiers and the evidence behind each status) and
+  `swarm/BACKENDS.md` (what each agent backend exposes; adding one); both ship in the archive.
+- [docs/1.0/](docs/1.0/): the 1.0 proposals for the owner: acceptance checklist, platforms,
+  compatibility, experimental policy, capabilities matrix, migration from 0.4.x, real-agent smoke
+  checklist, backlog.
 - [SESSION_START.md](SESSION_START.md): the prompt for an agent session;
   [RELEASE_NOTES.md](RELEASE_NOTES.md): changes and test evidence.
 

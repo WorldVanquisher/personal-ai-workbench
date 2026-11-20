@@ -21,11 +21,14 @@ import sys
 # handoff, install) always stay with the pai package. The workbench needs tmux, so on native
 # Windows only PAI's own commands run.
 WORKBENCH = {"run", "status", "attach", "logs", "trust", "resume", "pr", "next", "cleanup", "setup", "config", "jev",
-             "server", "task", "paste", "web"}
+             "server", "task", "paste", "web", "guide", "inspect", "recover"}
 PACKAGE = os.path.dirname(os.path.abspath(__file__))
 NATIVE_WINDOWS = os.name == "nt"
 
 QUICKSTART = """pai: run Claude Code and Codex on your Git repository, one task note per lane.
+
+Try it first, offline (a synthetic project and a FAKE worker; no account needed):
+  pai guide                plan -> dispatch -> status -> handoff in a disposable folder
 
 Start here, inside your Git checkout:
   pai doctor               check tools, agent logins and remote access (changes nothing)
@@ -74,9 +77,22 @@ def workbench_command(args):
         return cmd
     if cmd == "init" and not {"--vault", "--memory", "--inbox"} & {a.split("=")[0] for a in rest}:
         return cmd
-    if cmd == "doctor" and "--agents" not in rest and not [a for a in rest if not a.startswith("-")]:
+    if cmd == "doctor" and "--agents" not in rest and not _positionals(rest, ("--agent", "--project")):
         return cmd
     return None
+
+
+def _positionals(rest, valued):
+    """Arguments that are not options or an option's value (`--agent codex`: codex is a value)."""
+    out, skip = [], False
+    for a in rest:
+        if skip:
+            skip = False
+        elif a in valued:
+            skip = True
+        elif not a.startswith("-"):
+            out.append(a)
+    return out
 
 
 def _core():
@@ -128,11 +144,18 @@ def main(argv=None):
             return _core()
         finally:
             print("\nworkbench commands (`pai COMMAND --help`):\n"
-                  "  doctor, init, task, run, status, attach, logs, trust, resume, pr, next, cleanup, setup, config, jev,\n"
-                  "  paste (text into a lane in one piece), web (the run in your browser),\n"
+                  "  doctor, init, task, run, status, inspect, attach, logs, trust, resume, recover, pr, next, cleanup,\n"
+                  "  setup, config, jev,\n"
+                  "  guide (the whole flow offline, with a fake worker), paste (text into a lane in one piece),\n"
+                  "  web (the run in your browser),\n"
                   "  edit (one Markdown file in your browser; also on native Windows)\n"
                   "  (`pai init PROJECT --vault ...`, `pai doctor PROJECT` and `pai doctor --agents` are PAI's own\n"
-                  "  context and handoff commands, listed above)")
+                  "  context and handoff commands, listed above)\n\n"
+                  "exit codes (every command; scripts may rely on them across upgrades):\n"
+                  "  0  done, or a preview with nothing in the way\n"
+                  "  1  refused or needs a person (a REFUSED / CONFLICT / MISMATCH line says what to do);\n"
+                  "     pai status: a lane is still at work or waiting; pai doctor: an ESSENTIAL gap (0.5.0)\n"
+                  "  2  usage error, or input that cannot be read; nothing was changed")
     if args in (["-h"], ["--help"]) and NATIVE_WINDOWS:
         print(WINDOWS_NOTE + "\n")
     return _core()

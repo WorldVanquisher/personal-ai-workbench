@@ -1,0 +1,9 @@
+{
+ "kind": "rc",
+ "task_id": "r040",
+ "lane": "a",
+ "worktree": "@ROOT@/lanes/a",
+ "pid": null,
+ "proc_start": null,
+ "created": "2026-11-20T01:53:28Z"
+}

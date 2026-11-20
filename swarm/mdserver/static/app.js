@@ -18,6 +18,18 @@ function setDirty(v) {
   $("save").disabled = !cur || !v;
 }
 function showError(msg) { const e = $("error"); e.textContent = msg || ""; e.hidden = !msg; }
+// Drafts survive a failed save, a stopped server or a closed tab: kept in this browser only
+// (localStorage, per folder and file), removed after a successful save. Storage may be off.
+function draftKey() { return cur ? "pai-draft:" + $("root").selectedOptions[0].textContent + ":" + cur.path : null; }
+function keepDraft() {
+  const k = draftKey(); if (!k) return;
+  try { localStorage.setItem(k, JSON.stringify({ text: $("text").value, base: cur.base, at: new Date().toISOString() })); } catch (e) { /* storage off */ }
+}
+function dropDraft() { const k = draftKey(); try { if (k) localStorage.removeItem(k); } catch (e) { /* storage off */ } }
+function storedDraft() {
+  const k = draftKey(); if (!k) return null;
+  try { const d = JSON.parse(localStorage.getItem(k) || "null"); return d && typeof d.text === "string" ? d : null; } catch (e) { return null; }
+}
 async function preview() {
   const r = await api("POST", "/api/preview", { text: $("text").value });
   if (r.status === 200) $("preview").innerHTML = r.data.html; // server-rendered, every source character escaped
@@ -41,6 +53,10 @@ async function openFile(path) {
   cur = r.data; $("text").value = cur.text; $("text").disabled = false;
   $("path").textContent = $("root").selectedOptions[0].textContent + "/" + cur.path;
   setDirty(false); preview(); loadFiles();
+  const d = storedDraft();
+  $("restore").hidden = !(d && d.text !== cur.text);
+  if (d && d.text !== cur.text) $("restore-when").textContent = "kept " + d.at + (d.base !== cur.base ? "; the file changed since" : "");
+  else if (d) dropDraft();
 }
 async function review() {
   const r = await api("POST", "/api/diff", { root: cur.root, path: cur.path, text: $("text").value, base: cur.base });
@@ -61,16 +77,23 @@ async function review() {
   $("confirm").textContent = "Save revision " + r.data.proposed.slice(0, 8);
   $("dialog").hidden = false; $("confirm").focus();
 }
-window.addEventListener("unhandledrejection", () =>
-  showError("The editor could not reach pai (stopped?). Your draft is still here: copy it before closing the tab."));
+window.addEventListener("unhandledrejection", () => {
+  keepDraft();
+  showError("The editor could not reach pai (stopped?). Your draft is still here and kept in this browser: start the " +
+    "editor again and open the same note to restore it.");
+});
 async function save() {
   const text = $("text").value;
   const r = await api("POST", "/api/save", { root: cur.root, path: cur.path, text, base: cur.base,
     confirm: $("confirm").dataset.revision, crlf: cur.crlf, bom: cur.bom });
   $("dialog").hidden = true;
-  if (r.status === 409) { $("stale").hidden = false; return; }
-  if (r.status !== 200) return showError(r.data.error);
-  cur.base = r.data.base; cur.text = text; setDirty(false); $("save").focus();
+  if (r.status === 409) { keepDraft(); $("stale").hidden = false; return; }
+  if (r.status !== 200) {
+    keepDraft();
+    return showError("Not saved: " + (r.data.error || "error " + r.status) + ". Your edit is still here and kept in this " +
+      "browser; fix the cause and save again, or copy it.");
+  }
+  cur.base = r.data.base; cur.text = text; setDirty(false); dropDraft(); $("save").focus();
 }
 function view(which) {
   $("show-edit").setAttribute("aria-pressed", String(which === "edit"));
@@ -86,7 +109,15 @@ window.addEventListener("DOMContentLoaded", async () => {
   const single = r.data.single;  // `pai edit FILE.md`: straight into that one file, no file list
   $("root").addEventListener("change", loadFiles);
   $("filter").addEventListener("input", loadFiles);
-  $("text").addEventListener("input", () => { setDirty($("text").value !== cur.text); clearTimeout(timer); timer = setTimeout(preview, 400); });
+  $("text").addEventListener("input", () => {
+    setDirty($("text").value !== cur.text); clearTimeout(timer);
+    timer = setTimeout(() => { preview(); if (dirty) keepDraft(); else dropDraft(); }, 400);
+  });
+  $("restore-yes").addEventListener("click", () => {
+    const d = storedDraft(); if (d) { $("text").value = d.text; setDirty(d.text !== cur.text); preview(); }
+    $("restore").hidden = true; $("text").focus();
+  });
+  $("restore-no").addEventListener("click", () => { dropDraft(); $("restore").hidden = true; $("text").focus(); });
   $("save").addEventListener("click", review);
   $("confirm").addEventListener("click", save);
   $("cancel").addEventListener("click", () => { $("dialog").hidden = true; $("save").focus(); });

@@ -5,12 +5,14 @@ tmux server or your configuration. Where a test answers an agent's folder-trust 
 does so with tmux send-keys, playing the operator; product code never does."""
 import json
 import os
+import platform
 import shutil
 import signal
 import subprocess
 import sys
 import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import helpers  # noqa: E402
@@ -19,6 +21,8 @@ from helpers import SWARM, git, commit  # noqa: E402
 PAI = os.path.join(os.path.dirname(SWARM), "bin", "pai.py")
 sys.path.insert(0, SWARM)
 needs_311 = unittest.skipUnless(sys.version_info >= (3, 11), "pai (and its TOML defaults) needs Python 3.11+")
+# Install plans add sudo only for a non-root user; as root (a container, or `unshare -r`) they do not.
+SUDO = "" if hasattr(os, "geteuid") and os.geteuid() == 0 else "sudo "
 HERE = os.path.dirname(os.path.abspath(__file__))
 FAKES = {"claude": "fake_claude_rc.py", "codex": "fake_codex.py", "ssh": "fake_ssh.py", "ssh-add": "fake_ssh_add.py"}
 
@@ -31,6 +35,18 @@ def wrapper(bindir, name, fake):
                 % (sys.executable, os.path.join(HERE, fake)))
     os.chmod(path, 0o755)
     return path
+
+
+def read(path, missing=None):
+    """The file's text, read with the handle closed. A file that cannot be read raises, unless
+    the caller names what that means (`missing`)."""
+    try:
+        with open(path) as f:
+            return f.read()
+    except OSError:
+        if missing is None:
+            raise
+        return missing
 
 
 def lines(path):
@@ -60,6 +76,10 @@ class WB(helpers.Fixture):
         with open(self.keyfile, "w") as f:
             f.write("not a real key\n")
         self.sshlog = os.path.join(self.tmp, "ssh.log")
+        # A short dispatch settle window for every fixture run: only the tests of the window itself
+        # (test_dispatch, production_settle()) use the shipped 3 s. pai guide and the onboarding
+        # acceptance keep the shipped default on purpose: they check the product as shipped.
+        self.env["PAI_DISPATCH_SETTLE"] = "0.5"
         self.env.update(PATH=self.bin + os.pathsep + os.environ.get("PATH", ""), PAI_WORKBENCH_HOME=os.path.join(self.tmp, "wb"),
                         PAI_WORKBENCH_DATA=os.path.join(self.tmp, "wbdata"), FAKE_RC_DIR=self.ctl, CLAUDE_CONFIG_DIR=self.cfg,
                         FAKE_SSH_LOG=self.sshlog, FAKE_SSH_KEYFILE=self.keyfile, FAKE_SSH_ACCEPT="good-key")
@@ -88,7 +108,7 @@ class WB(helpers.Fixture):
     def set_config(self, updates, path=None):
         import wbconfig
         path = path or self.project_file
-        text = open(path).read() if os.path.exists(path) else ""
+        text = read(path, missing="")
         with open(path, "w") as f:
             f.write(wbconfig.set_values(text, updates))
 
@@ -174,7 +194,7 @@ class Init(WB):
                          ("codex", "origin", "main", self.tasks))
         self.assertEqual(cfg["review"], {"checks": {"verify": ["true"]}, "required_checks": ["verify"]})
         self.assertEqual({k: v for k, v in cfg["agents"].items() if v}, {"codex": {"model": "gpt-test", "effort": "high"}})
-        self.assertIn("# effort = ", open(path).read(), "unset settings stay as commented examples")
+        self.assertIn("# effort = ", read(path), "unset settings stay as commented examples")
         with open(path, "rb") as f:
             saved = f.read()
         # Not a terminal: an existing configuration is never replaced without --update.
@@ -191,7 +211,7 @@ class Init(WB):
         self.assertEqual(cfg2["default_agent"], "claude")
         self.assertEqual({k: v for k, v in cfg2["agents"].items() if v}, {"codex": {"model": "gpt-test", "effort": "high"}},
                          "switching to claude neither copies nor drops codex's own settings")
-        self.assertIn("# my own note, kept", open(path).read())
+        self.assertIn("# my own note, kept", read(path))
         self.assertEqual((cfg2["review"], cfg2["tasks"], cfg2["worktree_root"]), (cfg["review"], cfg["tasks"], cfg["worktree_root"]))
 
     def test_noninteractive_init_needs_explicit_values(self):
@@ -591,7 +611,7 @@ class Cleanup(WB):
         for lane in "abcd":
             self.assertTrue(os.path.isdir(os.path.join(self.root, lane)))
             self.assertEqual(git(self.repo, "rev-parse", "--verify", "-q", "pai/%s/%s" % (self.run, lane)) != "", True)
-        self.assertIn("uncommitted edit in b", open(os.path.join(self.root, "b", "README.md")).read())
+        self.assertIn("uncommitted edit in b", read(os.path.join(self.root, "b", "README.md")))
         before = self.snapshot()
         p = self.pai("cleanup", "--apply", "--lane", "a")
         self.assertEqual(p.returncode, 0, p.stdout)
@@ -612,7 +632,7 @@ class Cleanup(WB):
         self.assertNotIn("b", after)
         self.assertEqual({k: after[k] for k in ("a", "c", "d", "notes")}, {k: wins[k] for k in ("a", "c", "d", "notes")})
         self.assertFalse(self.lock_owned("b"))
-        self.assertIn("uncommitted edit in b", open(os.path.join(self.root, "b", "README.md")).read())
+        self.assertIn("uncommitted edit in b", read(os.path.join(self.root, "b", "README.md")))
         # the documented way back: resume starts the closed worker again on its branch, with its edit
         p = self.pai("resume", "--lane", "b", "--wait", "3")
         self.assertIn("b", self.windows_now())
@@ -630,9 +650,13 @@ class Cleanup(WB):
 @needs_311
 class Planner(unittest.TestCase):
     """The installer planner on simulated systems: os-release, platform and package managers
-    are fakes, nothing is installed. Simulated coverage only; no real OS was exercised here."""
+    are fakes, nothing is installed. Simulated coverage only; no real OS was exercised here.
 
-    def plan(self, system, ident=None, like="", version=None, managers=(), wsl=None, have=()):
+    WSL detection is stubbed explicitly for every simulated Linux (PAI_SWARM_WSL=0 unless a test
+    says otherwise): the real detection reads the host's /proc/sys/kernel/osrelease, so on a WSL
+    host a simulated "plain Linux" would otherwise be reported as WSL."""
+
+    def plan(self, system, ident=None, like="", version=None, managers=(), wsl="0", have=()):
         tmp = os.path.realpath(__import__("tempfile").mkdtemp(prefix="pai-planner-"))
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         b = os.path.join(tmp, "bin")
@@ -648,8 +672,8 @@ class Planner(unittest.TestCase):
             f.write('VERSION_ID="%s"\n' % version if version else "")
         env = {"PATH": b, "HOME": tmp, "PAI_SWARM_PLATFORM": system, "PAI_SWARM_OS_RELEASE": osr,
                "PAI_WORKBENCH_HOME": os.path.join(tmp, "wb"), "PAI_SWARM_HOME": os.path.join(tmp, "home")}
-        if wsl is not None:
-            env["PAI_SWARM_WSL"] = wsl
+        if system == "Linux":
+            env["PAI_SWARM_WSL"] = wsl  # never the host's own /proc: see the class docstring
         p = subprocess.run([sys.executable, "-B", PAI, "setup", "--dry-run"], cwd=tmp, env=env, capture_output=True,
                            text=True, stdin=subprocess.DEVNULL)
         self.assertFalse(os.path.exists(os.path.join(tmp, "home")), "setup --dry-run writes nothing")
@@ -658,20 +682,20 @@ class Planner(unittest.TestCase):
     def test_linux_distributions_by_os_release_and_present_manager(self):
         out = self.plan("Linux", "ubuntu", "debian", "24.04", ["apt-get", "sudo"])
         self.assertIn("system         linux (ubuntu 24.04)", out)
-        self.assertIn("sudo apt-get install -y git tmux procps gh", out)
+        self.assertIn(SUDO + "apt-get install -y git tmux procps gh", out)
         out = self.plan("Linux", "arch", managers=["pacman", "sudo"])
-        self.assertIn("sudo pacman -S --needed --noconfirm git tmux procps-ng github-cli", out)
+        self.assertIn(SUDO + "pacman -S --needed --noconfirm git tmux procps-ng github-cli", out)
         out = self.plan("Linux", "rocky", "rhel centos fedora", "9.4", ["dnf", "sudo"])
-        self.assertIn("sudo dnf install -y git tmux procps-ng\n", out)
+        self.assertIn(SUDO + "dnf install -y git tmux procps-ng\n", out)
         self.assertIn("gh is not in rocky's own repositories", out)
         out = self.plan("Linux", "almalinux", "rhel centos fedora", "8.10", ["yum", "sudo"])
-        self.assertIn("sudo yum install -y git tmux procps-ng", out)
+        self.assertIn(SUDO + "yum install -y git tmux procps-ng", out)
         out = self.plan("Linux", "amzn", "fedora", "2", ["yum", "sudo"])
-        self.assertIn("sudo yum install -y git tmux procps-ng", out)
+        self.assertIn(SUDO + "yum install -y git tmux procps-ng", out)
         out = self.plan("Linux", "amzn", "fedora", "2023", ["dnf", "sudo"])
-        self.assertIn("sudo dnf install -y git tmux procps-ng", out)
+        self.assertIn(SUDO + "dnf install -y git tmux procps-ng", out)
         out = self.plan("Linux", "fedora", None, "41", ["dnf", "sudo"])
-        self.assertIn("sudo dnf install -y git tmux procps-ng gh", out)
+        self.assertIn(SUDO + "dnf install -y git tmux procps-ng gh", out)
 
     def test_a_distribution_whose_manager_is_absent_or_unknown_is_not_guessed(self):
         out = self.plan("Linux", "ubuntu", "debian", "24.04", [])
@@ -682,7 +706,7 @@ class Planner(unittest.TestCase):
         self.assertNotIn("install -y", out)
         self.assertIn("missing        git, tmux, ps, gh, claude", out)
 
-    def test_macos_windows_and_wsl(self):
+    def test_macos_and_windows(self):
         out = self.plan("Darwin", managers=["brew"])
         self.assertIn("system         macos", out)
         self.assertIn("brew install git tmux gh", out)
@@ -698,10 +722,27 @@ class Planner(unittest.TestCase):
         self.assertNotIn("winget install --exact --source winget --id tmux", out)
         out = self.plan("Windows")
         self.assertIn("winget is not installed", out)
+
+    def test_wsl_when_detection_says_so(self):
+        # the positive case, kept apart from the plain-Linux simulations above
         out = self.plan("Linux", "ubuntu", "debian", "22.04", ["apt-get", "sudo"], wsl="1")
         self.assertIn("system         wsl (ubuntu 22.04)", out)
         self.assertIn("worker backend tmux", out)
-        self.assertIn("sudo apt-get install -y git tmux procps gh", out)
+        self.assertIn(SUDO + "apt-get install -y git tmux procps gh", out)
+        out = self.plan("Linux", "ubuntu", "debian", "22.04", ["apt-get", "sudo"], wsl="0")
+        self.assertIn("system         linux (ubuntu 22.04)", out, "an explicit 0 is plain Linux")
+
+    def test_runtime_wsl_detection_is_unchanged(self):
+        # with no stub, detection still reads WSL_DISTRO_NAME and the kernel's osrelease
+        import doctor
+        env = {k: v for k, v in os.environ.items() if k not in ("PAI_SWARM_WSL", "PAI_SWARM_PLATFORM", "WSL_DISTRO_NAME")}
+        real = platform.system() == "Linux" and "microsoft" in read("/proc/sys/kernel/osrelease", missing="").lower()
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch("platform.system", return_value="Linux"):
+            self.assertEqual(doctor.detect_platform()["system"], "wsl" if real else "linux")
+            with mock.patch.dict(os.environ, {"WSL_DISTRO_NAME": "Ubuntu"}):
+                self.assertEqual(doctor.detect_platform()["system"], "wsl")
+            with mock.patch("builtins.open", mock.mock_open(read_data="6.6.87.2-microsoft-standard-WSL2\n")):
+                self.assertEqual(doctor.detect_platform()["system"], "wsl", "a WSL kernel is detected as such")
 
     def test_pai_run_on_native_windows_is_refused_before_anything(self):
         tmp = os.path.realpath(__import__("tempfile").mkdtemp(prefix="pai-planner-"))
@@ -836,7 +877,7 @@ class Config(WB):
 
     def editors(self):
         p = os.path.join(self.tmp, "editors.log")
-        return open(p).read().split() if os.path.exists(p) else []
+        return read(p, missing="").split()
 
     def test_precedence_is_cli_then_project_then_global_then_built_in(self):
         self.init()
@@ -884,16 +925,16 @@ class Config(WB):
 
     def test_an_invalid_edit_keeps_the_previous_file_and_the_draft(self):
         self.init()
-        before = open(self.project_file).read()
+        before = read(self.project_file)
         self.editor("bad", "text = text.replace('workers = 2', 'workers = \"many\"\\napi_key = \"sk-not-real\"')")
         p = self.pai("config", "edit", env={"EDITOR": "bad"})
         self.assertEqual(p.returncode, 1)
         self.assertIn("INVALID  run.workers: must be a whole number", p.stdout)
         self.assertIn("INVALID  run.api_key: API keys and other credentials never belong in this file", p.stdout)
         self.assertNotIn("sk-not-real", p.stdout)
-        self.assertEqual(open(self.project_file).read(), before)
+        self.assertEqual(read(self.project_file), before)
         draft = self.project_file + ".draft"
-        self.assertIn('workers = "many"', open(draft).read())
+        self.assertIn('workers = "many"', read(draft))
         p = self.pai("config", "check")
         self.assertIn("an unsaved draft is waiting", p.stdout)
         self.editor("fix", "import re\ntext = re.sub(r'(?m)^api_key.*\\n', '', text).replace('workers = \"many\"', 'workers = 4')")
@@ -902,7 +943,7 @@ class Config(WB):
         self.assertIn("Continuing your unsaved draft", p.stdout)
         self.assertFalse(os.path.exists(draft))
         self.assertEqual(self.project_cfg()["workers"], 4)
-        self.assertIn("# pai workbench project defaults", open(self.project_file).read(), "comments survive an edit")
+        self.assertIn("# pai workbench project defaults", read(self.project_file), "comments survive an edit")
         self.assertEqual(self.pai("config", "check").returncode, 0)
 
     def test_each_agent_gets_its_own_model_and_effort_and_a_lane_override_stays_in_its_lane(self):

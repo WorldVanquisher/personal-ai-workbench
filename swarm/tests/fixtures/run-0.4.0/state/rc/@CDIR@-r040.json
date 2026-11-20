@@ -1,0 +1,24 @@
+{
+ "lanes": {
+  "a": {
+   "agent": "claude",
+   "mode": "local",
+   "model": null,
+   "pane_id": "%0",
+   "pane_pid": 89367,
+   "pane_start": "106704520",
+   "server_pid": "89366",
+   "server_start": "106704519",
+   "session_id": "$0",
+   "socket_path": "@ROOT@/t.sock",
+   "started_at": "2026-11-20T01:53:28Z",
+   "task_id": "r040",
+   "window_id": "@0"
+  }
+ },
+ "repo": "@ROOT@/repo",
+ "run_id": "r040",
+ "schema": "pai_rc_run_v1",
+ "session": "pai-r040",
+ "socket": "@ROOT@/t.sock"
+}

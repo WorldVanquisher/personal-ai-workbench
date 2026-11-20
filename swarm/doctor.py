@@ -157,12 +157,36 @@ def package_for(plat, tool):
     return (name, None) if name else (None, "%s has no %s package; see %s" % (mgr, tool, GH_LINUX_DOCS if tool == "gh" else "its docs"))
 
 
+# Essential: `pai run` cannot work without it. Optional: only the feature named needs it.
+# Claude's Remote Control stays essential: rc is Claude's default launch mode (--mode local opts out).
+OPTIONAL_TOOLS = {"gh": "pr open, pr plan, next", "gh login": "pr open, pr plan, next"}
+
+
+def need(row):
+    if row["state"] == "info" or row["tool"].startswith("backend ") or row["tool"] in ("platform", "rc sessions",
+                                                                                      "codex remote control", "project"):
+        return "info"
+    return "optional" if row["tool"] in OPTIONAL_TOOLS else "essential"
+
+
+def repair(tool, plat):
+    """(command to copy, or None; why there is none). Derived from this platform; a command is
+    only proposed when it can run here (no `brew install` without Homebrew)."""
+    if tool == "tmux" and plat["system"] == "windows":
+        return "wsl --install -d Ubuntu   # then install and run pai inside WSL (no native Windows tmux)", None
+    steps, problems = install_plan([tool], plat)
+    if steps:
+        return " && ".join(" ".join(c) for _, cmds in steps for c in cmds), None
+    return None, "; ".join(problems) or "no installer for it here"
+
+
 def check(agent_names=("claude",)):
-    """[{tool, used_by, state, detail, fix}] with state ok | missing | not-logged-in | rc-not-ready | unknown | info."""
+    """[{tool, used_by, state, detail, fix, need}] with state ok | missing | not-logged-in | rc-not-ready | unknown |
+    info, and need essential | optional | info. Backend rows also carry `capabilities` and `gaps`."""
     rows = []
 
-    def add(tool, used_by, state, detail, fix=None):
-        rows.append({"tool": tool, "used_by": used_by, "state": state, "detail": detail, "fix": fix})
+    def add(tool, used_by, state, detail, fix=None, **extra):
+        rows.append(dict({"tool": tool, "used_by": used_by, "state": state, "detail": detail, "fix": fix}, **extra))
 
     plat = detect_platform()
     add("platform", "-", "info", "%s%s, %s; package manager %s; worker backend %s" % (
@@ -174,7 +198,9 @@ def check(agent_names=("claude",)):
             continue
         path = shutil.which(tool)
         if not path:
-            add(tool, used_by, "missing", "not on PATH", "pai setup --install-missing")
+            cmd, why = repair(tool, plat)
+            add(tool, used_by, "missing", "not on PATH" if cmd else "not on PATH (%s)" % why.replace(
+                "cannot install %s automatically: " % tool, ""), cmd)
             continue
         add(tool, used_by, "ok", "%s (%s)" % (path, _version(path, "-V" if tool == "tmux" else "--version"))
             if tool != "ps" else path)
@@ -213,11 +239,23 @@ def check(agent_names=("claude",)):
             elif auth.get("authMethod") != "claude.ai":
                 add("claude remote control", "rc", "rc-not-ready",
                     "Remote Control needs a claude.ai subscription login; the current login is %s"
-                    % (auth.get("authMethod") or "unknown"), "log in with your claude.ai account (/login)")
+                    % (auth.get("authMethod") or "unknown"), "log in with your claude.ai account (/login), or run Claude lanes with --mode local")
             else:
                 add("claude remote control", "rc", "ok",
                     "available (command present, claude.ai login); whether a session is connected is per lane, "
                     "in `pai status`")
+    import agents
+    for a in agent_names:
+        ad = agents.get(a)
+        if ad:
+            caps, gaps = ad.capabilities(), ad.gaps()
+            add("backend %s" % a, AGENT_USE.get(a, "agent lanes"), "info", "launch %s; readiness from %s; trust prompt "
+                "from the screen (answered by you); delivery from %s%s" % (
+                    "/".join(caps["launch"]["modes"]), caps["readiness"]["source"].replace("-", " "),
+                    caps["transcript"]["location"] or "nothing", "; gaps: %s" % "; ".join(gaps) if gaps else ""),
+                capabilities=caps, gaps=gaps)
+    for r in rows:
+        r["need"] = need(r)
     return rows
 
 
@@ -273,11 +311,28 @@ def show(rows):
     label = {"ok": "ok", "missing": "MISSING", "not-logged-in": "NOT LOGGED IN", "rc-not-ready": "RC NOT READY",
              "unknown": "UNKNOWN", "info": "info"}
     for r in rows:
-        print("%-14s %-22s %s%s" % (label[r["state"]], r["tool"], r["detail"], "   -> %s" % r["fix"] if r["fix"] else ""))
+        r.setdefault("need", need(r))
+    for group, title in (("essential", "ESSENTIAL (pai run needs these)"),
+                         ("optional", "OPTIONAL (only the feature named needs it)"), ("info", "INFO")):
+        mine = [r for r in rows if r["need"] == group]
+        if not mine:
+            continue
+        print("%s:" % title)
+        for r in mine:
+            extra = "   (only for: %s)" % OPTIONAL_TOOLS[r["tool"]] if group == "optional" and r["state"] != "ok" else ""
+            print("%-14s %-22s %s%s%s" % (label[r["state"]], r["tool"], r["detail"],
+                                         "   -> %s" % r["fix"] if r["fix"] else "", extra))
+    fixes = [(r["need"], r["fix"]) for r in rows if r["state"] not in ("ok", "info") and r["fix"]]
+    if fixes:
+        print("\nREPAIR (copy and run in this shell; doctor ran none of them):")
+        for grp in ("essential", "optional"):
+            for f in dict.fromkeys(f for g, f in fixes if g == grp):
+                print("  %s%s" % (f, "" if grp == "essential" else "   # optional"))
 
 
 def failing(rows):
-    return [r for r in rows if r["state"] not in ("ok", "info")]
+    """Rows that keep pai run from working (an optional gap is reported, not failing)."""
+    return [r for r in rows if r["state"] not in ("ok", "info") and r.get("need", need(r)) != "optional"]
 
 
 def show_platform(plat):

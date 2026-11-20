@@ -1,0 +1,25 @@
+{
+ "entries": {
+  "a/first": {
+   "attempt": 1,
+   "delivered_at": "2026-11-20T01:53:29Z",
+   "evidence": "Claude's own transcript for this worktree records the prompt (user message at 2026-11-20T01:53:29.864Z)",
+   "lane": "a",
+   "pane_id": "%0",
+   "pid": 89367,
+   "pid_start": "106704520",
+   "sent_at": "2026-11-20T01:53:29Z",
+   "sent_ts": 1795139609.8657684,
+   "started_at": "2026-11-20T01:53:29Z",
+   "started_ts": 1795139609.3421378,
+   "state": "delivered",
+   "tag": "[pai r040/a/first]",
+   "task": "first",
+   "task_id": "r040",
+   "typed_at": "2026-11-20T01:53:29Z",
+   "typed_ts": 1795139609.353996,
+   "window_id": "@0"
+  }
+ },
+ "schema": "pai_dispatch_v1"
+}

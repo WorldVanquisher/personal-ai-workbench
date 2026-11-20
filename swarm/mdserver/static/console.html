@@ -16,8 +16,22 @@
     <span id="run" class="run"></span>
     <a id="notes" class="button-link" href="/notes" target="_blank" rel="noopener" hidden>Notes ↗</a>
     <span id="state" class="state" aria-live="polite"></span>
+    <button type="button" id="recover" class="ghost" aria-haspopup="true" aria-controls="recover-panel" hidden>Resume run…</button>
   </header>
+  <p id="summary" class="summary" role="status" aria-live="polite"></p>
   <div id="error" class="banner" role="alert" hidden></div>
+  <section id="recover-panel" class="panel recover" aria-labelledby="recover-title" hidden>
+    <h2 id="recover-title" tabindex="-1">RESUME RUN: RECOVERY PREVIEW (nothing has changed)</h2>
+    <p class="hint">The same preview as <code id="recover-cli">pai recover</code>. Apply does only the automatic actions
+      (restart, deliver, record a delivery the transcript shows). A trust prompt, an unknown dispatch or a doubtful
+      window stays yours, in a terminal.</p>
+    <ul id="recover-lanes" class="plans"></ul>
+    <div class="actions">
+      <button type="button" id="recover-apply" class="primary">Apply recovery</button>
+      <button type="button" id="recover-close">Close</button>
+    </div>
+    <pre id="recover-report" class="report" aria-live="polite" hidden></pre>
+  </section>
   <div class="layout console">
     <nav class="lanes panel" aria-label="Lanes">
       <h2>LANES</h2>
@@ -26,8 +40,15 @@
     </nav>
     <section class="lane panel" aria-label="Lane" id="lane" hidden>
       <div class="lane-head">
-        <h2 id="lane-title"></h2>
+        <h2 id="lane-title" tabindex="-1"></h2>
         <a id="note-link" class="button-link" target="_blank" rel="noopener" hidden>Task note ↗</a>
+        <button type="button" id="inspect" class="ghost" aria-pressed="false" aria-controls="inspect-panel">Inspect</button>
+      </div>
+      <div id="lane-status" class="lane-status" role="status" aria-live="polite"></div>
+      <dl id="inspect-panel" class="inspect" aria-label="Evidence behind this lane's state" hidden></dl>
+      <div id="gone" class="empty" role="alert" hidden>
+        <p id="gone-text"></p>
+        <button id="gone-recover" class="primary" type="button">Preview recovery</button>
       </div>
       <div class="view-tabs always" role="group" aria-label="Pane">
         <button type="button" id="tab-agent" aria-pressed="true">Agent</button>
@@ -61,11 +82,22 @@
         <button type="button" id="copy" class="ghost">Copy screen</button>
         <button type="button" id="close-shell" class="ghost" hidden>Close shell</button>
       </div>
+      <div id="inbox" class="inbox" role="status" aria-live="polite" hidden>
+        <span id="inbox-text"></span>
+        <button type="button" id="inbox-submit" hidden>Submit (Enter)</button>
+      </div>
       <label for="compose" class="compose-label">Message: goes to the lane as one paste (nothing is submitted unless you choose "Paste and Enter")</label>
-      <textarea id="compose" class="compose" spellcheck="false" placeholder="Write or paste a longer message here"></textarea>
+      <textarea id="compose" class="compose" spellcheck="false" placeholder="Write or paste a longer message here"
+        aria-describedby="compose-size"></textarea>
+      <p id="compose-size" class="hint"></p>
+      <div id="staging" class="staging" role="group" aria-labelledby="staging-text" hidden>
+        <p id="staging-text"></p>
+        <button type="button" id="staging-confirm" class="primary">Confirm paste</button>
+        <button type="button" id="staging-cancel">Cancel</button>
+      </div>
       <div class="actions">
-        <button id="send" class="primary" type="button">Paste</button>
-        <button id="send-enter" type="button">Paste and Enter</button>
+        <button id="send" class="primary" type="button">Paste…</button>
+        <button id="send-enter" type="button">Paste and Enter…</button>
         <span id="result" class="hint" aria-live="polite"></span>
       </div>
     </section>
