@@ -29,6 +29,10 @@ sys.path.insert(0, os.path.join(ROOT, "swarm"))
 
 from pai import cli, launch  # noqa: E402
 import workbench  # noqa: E402
+import refresh  # noqa: E402  `pai worktree`: its own parser, reached through workbench.main
+import splitplan  # noqa: E402  `pai plan`: the same
+
+PASS_THROUGH = {"worktree": refresh.parser, "plan": splitplan.parser}
 
 DOCS = ["README.md", "README.zh-CN.md", "QUICKSTART.md", "QUICKSTART.zh-CN.md", "INSTALL.md", "REFERENCE.md",
         "swarm/WORKBENCH.md", "swarm/RUN-STATE.md", "swarm/BACKENDS.md", "swarm/CONTINUATION.md"]
@@ -75,10 +79,16 @@ def helps(p):
 def inventory():
     core, wb = cli._parser(), workbench.parser()
     rows = []
-    for parser, owner in ((core, "core"), (wb, "workbench")):
+    sources = [(core, "core", []), (wb, "workbench", [])] + [(make(), "workbench", [name])
+                                                             for name, make in sorted(PASS_THROUGH.items())]
+    for parser, owner, prefix in sources:
         top = helps(parser)
-        for path, p in walk(parser, []):
-            if not path:
+        for path, p in walk(parser, prefix):
+            if not path or (not prefix and path[0] in PASS_THROUGH):
+                continue  # the pass-through stubs: their own parser is walked instead
+            if prefix and path == prefix:
+                rows.append({"command": "pai " + " ".join(path), "owner": owner, "routed": "workbench (own parser)",
+                             "help": helps(wb).get(path[0]), "options": options(p), "windows": False})
                 continue
             name = path[0]
             if owner == "core" and name in ("init", "doctor"):
@@ -91,8 +101,8 @@ def inventory():
             else:
                 routed = "core"
             rows.append({"command": "pai " + " ".join(path), "owner": owner, "routed": routed,
-                         "help": top.get(name) if len(path) == 1 else helps(walk_get(parser, path[:-1])).get(path[-1]),
-                         "options": options(p), "windows": owner == "core" or name == "edit"})
+                         "help": top.get(name) if len(path) == 1 else helps(walk_get(parser, path[len(prefix):-1])).get(
+                             path[-1]), "options": options(p), "windows": owner == "core" or name == "edit"})
     rows.append({"command": "pai edit FILE.md", "owner": "mdserver", "routed": "pai/launch.py before any other routing",
                  "help": "one Markdown file in the browser (loopback only)", "options": [], "windows": True})
     return {"schema": "pai_command_inventory_v1", "entry_points": [dict(zip(("entry", "how", "where"), e))
@@ -181,6 +191,8 @@ def check(example, reference=False):
         return ("ref", "pai edit named in the text") if reference else ("FAIL", "pai edit needs a file")
     cmd = launch.workbench_command(argv)
     parser = workbench.parser() if cmd else cli._parser()
+    if cmd in PASS_THROUGH:
+        parser, argv = PASS_THROUGH[cmd](), argv[1:]
     err = io.StringIO()
     with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
         try:
@@ -197,8 +209,9 @@ def check(example, reference=False):
 
 def help_texts():
     out = []
-    for parser, owner in ((cli._parser(), "core"), (workbench.parser(), "workbench")):
-        for path, p in walk(parser, []):
+    for parser, owner, prefix in [(cli._parser(), "core", []), (workbench.parser(), "workbench", [])] + [
+            (make(), "workbench", [name]) for name, make in sorted(PASS_THROUGH.items())]:
+        for path, p in walk(parser, prefix):
             out.append(("help: %s pai %s" % (owner, " ".join(path)), p.format_help(), False))
     out.append(("help: pai (quick start)", launch.QUICKSTART, False))
     return out

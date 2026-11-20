@@ -1,5 +1,41 @@
 # 0.5.0 release checklist (what remains; draft for the owner)
 
+## R4 candidate `0.5.0rc2` (2026-11-20): what remains, in order (supersedes the status below)
+
+Built only in a scratch copy by `tools/package_check.py --candidate 0.5.0rc2`; the tree still says
+0.4.0. Nothing was tagged, released, pushed or published. Evidence: the worker's R4 handoff.
+
+Verified by the worker (fakes, local remotes, this Linux host):
+- [x] package check 36/36 on the candidate's exact wheel and archives (install, upgrade from 0.4.0,
+      7 interrupted installs, rollback, console, both handoff directions, uninstall);
+- [x] R3/R4 modules and the worktree page assets in the wheel and both archives, byte-identical;
+      one version everywhere (file names, METADATA, MANIFEST, `pai --version` from each entry point);
+- [x] the focused suites, `tools/verify.py --quick`, the offline acceptance scenarios A-C
+      (`docs/0.5.0/OWNER-WORKER-LOOP.md`), real Chromium 131 smokes (48/48, 30/30), PowerShell 7.4.7
+      quoting (on Linux).
+
+Owner decisions (before committing):
+- [ ] the version: 0.5.0 (the worker's proposal) or another release candidate first;
+- [ ] `pai worktree publish --expect-plan`: keep optional (as built) or require it in 1.0;
+- [ ] the new AGENTS.md subsections (lanes, decisions, escalation) and `pai plan split-owner`;
+- [ ] plans made before modes were recorded now need a new preview (behaviour change).
+
+Owner runs on the candidate commit (record each result):
+- [ ] push the candidate branch and record CI (Linux, macOS, Windows x 3.11/3.13; four images);
+- [ ] one real `pai worktree publish --draft` to GitHub with the real `gh` (a throwaway branch);
+- [ ] `tools/verify.py --require-all` where uv is installed (the uv quickstart step);
+- [ ] the browser harness on your machine if you want it repeated
+      (`sh ~/.cache/pai-r4/browser/run.sh WORKTREE ~/.cache/pai-r4/browser/smoke-r4.mjs OUT`);
+- [ ] WSL and macOS rows of `docs/1.0/PLATFORMS.md` before claiming them.
+
+Release (owner only; a separate decision):
+- [ ] set `__version__` in `pai/__init__.py` and the `@v0.4.0` install lines (README*, QUICKSTART*,
+      INSTALL.md) to the chosen version; write the RELEASE_NOTES.md section;
+- [ ] `python3 -B tools/build_bundle.py --out dist` on the reviewed commit (byte-identical rebuild);
+- [ ] tag and publish the archives with their `.sha256` files.
+
+## Earlier status (R2 and the continuation slice)
+
 Status on 2026-11-19, from the worker's handoff `PAI-0.5.0-CONTINUATION-HANDOFF.md`. The tree
 still says 0.4.0; nothing is staged, committed, tagged or released. A sealed copy of this file and
 the evidence it points to is in `~/.cache/pai-0.5.0-continuation/` (`SHA256SUMS`).

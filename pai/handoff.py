@@ -53,7 +53,8 @@ def _create_dir(inbox, task_id, stamp):
 TEMPLATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "handoff.md")
 
 
-def render(project, task_id, created, states, summary, evidence, blockers, next_steps, proposals):
+def render(project, task_id, created, states, summary, evidence, blockers, next_steps, proposals, decisions=(),
+           needs_owner=()):
     """Fill the shipped template. Only the template's own $placeholders are substituted."""
     def bullets(items, empty):
         return "\n".join(f"- {x}" for x in items) if items else f"- {empty}"
@@ -67,10 +68,13 @@ def render(project, task_id, created, states, summary, evidence, blockers, next_
         evidence=bullets(evidence, "None supplied."),
         blockers=bullets(blockers, "None supplied (not the same as none existing)."),
         next_steps=bullets(next_steps, "None supplied."),
-        proposals=bullets(proposals, "None supplied."))
+        proposals=bullets(proposals, "None supplied."),
+        decisions=bullets(decisions, "None recorded."),
+        needs_owner=bullets(needs_owner, "None recorded."))
 
 
-def create(project, task_id, states=None, summary="", evidence=(), blockers=(), next_steps=(), proposals=(), now=None):
+def create(project, task_id, states=None, summary="", evidence=(), blockers=(), next_steps=(), proposals=(), now=None,
+           decisions=(), needs_owner=()):
     if not TASK_ID.match(task_id or ""):
         raise HandoffError("task id must be 1-40 characters of [A-Za-z0-9._-] starting with a letter or digit")
     states = {k: _one_line(v, k) for k, v in (states or {}).items() if v}
@@ -78,7 +82,8 @@ def create(project, task_id, states=None, summary="", evidence=(), blockers=(), 
     if unknown_keys:
         raise HandoffError(f"unknown state fields: {', '.join(sorted(unknown_keys))}")
     summary = _one_line(summary, "summary")
-    lists = [[_one_line(x, "list item") for x in items] for items in (evidence, blockers, next_steps, proposals)]
+    lists = [[_one_line(x, "list item") for x in items] for items in (evidence, blockers, next_steps, proposals, decisions,
+                                                                      needs_owner)]
     inbox = os.path.realpath(project.inbox)
     if not inside(inbox, project.vault) or not os.path.isdir(inbox):
         raise HandoffError("inbox is not a directory inside the vault")

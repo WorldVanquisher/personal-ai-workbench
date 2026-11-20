@@ -37,6 +37,19 @@ ${blockers}
 
 ${next_steps}
 
+## Decisions made within the worker's authority
+
+What was chosen, why, and how to reverse it.
+
+${decisions}
+
+## Decisions for the owner (not acted on)
+
+Above the worker's authority: the options, their trade-offs and a recommendation. Nothing here
+was done; the work that depends on it waits for the owner.
+
+${needs_owner}
+
 ## Knowledge-update proposals (UNAPPROVED)
 
 These are proposals only. They change no formal note and constrain nothing

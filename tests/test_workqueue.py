@@ -187,6 +187,61 @@ class Queue(unittest.TestCase):
         self.assertEqual(st["sessions"], ["session-1", "session-2"])
         self.assertEqual(st["done"], ["Q-001", "Q-002", "Q-003", "Q-005", "Q-006", "Q-007", "Q-008", "Q-009", "Q-010"])
 
+    def test_ids_with_several_prefix_words(self):
+        """R4 ids such as R4-PAI-001: listed, marked, ranged in summaries and checked in handoff tables."""
+        items = os.path.join(self.tmp, "r4.md")
+        with open(items, "w", encoding="utf-8") as f:
+            f.write("".join("R4-PAI-%03d. Item %d\n" % (i, i) for i in range(1, 5)))
+        q = os.path.join(self.tmp, "r4.json")
+        self.ok("queue", "init", q, "--from", items, "--write")
+        self.ok("queue", "mark", q, "R4-PAI-001", "done", "--evidence", "e1")
+        self.ok("queue", "mark", q, "R4-PAI-002", "done", "--evidence", "e2")
+        self.assertIn("  done        R4-PAI-001..R4-PAI-002", self.ok("queue", "status", q))
+        hand = os.path.join(self.tmp, "h.md")
+        with open(hand, "w") as f:
+            f.write(self.ok("queue", "table", q))
+        self.assertIn("ok: 4 row(s)", self.ok("queue", "check", q, hand))
+
+    def test_an_invalid_result_is_reopened_by_the_owner_and_retried(self):
+        """R4-PAI-034: a worker marks an item done; the owner finds the result invalid and reopens it with a reason;
+        the next session gets it again; a handoff still claiming done is caught; the history keeps every step."""
+        self.ok("queue", "mark", self.q, "Q-001", "done", "--evidence", "tests pass", session="worker-1")
+        p = self.pai("queue", "mark", self.q, "Q-001", "todo")
+        self.assertEqual(p.returncode, 2)
+        self.assertIn("todo needs --reason", p.stderr)
+        self.ok("queue", "mark", self.q, "Q-001", "todo", "--reason", "retry: the evidence ran the wrong suite",
+                session="owner")
+        self.assertEqual(self.ok("queue", "next", self.q).splitlines()[0], "Q-001 Item number 1")
+        stale = os.path.join(self.tmp, "stale.md")
+        with open(stale, "w") as f:
+            f.write("| Q-001 | done | tests pass |\n\nTotals: done 1 (10 items)\n")
+        p = self.pai("queue", "check", self.q, stale)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("Q-001: the handoff says done, the queue log says todo (retry: the evidence ran the wrong suite)",
+                      p.stdout)
+        out = self.ok("queue", "show", self.q, "Q-001")
+        self.assertIn("state     todo (retry: the evidence ran the wrong suite)", out)
+        self.assertRegex(out, r"history   \S+ done +worker-1; evidence: tests pass")
+        self.assertRegex(out, r"history   \S+ todo +owner; reason: retry")
+        self.ok("queue", "mark", self.q, "Q-001", "done", "--evidence", "full suite: 125 OK", session="worker-2")
+        self.assertEqual(self.status()["done"], ["Q-001"])
+
+    def test_checkpoints_are_listed_from_the_files(self):
+        """R4-PAI-033: checkpoints and item texts come from the queue files, not from a conversation."""
+        self.assertIn("no checkpoint recorded yet", self.ok("queue", "show", self.q))
+        hand = os.path.join(self.tmp, "cp5.md")
+        self.ok("queue", "mark", self.q, "Q-001", "done", "--evidence", "e")
+        with open(hand, "w") as f:
+            f.write(self.ok("queue", "table", self.q))
+        self.ok("queue", "checkpoint", self.q, "Q-005", "--handoff", hand)
+        self.assertIn("matches its recorded sha256", self.ok("queue", "show", self.q))
+        with open(hand, "a") as f:
+            f.write("edited later\n")
+        self.assertIn("CHANGED since it was recorded", self.ok("queue", "show", self.q))
+        cps = json.loads(self.ok("queue", "show", self.q, "--json"))["checkpoints"]
+        self.assertEqual((cps[0]["id"], cps[0]["matches"], cps[0]["done"]), ("Q-005", False, 1))
+        self.assertIn("Q-007 Item number 7", self.ok("queue", "show", self.q, "Q-007"))
+
     def test_unsupported_queue_version(self):
         with open(self.q, encoding="utf-8") as f:
             doc = json.load(f)

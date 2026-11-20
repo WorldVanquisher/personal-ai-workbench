@@ -4,7 +4,7 @@
     python3 -B tools/package_check.py --work DIR [--old-ref REF] [--candidate VERSION] [--setuptools PATH]
 
 From a checkout. Builds, from scratch copies (the checkout is never written):
-  candidate  this tree, with pai/__init__.py's version set to --candidate (default 0.5.0; X.Y.Z, as build_bundle requires) in
+  candidate  this tree, with pai/__init__.py's version set to --candidate (default 0.5.0; X.Y.Z or a pre-release such as 0.5.0rc2) in
              the copy only, so the two installs can be told apart; the tree's own version is kept
   previous   `git archive REF` (default: the last release commit, b02acec = v0.4.0)
 each as a wheel (pip, no build isolation, no index: setuptools comes from --setuptools, a local

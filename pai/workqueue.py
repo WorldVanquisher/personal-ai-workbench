@@ -9,6 +9,8 @@ one to do, kept in two local files instead of in an agent's conversation.
     pai queue table FILE                     the per-ID table and totals for a handoff, from the log
     pai queue check FILE HANDOFF             compare a handoff's per-ID rows and totals with the queue
     pai queue restart FILE                   a copyable prompt to resume in a fresh session
+    pai queue show FILE [ID]                 the checkpoints (and whether each handoff still matches),
+                                             or one item: its text, state and full history
 
 Two files, both plain text, both safe to read at any time:
   FILE (format `pai-queue`, version 1, JSON): the queue's name, its items in order (id, title) and
@@ -38,10 +40,12 @@ import sys
 FORMAT, VERSION = "pai-queue", 1
 STATES = ("todo", "doing", "done", "prototype", "blocked", "owner-only")
 FINAL = ("done", "prototype", "blocked", "owner-only")
-NEEDS_REASON = ("prototype", "blocked", "owner-only")
+NEEDS_REASON = ("prototype", "blocked", "owner-only", "todo")  # todo: reopening an item (an owner's retry)
 NEEDS_EVIDENCE = ("done", "prototype")
-ITEM_RE = re.compile(r"^\s*(?:[-*+]\s+)?(?:\*\*)?([A-Za-z][A-Za-z0-9]*-\d{1,5})(?:\*\*)?[.:)]?\s+(.+?)\s*$")
-ROW_RE = re.compile(r"^\|\s*`?([A-Za-z][A-Za-z0-9]*-\d{1,5})`?\s*\|\s*`?([a-z][a-z-]*)`?\s*\|")
+# an item id: one or more prefix words, then a number (R2-001, R4-PAI-001, W-01)
+ID = r"[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z][A-Za-z0-9]*)*-\d{1,5}"
+ITEM_RE = re.compile(r"^\s*(?:[-*+]\s+)?(?:\*\*)?(" + ID + r")(?:\*\*)?[.:)]?\s+(.+?)\s*$")
+ROW_RE = re.compile(r"^\|\s*`?(" + ID + r")`?\s*\|\s*`?([a-z][a-z-]*)`?\s*\|")
 TOTALS_RE = re.compile(r"^\s*(?:\*\*)?totals?(?:\*\*)?\s*:", re.I)
 COUNT_RE = re.compile(r"\b(todo|doing|done|prototype|blocked|owner-only)\s*[:=]?\s*(\d+)\b|\b(\d+)\s+"
                       r"(todo|doing|done|prototype|blocked|owner-only)\b")
@@ -354,7 +358,7 @@ def add_parser(sub):
     m = qs.add_parser("mark", help="record one item's state (append-only)")
     m.add_argument("file")
     m.add_argument("id")
-    m.add_argument("state", choices=[s for s in STATES if s != "todo"])
+    m.add_argument("state", choices=list(STATES), help="todo reopens an item (an owner's retry; --reason required)")
     m.add_argument("--reason", help="why (required for prototype, blocked, owner-only)")
     m.add_argument("--evidence", help="evidence path or test (required for done and prototype)")
     m.add_argument("--session", default=os.environ.get("PAI_QUEUE_SESSION"), help="session label ($PAI_QUEUE_SESSION)")
@@ -374,6 +378,10 @@ def add_parser(sub):
     ad.add_argument("--write", action="store_true")
     r = qs.add_parser("restart", help="a copyable prompt to resume in a fresh session")
     r.add_argument("file")
+    sh = qs.add_parser("show", help="the checkpoints with their handoffs, or one item with its full history")
+    sh.add_argument("file")
+    sh.add_argument("id", nargs="?")
+    sh.add_argument("--json", action="store_true")
     return p
 
 
@@ -528,4 +536,59 @@ def _main(a, out, err):
     if a.qcmd == "restart":
         out(restart_prompt(a.file, doc, st, evs))
         return 0
+    if a.qcmd == "show":
+        return show(a, doc, st, evs, out)
     return 2
+
+
+def checkpoints(path, evs):
+    """[{id, at, handoff, sha256, matches}] in log order; matches: the handoff file still has the
+    recorded sha256 (True), differs (False), is gone or was not given (None)."""
+    out = []
+    base = os.path.dirname(os.path.abspath(path))
+    for e in evs:
+        if e.get("event") != "checkpoint":
+            continue
+        h, ok = e.get("handoff"), None
+        if h:
+            full = h if os.path.isabs(h) else os.path.join(base, h)
+            try:
+                with open(full, "rb") as f:
+                    ok = hashlib.sha256(f.read()).hexdigest() == e.get("sha256")
+            except OSError:
+                ok = None
+        out.append({"id": e.get("id"), "at": e.get("at"), "handoff": h, "sha256": e.get("sha256"), "matches": ok,
+                    "done": len(e.get("done") or []), "counts": e.get("counts")})
+    return out
+
+
+def show(a, doc, st, evs, out):
+    if a.id:
+        item = next((i for i in doc["items"] if i["id"] == a.id), None)
+        if not item:
+            raise QueueError("%s is not an item of %s" % (a.id, a.file))
+        hist = [e for e in evs if e.get("event") == "state" and e.get("id") == a.id]
+        if a.json:
+            out(json.dumps({"id": a.id, "title": item["title"], "state": st[a.id], "history": hist}, indent=1,
+                           ensure_ascii=False))
+            return 0
+        out("%s %s" % (a.id, item["title"]))
+        out("state     %s%s" % (st[a.id]["state"], " (%s)" % st[a.id]["reason"] if st[a.id]["reason"] else ""))
+        if st[a.id]["evidence"]:
+            out("evidence  %s" % st[a.id]["evidence"])
+        for e in hist:
+            out("history   %s %-10s %s%s%s" % (e.get("at"), e.get("state"), e.get("session") or "-",
+                                             "; reason: %s" % e["reason"] if e.get("reason") else "",
+                                             "; evidence: %s" % e["evidence"] if e.get("evidence") else ""))
+        return 0
+    cps = checkpoints(a.file, evs)
+    if a.json:
+        out(json.dumps({"checkpoints": cps}, indent=1))
+        return 0
+    if not cps:
+        out("no checkpoint recorded yet (pai queue checkpoint FILE ID --handoff PATH)")
+    for c in cps:
+        out("%-14s %s  %s  %s" % (c["id"], c["at"], c["handoff"] or "(no handoff file)", {
+            True: "matches its recorded sha256", False: "CHANGED since it was recorded", None: "not readable here"
+        }[c["matches"]] if c["handoff"] else ""))
+    return 0

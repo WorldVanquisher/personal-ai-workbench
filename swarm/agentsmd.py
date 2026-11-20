@@ -179,6 +179,41 @@ def proposals(goal, scope, use_jev):
     return out, state, detail
 
 
+# The decisions a worker can be given (R4): each is assigned on its own; what is not given to the
+# worker is the owner's. The owner-only list below is never delegated.
+DECISIONS = {"implementation": "how to make the change inside your scope",
+             "testing": "which tests to add or change, and how to run them",
+             "design": "local design inside your scope: names, structure, helpers"}
+OWNER_APPROVAL = ["pushing, opening or merging pull requests; packages, tags and releases",
+                  "anything outside your scope, another lane's paths, or a shared or public interface",
+                  "cloud or production writes, spending, credentials or secrets, real user data, database migrations, DNS"]
+
+
+def decisions(reserved=()):
+    """{"worker": [kind, ...], "owner": [kind, ...], "owner_approval": [text, ...]} for the section and previews."""
+    bad = [r for r in reserved if r not in DECISIONS]
+    if bad:
+        raise InitError("--reserve takes %s, not %s" % (", ".join(DECISIONS), ", ".join(bad)))
+    return {"worker": [k for k in DECISIONS if k not in reserved], "owner": [k for k in DECISIONS if k in reserved],
+            "owner_approval": list(OWNER_APPROVAL)}
+
+
+def other_lanes(wt):
+    """[{lane, branch, scope}] of the other worktrees whose managed AGENTS.md declares a scope."""
+    try:
+        import splitplan
+        owned, _main = splitplan.ownership(wt)
+    except Exception:  # noqa: BLE001  a preview never fails because a neighbour's file is odd
+        return []
+    out = {}
+    for scope, o in owned.items():
+        if os.path.realpath(o["worktree"]) == wt:
+            continue
+        key = (o["lane"] or "?", o["branch"] or "?")
+        out.setdefault(key, []).append(scope)
+    return [{"lane": k[0], "branch": k[1], "scope": sorted(v)} for k, v in sorted(out.items())]
+
+
 def section(info, accepted, nl="\n"):
     """The managed section's text (deterministic for the same inputs)."""
     s = [BEGIN, "## This worktree (pai)", ""]
@@ -197,9 +232,29 @@ def section(info, accepted, nl="\n"):
     if not info["checks"]:
         s.append("- No checks are configured: say which you ran and their results.")
     s.append("- Report what changed (paths), each check with its exit code, and what is not verified.")
+    if info.get("other_lanes"):
+        s += ["", "### Lanes and write scopes", ""]
+        mine = ", ".join("`%s/`" % d.rstrip("/") for d in info["scope"]) or "the whole repository"
+        s.append("- %s (this worktree): writes %s" % ("lane `%s`" % info["lane"] if info["lane"] else "this lane", mine))
+        for o in info["other_lanes"]:
+            s.append("- lane `%s` (branch `%s`): %s; read-only for you" % (
+                o["lane"], o["branch"], ", ".join("`%s/`" % d for d in o["scope"])))
+    dec = info.get("decisions") or decisions()
+    s += ["", "### Decisions you own", ""]
+    for k in dec["worker"]:
+        s.append("- %s: %s. Record what you chose, why, and how to reverse it." % (k.capitalize(), DECISIONS[k]))
+    if not dec["worker"]:
+        s.append("- None: the owner decides implementation, testing and design for this lane.")
+    for k in dec["owner"]:
+        s.append("- %s is reserved for the owner: propose, then wait." % k.capitalize())
     s += ["", "### Owner only", "",
-          "- Do not push, open or merge pull requests, deploy, or change credentials, secrets or remote settings.",
-          "- Do not reset, stash, force or delete branches or worktrees. The owner publishes (`pai worktree publish`)."]
+          "- Do not push, open or merge pull requests, publish packages, tags or releases, deploy, or change credentials, "
+          "secrets or remote settings.",
+          "- Do not reset, stash, force or delete branches or worktrees. The owner publishes (`pai worktree publish`).",
+          "- Ask the owner before: %s." % "; ".join(dec["owner_approval"][1:])]
+    s += ["", "### When a decision is above your authority", "",
+          "- Stop that part and do not act on it. Write the options, their trade-offs and your recommendation into your "
+          "report or handoff; keep going with independent work; wait for the owner's answer."]
     s += ["", "### Repository rules (inherited; the source files decide)", ""]
     clash = {c["source"] for c in conflicts(info["inherited"])}
     for r in info["inherited"]:
@@ -215,6 +270,55 @@ def section(info, accepted, nl="\n"):
     return nl.join(s)
 
 
+MARKER_RE = re.compile(r"pai:managed:", re.I)
+
+
+def read_text(path, name):
+    """A file's text for merging (BOM kept as U+FEFF, line endings as they are), or InitError:
+    pai only rewrites UTF-8 files with LF or CRLF line endings, and says why it will not."""
+    with open(path, "rb") as f:
+        data = f.read()
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        raise InitError("%s is UTF-16: pai writes only UTF-8, and nothing was written. Save it as UTF-8 (with or without "
+                        "a BOM) and run again, or use --file with another name" % name)
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise InitError("%s is not UTF-8 (byte offset %d): pai does not rewrite it, and nothing was written. Save it as UTF-8 "
+                        "and run again, or use --file with another name" % (name, e.start))
+    if "\r" in text.replace("\r\n", ""):
+        raise InitError("%s has old Mac (CR-only) line endings: pai keeps LF and CRLF files as they are but does not "
+                        "rewrite this one, and nothing was written. Convert it to LF or CRLF and run again" % name)
+    return text
+
+
+def marker_problems(body):
+    """What is wrong with the managed-section markers, with line numbers and the fix ([] when
+    there are none, or exactly one begin followed by one end)."""
+    begins, ends, bad = [], [], []
+    for n, line in enumerate(body.replace("\r\n", "\n").split("\n"), 1):
+        if BEGIN_RE.search(line):
+            begins.append(n)
+        elif END in line:
+            ends.append(n)
+        elif MARKER_RE.search(line):
+            bad.append(n)
+    out = []
+    if bad:
+        out.append("line(s) %s look like a pai marker but are not one (a marker is a whole `<!-- pai:managed:begin ... -->` "
+                   "or `%s`): correct or delete them" % (", ".join(map(str, bad)), END))
+    if len(begins) > 1:
+        out.append("%d managed sections begin (lines %s): keep one, delete the others from their begin line to their end "
+                   "line" % (len(begins), ", ".join(map(str, begins))))
+    if begins and not [e for e in ends if e > begins[0]]:
+        out.append("the managed section that begins on line %d has no end marker: add the line `%s` after its last line, "
+                   "or delete the section from line %d" % (begins[0], END, begins[0]))
+    stray = [e for e in ends if not begins or e < begins[0]] + [e for e in ends if begins and e > begins[0]][1:]
+    if stray:
+        out.append("line(s) %s hold an end marker that closes no section: delete them" % ", ".join(map(str, stray)))
+    return out
+
+
 def merge(existing, managed):
     """(new text, how): the existing file with only the managed section replaced (or appended).
     `existing` is the raw text (BOM and line endings as they are)."""
@@ -222,11 +326,13 @@ def merge(existing, managed):
     body = existing[1:] if bom else existing
     nl = "\r\n" if "\r\n" in body else "\n"
     managed = managed.replace("\n", nl)
+    problems = marker_problems(body)
+    if problems:
+        raise InitError("the file's pai markers need fixing by hand first (pai never edits outside its own section; "
+                        "nothing was written): " + "; ".join(problems))
     m = BEGIN_RE.search(body)
     if m:
         end = body.find(END, m.start())
-        if end < 0:
-            raise InitError("the managed section has a begin marker but no %s; fix the file by hand" % END)
         new = body[:m.start()] + managed + body[end + len(END):]
         how = "replaced the managed section"
     elif body:
@@ -265,7 +371,7 @@ def sections(text):
 
 
 def plan(path, goal, scope=(), owner=None, lane=None, checks=(), file="AGENTS.md", use_jev=False, accept=(), profile=None,
-         existing=None):
+         existing=None, reserve=()):
     """The proposal for one worktree. `existing` (the editor's unsaved text) replaces the file's
     content as the text the section is merged into; the diff is then against that text."""
     wt = os.path.realpath(os.path.abspath(os.path.expanduser(path)))
@@ -309,11 +415,10 @@ def plan(path, goal, scope=(), owner=None, lane=None, checks=(), file="AGENTS.md
     info = {"worktree": wt, "file": file, "goal": goal_clean, "scope": [d.rstrip("/") for d in scope], "owner": owner,
             "lane": lane, "checks": [tuple(c) for c in checks], "branch": gitprep.current_branch(wt),
             "base_ref": base_ref, "base_sha": gitprep.rev(wt, "refs/remotes/" + base_ref), "inherited": rules,
-            "instruction_files": files}
+            "instruction_files": files, "decisions": decisions(reserve), "other_lanes": other_lanes(wt)}
     raw = ""
     if os.path.exists(target):
-        with open(target, "rb") as f:
-            raw = f.read().decode("utf-8")
+        raw = read_text(target, file)
     disk = raw
     if existing is not None:
         raw = existing
@@ -325,6 +430,15 @@ def plan(path, goal, scope=(), owner=None, lane=None, checks=(), file="AGENTS.md
         with open(os.path.join(wt, "CLAUDE.md"), encoding="utf-8-sig", errors="replace") as f:
             entry["imports_agents"] = "@AGENTS.md" in f.read()
     notes = ["scope %s does not exist yet (the worker creates it)" % d for d in new_dirs]
+    import splitplan
+    for o in info["other_lanes"]:
+        for d in info["scope"] or [""]:
+            hit = [x for x in o["scope"] if splitplan.overlaps(d, x)]
+            if hit:
+                notes.append("CONTESTED: scope %s overlaps lane %s's %s (branch %s): give each path to one lane; `pai plan "
+                             "check` refuses slices that write another lane's paths" % (
+                                 "`%s/`" % d if d else "(the whole repository)", o["lane"], ", ".join("`%s/`" % x for x in hit),
+                                 o["branch"]))
     if file == "AGENTS.md" and entry["claude_md"] and not entry["imports_agents"]:
         notes.append("Claude Code reads CLAUDE.md, Codex reads AGENTS.md: for a Claude lane, add the line `@AGENTS.md` to "
                      "CLAUDE.md yourself, or run with --file CLAUDE.md")
@@ -335,7 +449,8 @@ def plan(path, goal, scope=(), owner=None, lane=None, checks=(), file="AGENTS.md
             "sections": sections(new),
             "new": new, "diff": diff, "inherited": rules, "instruction_files": files, "conflicts": conflicts(rules),
             "proposals": props, "accepted": [a["id"] for a in accepted], "jev": {"state": jstate, "detail": jdetail},
-            "template": TEMPLATE_VERSION, "removed_from_goal": goal_removed, "notes": notes, "entry_points": entry}
+            "template": TEMPLATE_VERSION, "removed_from_goal": goal_removed, "notes": notes, "entry_points": entry,
+            "decisions": info["decisions"], "other_lanes": info["other_lanes"]}
 
 
 def write(p):
@@ -344,8 +459,7 @@ def write(p):
     if os.path.exists(p["target"]):
         if os.path.islink(p["target"]):
             raise InitError("%s became a symbolic link; nothing written" % p["file"])
-        with open(p["target"], "rb") as f:
-            raw = f.read().decode("utf-8")
+        raw = read_text(p["target"], p["file"])
     if hashlib.sha256(raw.encode("utf-8")).hexdigest() != p["old_sha256"]:
         raise InitError("%s changed since the preview; nothing written" % p["file"])
     if p["unchanged"]:
@@ -369,6 +483,13 @@ def render(p):
     out = ["worktree    %s" % p["worktree"], "file        %s (%s)" % (p["file"], p["how"]),
            "template    %s; JEV %s (%s)" % (p["template"], p["jev"]["state"], p["jev"]["detail"]),
            "inherited   %d rule(s) from %s" % (len(p["inherited"]), ", ".join(p["instruction_files"]) or "no instruction file")]
+    dec = p.get("decisions") or decisions()
+    out.append("worker      decides %s; records each choice, why and how to reverse it" % (
+        ", ".join(dec["worker"]) or "nothing on its own"))
+    out.append("OWNER       approves %s%s" % ("; ".join(dec["owner_approval"]), "; and decides %s" % ", ".join(dec["owner"])
+                                             if dec["owner"] else ""))
+    for o in p.get("other_lanes") or []:
+        out.append("lane        %s (branch %s) writes %s" % (o["lane"], o["branch"], ", ".join(o["scope"])))
     for c in p["conflicts"]:
         out.append("CONFLICT    %s %r: %s" % (c["source"], c["text"], c["why"]))
     out.append("proposed    (not applied; --accept RULE adds one)")

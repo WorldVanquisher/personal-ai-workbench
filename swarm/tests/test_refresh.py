@@ -121,6 +121,61 @@ class PostMergeRefresh(helpers.Fixture):
         self.assertIn("already exists", p.stderr)
 
 
+    def test_a_dirty_lane_does_not_block_a_clean_lane(self):
+        """R4-PAI-007: each lane gets its own plan; the dirty one is left alone, the clean one moves."""
+        clean = os.path.join(self.tmp, "clean lane")
+        git(self.repo, "worktree", "add", "-q", "-b", "lane/clean", clean, self.c0)
+        dirty_plan = json.loads(self.pai("refresh", "--worktree", self.old, "--json").stdout)
+        clean_plan = json.loads(self.pai("refresh", "--worktree", clean, "--json").stdout)
+        self.assertEqual((dirty_plan["recommendation"]["kind"], clean_plan["recommendation"]["kind"]),
+                         ("new-worktree", "fast-forward"))
+        r = self.run_bash(clean_plan["commands"]["bash"])
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(git(clean, "rev-parse", "HEAD"), self.squash, "the clean lane moved")
+        for n, data in self.old_bytes.items():
+            self.assertEqual(self.read(os.path.join(self.old, n)), data, "the dirty lane is untouched: %s" % n)
+        listing = self.pai("list").stdout
+        self.assertIn("2 uncommitted", listing)
+        self.assertEqual(self.pai("verify", clean, "--base", self.squash).returncode, 0)
+
+    def test_refreshing_an_already_prepared_worktree_again(self):
+        """R4-PAI-009: the same plan run twice changes nothing the second time; a fresh-worktree plan
+        for a path or branch that now exists is refused with what to choose instead."""
+        lane = os.path.join(self.tmp, "lane twice")
+        git(self.repo, "worktree", "add", "-q", "-b", "lane/twice", lane, self.c0)
+        for attempt in (1, 2):
+            info = json.loads(self.pai("refresh", "--worktree", lane, "--json").stdout)
+            self.assertEqual(info["recommendation"]["kind"], "fast-forward")
+            r = self.run_bash(info["commands"]["bash"])
+            self.assertEqual(r.returncode, 0, "attempt %d: %s" % (attempt, r.stdout + r.stderr))
+            self.assertEqual(git(lane, "rev-parse", "HEAD"), self.squash)
+        self.assertIn("Already up to date", r.stdout, "the second run is a no-op")
+        new = os.path.join(self.tmp, "fresh twice")
+        info = json.loads(self.pai("refresh", "--new", new, "--branch", "post/twice", "--json").stdout)
+        self.assertEqual(self.run_bash(info["commands"]["bash"]).returncode, 0)
+        p = self.pai("refresh", "--new", new, "--branch", "post/other")
+        self.assertEqual(p.returncode, 2)
+        self.assertIn("already exists; choose another --new path (nothing there is touched)", p.stderr + p.stdout)
+        p = self.pai("refresh", "--new", os.path.join(self.tmp, "elsewhere"), "--branch", "post/twice")
+        self.assertIn("branch post/twice already exists; choose another --branch", p.stderr + p.stdout)
+
+    def test_every_value_in_the_owner_commands_is_quoted(self):
+        """R4-PAI-010: branch names Git accepts may hold $(...), backticks, quotes, ; & |: the bash commands run
+        with them literally (nothing is executed), and PowerShell gets single-quoted literals."""
+        for i, branch in enumerate(("p$(touch${IFS}PWNED)", "q`touch${IFS}PWNED2`", "it's", "a&b|c", "x;y", "e$HOME")):
+            new = os.path.join(self.tmp, "wt %d $x `y` 'z'" % i)
+            info = json.loads(self.pai("refresh", "--new", new, "--branch", branch, "--json").stdout)
+            r = self.run_bash(info["commands"]["bash"])
+            self.assertEqual(r.returncode, 0, "%s: %s" % (branch, r.stdout + r.stderr))
+            self.assertEqual(git(new, "symbolic-ref", "--short", "HEAD"), branch, "the branch is created literally")
+            self.assertEqual(git(new, "rev-parse", "HEAD"), self.squash)
+            for ps in info["commands"]["powershell"]:
+                self.assertNotIn('"', ps.replace("$BASE", ""), "no double-quoted (expanding) strings: %s" % ps)
+            self.assertIn("-b '%s'" % branch.replace("'", "''"), info["commands"]["powershell"][2])
+        for d in (self.tmp, self.repo):
+            self.assertFalse(os.path.exists(os.path.join(d, "PWNED")) or os.path.exists(os.path.join(d, "PWNED2")),
+                             "nothing in a branch name was executed")
+
     def test_help_reaches_the_subcommand_parsers(self):
         for args, needle in ((["worktree", "--help"], "refresh"), (["plan", "--help"], "propose"),
                              (["worktree", "init", "--help"], "--goal")):

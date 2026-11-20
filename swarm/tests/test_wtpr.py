@@ -276,6 +276,9 @@ class WorktreePR(helpers.Fixture):
                                              "it changes path(s) outside the approved preview: debug.log")
         self.assertFalse(os.path.exists(self.plan + ".journal"), "a refused commit is not recorded as adopted")
         self.assertEqual(git(self.wt, "rev-list", "--count", "%s..HEAD" % self.c0), "1", "never committed twice")
+        listing = self.pai("list", "--repo", self.repo).stdout  # R4-PAI-047: still visible to the owner afterwards
+        self.assertIn("branch feat/y, HEAD %s" % head[:12], listing)
+        self.assertIn("1 commit(s) not in the fetched base", listing)
 
     def test_a_commit_with_other_content_than_the_preview_is_refused_when_adopted(self):
         self.assertEqual(self.preview("--out", self.plan).returncode, 0)
@@ -364,6 +367,135 @@ class WorktreePR(helpers.Fixture):
                                              "README.md in the commit is 120000 (symbolic link), not the previewed "
                                              "100644 (file)")
 
+    def test_regular_executable_link_and_deletion_entries(self):
+        """R4-PAI-038: one reviewed commit with a modified file, a new executable, a new link and a deletion."""
+        commit(self.wt, "old.txt", "to be removed\n", "add old.txt")
+        base = git(self.wt, "rev-parse", "HEAD")
+        self.write("run.sh", "#!/bin/sh\necho hi\n")
+        os.chmod(os.path.join(self.wt, "run.sh"), 0o755)
+        os.symlink("run.sh", os.path.join(self.wt, "latest"))
+        os.remove(os.path.join(self.wt, "old.txt"))
+        paths = ("README.md", "run.sh", "latest", "old.txt")
+        self.assertEqual(self.preview("--out", self.plan, paths=paths).returncode, 0)
+        with open(self.plan) as f:
+            rows = {r["path"]: (r["status"].strip(), r["mode"]) for r in json.load(f)["paths"]["approved"]}
+        self.assertEqual(rows, {"README.md": ("M", "100644"), "run.sh": ("??", "100755"), "latest": ("??", "120000"),
+                                "old.txt": ("D", None)})
+        p = self.pai("publish", self.plan, "--yes", "--draft")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        head = git(self.wt, "rev-parse", "HEAD")
+        self.assertEqual(git(self.wt, "rev-parse", "HEAD~1"), base)
+        tree = {l.split("\t")[1]: l.split()[0] for l in git(self.wt, "ls-tree", head).splitlines()}
+        self.assertEqual((tree["README.md"], tree["run.sh"], tree["latest"]), ("100644", "100755", "120000"))
+        self.assertNotIn("old.txt", tree)
+        self.assertEqual(git(self.origin, "rev-parse", "refs/heads/feat/y"), head)
+
+    def test_a_plan_without_approved_modes_needs_a_new_review(self):
+        """R4-PAI-039: a plan from an earlier pai (no recorded modes) is refused before anything; a new preview publishes."""
+        self.assertEqual(self.preview("--out", self.plan).returncode, 0)
+        with open(self.plan) as f:
+            plan = json.load(f)
+        for r in plan["paths"]["approved"]:
+            del r["mode"]
+        with open(self.plan, "w") as f:
+            json.dump(plan, f)
+        remote_before = self.remote_refs()
+        p = self.pai("publish", self.plan, "--yes", "--draft")
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("was made by an earlier pai and does not record the approved type and mode of", p.stdout)
+        self.assertIn("Preview again", p.stdout)
+        self.assertEqual((git(self.wt, "rev-parse", "HEAD"), self.remote_refs(), self.pr_creates()),
+                         (self.c0, remote_before, []))
+        os.remove(self.plan)
+        self.assertEqual(self.preview("--out", self.plan).returncode, 0)
+        self.assertEqual(self.pai("publish", self.plan, "--yes", "--draft").returncode, 0)
+
+    def test_line_ending_attributes_are_matched_against_what_git_records(self):
+        """R4-PAI-040: a representative repository: `* text=auto` and `*.txt text eol=lf`; a CRLF working file is
+        stored with LF; preview, gate and publish agree with Git's own result."""
+        self.write(".gitattributes", "* text=auto\n*.txt text eol=lf\n")
+        git(self.wt, "add", ".gitattributes")
+        git(self.wt, "commit", "-qm", "attributes")
+        self.c0 = git(self.wt, "rev-parse", "HEAD")
+        with open(os.path.join(self.wt, "notes.txt"), "wb") as f:
+            f.write(b"line one\r\nline two\r\n")
+        self.assertEqual(self.preview("--out", self.plan, paths=("notes.txt",)).returncode, 0)
+        p = self.pai("publish", self.plan, "--yes", "--draft")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        head = git(self.wt, "rev-parse", "HEAD")
+        stored = subprocess.run(["git", "-C", self.wt, "cat-file", "blob", "%s:notes.txt" % head], capture_output=True).stdout
+        self.assertEqual(stored, b"line one\nline two\n", "Git normalised the line endings")
+        expected = git(self.wt, "hash-object", "--path", "notes.txt", "notes.txt")
+        self.assertEqual(git(self.wt, "rev-parse", "%s:notes.txt" % head), expected)
+        self.assertEqual(self.pai("publish", self.plan, "--yes", "--draft").returncode, 0, "and its retry")
+
+    def test_outcomes_report_only_what_happened_and_branch_drift_says_how_back(self):
+        """R4-PAI-041..045: the outcome line after a push failure, a PR failure and success, from the journal alone;
+        a branch switch since the preview is refused with both ways back."""
+        self.assertEqual(self.preview("--out", self.plan).returncode, 0)
+        git(self.wt, "switch", "-q", "-c", "other")
+        p = self.pai("publish", self.plan, "--yes", "--ready")
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("REFUSED     the worktree is on other, not feat/y: to publish feat/y, switch back "
+                      "(git -C '%s' switch feat/y); to publish other, preview it instead" % self.wt, p.stdout)
+        self.assertIn("outcome     commit: none made by this plan; remote: not pushed by this plan; PR: not opened", p.stdout)
+        git(self.wt, "switch", "-q", "feat/y")
+        objects = os.path.join(self.origin, "objects")
+        mode = stat.S_IMODE(os.stat(objects).st_mode)
+        os.chmod(objects, 0o555)
+        try:
+            p = self.pai("publish", self.plan, "--yes", "--ready")
+        finally:
+            os.chmod(objects, mode)
+        head = git(self.wt, "rev-parse", "HEAD")
+        if os.geteuid() != 0:  # root ignores the read-only object folder, so the push succeeds there
+            self.assertIn("outcome     commit: %s (local branch at it); remote: not pushed by this plan; PR: not opened"
+                          % head[:12], p.stdout)
+            self.assertNotIn("pushed      ", p.stdout)
+        with open(self.env["FAKE_GH_STATE"], "w") as f:
+            json.dump({"prs": [], "fail_create": True}, f)
+        p = self.pai("publish", self.plan, "--yes", "--ready")
+        self.assertIn("outcome     commit: %s (local branch at it); remote: origin feat/y = %s (read back); PR: not opened"
+                      % (head[:12], head[:12]), p.stdout)
+        with open(self.env["FAKE_GH_STATE"], "w") as f:
+            json.dump({"prs": []}, f)
+        p = self.pai("publish", self.plan, "--yes", "--ready")
+        self.assertEqual(p.returncode, 0, p.stdout)
+        self.assertRegex(p.stdout, r"outcome     commit: %s \(local branch at it\); remote: origin feat/y = %s \(read back\); "
+                                   r"PR: https://\S+" % (head[:12], head[:12]))
+
+    def test_reviewed_trailers_are_published_exactly_and_ai_attribution_is_refused(self):
+        """R4-PAI-049: a commit-msg hook that drops a reviewed trailer is refused before the push; without it the
+        reviewed message with its human trailers is published exactly; an AI attribution trailer is refused at preview."""
+        msg = os.path.join(self.tmp, "msg.txt")
+        with open(msg, "w") as f:
+            f.write("docs: a note\n\nAdds a note.\n\nReviewed-by: Ada Owner <ada@example.org>\n"
+                    "Co-authored-by: Grace Human <grace@example.org>\n")
+        p = self.preview("--out", self.plan, "--message-file", msg)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        remote_before = self.remote_refs()
+        hook = self.hook("commit-msg", "#!/bin/sh\ngrep -v '^Reviewed-by:' \"$1\" > \"$1.tmp\" && mv \"$1.tmp\" \"$1\"\n")
+        p = self.pai("publish", self.plan, "--yes", "--draft")
+        self.assertEqual(p.returncode, 1, p.stdout)
+        self.assertIn("its message is not the reviewed one", p.stdout)
+        self.assertEqual((self.remote_refs(), self.pr_creates()), (remote_before, []))
+        os.remove(hook)  # the owner removes the hook, undoes the refused commit and publishes the reviewed plan
+        git(self.wt, "reset", "-q", "--soft", self.c0)
+        git(self.wt, "rm", "-q", "--cached", "docs/new note.md")
+        os.remove(self.plan + ".journal")
+        p = self.pai("publish", self.plan, "--yes", "--draft")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        trailers = git(self.wt, "log", "-1", "--format=%(trailers:only)").strip().splitlines()
+        self.assertEqual(trailers, ["Reviewed-by: Ada Owner <ada@example.org>",
+                                    "Co-authored-by: Grace Human <grace@example.org>"])
+        self.assertEqual(git(self.origin, "rev-parse", "refs/heads/feat/y"), git(self.wt, "rev-parse", "HEAD"))
+        with open(msg, "a") as f:
+            f.write("Co-Authored-By: Claude <noreply@anthropic.com>\n")
+        p = self.preview("--out", os.path.join(self.tmp, "ai.json"), "--message-file", msg)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("REFUSED     commit message", p.stdout)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "ai.json")), "no plan is written for it")
+
     def test_a_clean_filter_still_publishes(self):
         """Git stores the filtered bytes, not the working file's: still the approved content."""
         git(self.repo, "config", "filter.upper.clean", "tr a-z A-Z")
@@ -395,6 +527,47 @@ class WorktreePR(helpers.Fixture):
         self.assertFalse(os.path.exists(self.plan), "a refused preview writes no plan, so nothing can be published")
         self.assertEqual(git(self.wt, "rev-parse", "HEAD"), self.c0)
         self.assertEqual(self.pr_creates(), [])
+
+    def digest(self):
+        with open(self.plan, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+
+    def test_from_planning_to_publishing_still_needs_the_owners_confirmation_of_the_reviewed_plan(self):
+        """R4-PAI-018: a worker can prepare a preview and dry-run it; nothing is published without the owner's
+        explicit --yes and PR state, and with --expect-plan only the exact plan the owner reviewed is published."""
+        p = self.preview("--out", self.plan)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        reviewed = self.digest()
+        self.assertIn("(sha256 %s; review it, then: pai worktree publish" % reviewed[:16], p.stdout)
+        self.assertIn("--expect-plan %s --yes --draft|--ready" % reviewed[:16], p.stdout)
+        remote_before = self.remote_refs()
+        p = self.pai("publish", self.plan)
+        self.assertIn("Nothing was done: add --yes", p.stdout)
+        p = self.pai("publish", self.plan, "--yes")
+        self.assertIn("choose --draft or --ready", p.stdout)
+        with open(self.plan) as f:  # the plan is edited after the owner's review
+            plan = json.load(f)
+        plan["draft"]["title"] = "docs: a note (and more)"
+        with open(self.plan, "w") as f:
+            json.dump(plan, f, indent=1)
+        p = self.pai("publish", self.plan, "--expect-plan", reviewed[:16], "--yes", "--draft")
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("is not the plan that was reviewed", p.stdout)
+        self.assertIn("Nothing was staged, committed, pushed or opened.", p.stdout)
+        self.assertEqual(git(self.wt, "rev-parse", "HEAD"), self.c0)
+        self.assertEqual((self.remote_refs(), self.pr_creates()), (remote_before, []))
+        p = self.pai("publish", self.plan, "--expect-plan", "not-a-digest", "--yes", "--draft")
+        self.assertEqual(p.returncode, 2)
+        self.assertIn("--expect-plan takes the plan's sha256", p.stderr)
+        os.remove(self.plan)
+        self.assertEqual(self.preview("--out", self.plan).returncode, 0)  # the owner reviews again
+        fresh = self.digest()
+        p = self.pai("publish", self.plan, "--expect-plan", fresh[:12], "--yes", "--draft")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertEqual(len(self.pr_creates()), 1)
+        p = self.pai("publish", self.plan, "--expect-plan", fresh, "--yes", "--draft")
+        self.assertEqual(p.returncode, 0, "a retry with the same reviewed plan stays idempotent")
+        self.assertEqual(len(self.pr_creates()), 1)
 
 
 if __name__ == "__main__":

@@ -197,6 +197,126 @@ class SplitPlan(helpers.Fixture):
         p = self.pai("plan", "accept", self.plan, "--queues", self.queues, "--write")
         self.assertEqual(p.stdout.count("already"), 4, "nothing re-queued around the blocker")
 
+    # -- R4
+
+    def read_plan(self):
+        with open(self.plan) as f:
+            return json.load(f)
+
+    def test_the_same_goal_gives_the_same_ids_and_dependencies(self):
+        """R4-PAI-026: proposing twice gives the same plan; a slice added at the end leaves earlier ids alone."""
+        outs = []
+        for i in range(2):
+            out = os.path.join(self.tmp, "p%d.json" % i)
+            self.pai("plan", "propose", "--parent", "EXP", "--goals", self.goals, "--repo", self.repo, "--out", out)
+            with open(out) as f:
+                outs.append(f.read())
+        self.assertEqual(outs[0], outs[1], "byte-identical plans from the same goals")
+        first = {s["id"]: (s["item"], s.get("needs", [])) for s in json.loads(outs[0])["slices"]}
+        self.assertEqual(first["docs"], ("EXP-003", ["api"]))
+        with open(self.goals, "a") as f:
+            f.write("- tests: Add export tests | paths: tests/export/ | verify: python -m pytest tests/export | prereqs: none\n")
+        out = os.path.join(self.tmp, "p2.json")
+        self.pai("plan", "propose", "--parent", "EXP", "--goals", self.goals, "--repo", self.repo, "--out", out)
+        with open(out) as f:
+            later = {s["id"]: (s["item"], s.get("needs", [])) for s in json.load(f)["slices"]}
+        self.assertEqual({k: later[k] for k in first}, first, "earlier ids unchanged")
+        self.assertEqual(later["tests"][0], "EXP-005")
+
+    def test_contested_paths_name_the_lane_that_owns_them(self):
+        """R4-PAI-028: two slices writing one path, and a slice writing a path another lane owns, are refused with the owner."""
+        goals = os.path.join(self.tmp, "contested.md")
+        with open(goals, "w") as f:
+            f.write("- ui: Change the API page | paths: src api/page.py | verify: make ui | prereqs: none | worker: b\n"
+                    "- web: Web | paths: web/ | verify: make web | prereqs: none\n"
+                    "- cli: Cli | paths: web/shared.js | verify: make cli | prereqs: none\n")
+        p = self.pai("plan", "propose", "--parent", "CON", "--goals", goals, "--repo", self.repo, "--out", self.plan)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("PROBLEM   ui owned-elsewhere: src api is owned by lane a (%s)" % self.wt, p.stdout)
+        self.assertIn("PROBLEM   web+cli shared-write-paths: web and cli would both write web/shared.js", p.stdout)
+        p = self.pai("plan", "accept", self.plan, "--queues", self.queues, "--write")
+        self.assertEqual(p.returncode, 1)
+        self.assertFalse(os.path.exists(self.queues), "nothing is queued while a path is contested")
+
+    def test_a_blocked_cloud_task_becomes_a_local_rehearsal_and_an_owner_decision(self):
+        """R4-PAI-029: split-owner keeps the worker's item for the rehearsal, adds the owner's decision after it,
+        moves dependents onto the decision, and queues the decision as owner-only in the owner's queue."""
+        goals = os.path.join(self.tmp, "cloud.md")
+        with open(goals, "w") as f:
+            f.write("- export: Add the export job | paths: jobs/export/ | verify: python -m pytest tests/jobs | prereqs: none\n"
+                    "- deploy: Deploy the export job to AWS staging | paths: infra/export/ | verify: terraform plan "
+                    "(local) | prereqs: none | needs: export\n"
+                    "- announce: Announce the export | paths: docs/news.md | verify: proofread | prereqs: none | needs: deploy\n")
+        p = self.pai("plan", "propose", "--parent", "CLD", "--goals", goals, "--repo", self.repo, "--out", self.plan)
+        self.assertIn("WARNING   deploy looks-owner-only: the goal mentions 'Deploy'", p.stdout)
+        self.assertIn("pai plan split-owner PLAN deploy", p.stdout)
+        before = {s["id"]: s["item"] for s in self.read_plan()["slices"]}
+        p = self.pai("plan", "split-owner", self.plan, "deploy")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        sl = {s["id"]: s for s in self.read_plan()["slices"]}
+        self.assertEqual(list(sl), ["export", "deploy-rehearsal", "deploy-decision", "announce"])
+        self.assertEqual(sl["deploy-rehearsal"]["item"], before["deploy"], "the rehearsal keeps the worker's item")
+        self.assertEqual((sl["deploy-rehearsal"]["paths"], sl["deploy-rehearsal"]["verify"]), (["infra/export/"],
+                                                                                              "terraform plan (local)"))
+        self.assertTrue(sl["deploy-rehearsal"]["goal"].startswith("Rehearse locally, with no live writes or spending:"))
+        self.assertEqual((sl["deploy-decision"]["item"], sl["deploy-decision"]["worker"], sl["deploy-decision"]["needs"]),
+                         ("CLD-004", "owner", ["deploy-rehearsal"]))
+        self.assertEqual(sl["announce"]["needs"], ["deploy-decision"], "dependents wait for the owner's decision")
+        self.assertNotIn("WARNING", p.stdout, "nothing left that looks owner-only")
+        self.assertEqual(self.pai("plan", "accept", self.plan, "--queues", self.queues, "--write").returncode, 0)
+        owner_q = os.path.join(self.queues, "CLD-owner.queue")
+        st = json.loads(self.pai("queue", "status", owner_q, "--json").stdout)
+        self.assertEqual(st["owner_only"][0]["id"], "CLD-004")
+        self.assertIn("owner decision: Owner decision: Deploy the export job to AWS staging", st["owner_only"][0]["reason"])
+        self.assertIn("waits for deploy-rehearsal", st["owner_only"][0]["reason"])
+        p = self.pai("plan", "split-owner", self.plan, "export")
+        self.assertEqual(p.returncode, 2)
+        self.assertIn("already in a queue", p.stderr)
+
+    def test_lane_status_and_other_lanes_continue_past_a_blocked_one(self):
+        """R4-PAI-032/035: one lane's current, blocked and remaining ids; another lane keeps working while one is
+        blocked on its dependency; the blocked one becomes ready when the dependency is done."""
+        self.pai("plan", "propose", "--parent", "EXP", "--goals", self.goals, "--repo", self.repo, "--out", self.plan)
+        self.edit(lambda plan: plan["slices"][3].update(paths=["cli/"]))
+        self.assertEqual(self.pai("plan", "accept", self.plan, "--queues", self.queues, "--write").returncode, 0)
+        sl = {s["id"]: s for s in self.read_plan()["slices"]}
+        docs_lane, api_lane = sl["docs"]["worker"], sl["api"]["worker"]
+        st = json.loads(self.pai("plan", "status", self.plan, "--queues", self.queues, "--lane", docs_lane, "--json").stdout)
+        self.assertEqual(list(st), [docs_lane])
+        self.assertEqual(st[docs_lane]["blocked"][0]["reason"], "waits for api")
+        q = lambda s_: os.path.join(self.queues, "EXP-%s.queue" % sl[s_]["worker"])  # noqa: E731
+        self.pai("queue", "mark", q("web"), sl["web"]["item"], "doing", "--session", "w")
+        self.pai("queue", "mark", q("cli"), sl["cli"]["item"], "done", "--evidence", "cli tests", "--session", "c")
+        p = self.pai("plan", "status", self.plan, "--queues", self.queues)
+        self.assertIn("current    %s web" % sl["web"]["item"], p.stdout, "the web lane works on")
+        self.assertIn("BLOCKED    %s docs: waits for api" % sl["docs"]["item"], p.stdout)
+        self.assertIn("done       %s cli" % sl["cli"]["item"], p.stdout)
+        self.pai("queue", "mark", q("api"), sl["api"]["item"], "done", "--evidence", "api tests", "--session", "a")
+        st = json.loads(self.pai("plan", "status", self.plan, "--queues", self.queues, "--json").stdout)
+        self.assertEqual(st[docs_lane]["startable"], ["docs"], "the dependency is done: docs can start")
+        self.assertEqual(st[api_lane]["done"][0]["slice"], "api")
+        p = self.pai("plan", "status", self.plan, "--queues", self.queues, "--lane", "zz")
+        self.assertEqual(p.returncode, 2)
+        self.assertIn("no lane zz in this plan", p.stderr)
+
+    def test_reapplying_the_accepted_plan_adds_no_row(self):
+        """R4-PAI-030: accept twice (and once more after an owner split was accepted): every queue is byte-identical."""
+        self.pai("plan", "propose", "--parent", "EXP", "--goals", self.goals, "--repo", self.repo, "--out", self.plan)
+        self.edit(lambda plan: plan["slices"][3].update(paths=["cli/"]))
+        self.assertEqual(self.pai("plan", "accept", self.plan, "--queues", self.queues, "--write").returncode, 0)
+
+        def snap():
+            out = {}
+            for name in sorted(os.listdir(self.queues)):
+                with open(os.path.join(self.queues, name), "rb") as f:
+                    out[name] = f.read()
+            return out
+        before = snap()
+        for _ in range(2):
+            p = self.pai("plan", "accept", self.plan, "--queues", self.queues, "--write")
+            self.assertEqual(p.stdout.count("already"), 4)
+        self.assertEqual(snap(), before)
+
 
 if __name__ == "__main__":
     unittest.main()

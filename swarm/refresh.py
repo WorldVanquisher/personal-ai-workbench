@@ -79,6 +79,8 @@ def describe(repo=None, remote="origin", base="main"):
     wts = worktrees(main)
     for w in wts:
         w["contains_last_fetched_base"] = bool(last and w["head"] and gitprep.is_ancestor(main, last, w["head"]))
+        # commits the worktree has that the fetched base does not: unpublished work (or a refused publish) stays visible
+        w["ahead_of_base"] = gitprep.ahead(main, last, w["head"]) if last and w["head"] else None
     return {"repository": dict(ident, path=main, common_dir=cdir), "base": {"branch": base, "tracking_ref": tracking,
             "last_fetched": last}, "worktrees": wts}
 
@@ -133,25 +135,29 @@ def plan(repo=None, remote="origin", base="main", worktree=None, new=None, branc
 
 
 def commands(info, shell):
-    """The owner-run commands, in order, for bash or PowerShell."""
+    """The owner-run commands, in order, for bash or PowerShell. Every value pai puts into them
+    (paths, the remote, the base and the new branch, which Git allows to contain `$`, quotes,
+    backticks, `|` or `&`) is quoted for that shell; only $BASE, set by the commands themselves,
+    is expanded."""
     main, r = info["repository"]["path"], info["recommendation"]
     remote, base = info["repository"]["remote"], info["base"]["branch"]
     refspec = "+refs/heads/%s:refs/remotes/%s/%s" % (base, remote, base)
+    tracking = "%s/%s" % (remote, base)
     q = lambda p: _q(p, shell)  # noqa: E731
     if shell == "powershell":
-        out = ["git -C %s fetch %s %s" % (q(main), remote, refspec),
-               "$BASE = git -C %s rev-parse %s/%s; \"fetched %s/%s = $BASE\"" % (q(main), remote, base, remote, base)]
+        out = ["git -C %s fetch %s %s" % (q(main), q(remote), q(refspec)),
+               "$BASE = git -C %s rev-parse %s; %s + $BASE" % (q(main), q(tracking), q("fetched %s = " % tracking))]
         if r["kind"] == "new-worktree":
-            out.append("git -C %s worktree add -b %s %s $BASE" % (q(main), r["branch"], q(r["path"])))
+            out.append("git -C %s worktree add -b %s %s $BASE" % (q(main), q(r["branch"]), q(r["path"])))
         else:
             out.append("if ((git -C %s status --porcelain) -eq $null) { git -C %s merge --ff-only $BASE } else "
-                       "{ \"not clean: nothing was changed\" }" % (q(r["path"]), q(r["path"])))
+                       "{ 'not clean: nothing was changed' }" % (q(r["path"]), q(r["path"])))
         out.append("pai worktree verify %s --base $BASE" % q(r["path"]))
         return out
-    out = ["git -C %s fetch %s %s" % (q(main), remote, refspec),
-           "BASE=$(git -C %s rev-parse %s/%s) && echo \"fetched %s/%s = $BASE\"" % (q(main), remote, base, remote, base)]
+    out = ["git -C %s fetch %s %s" % (q(main), q(remote), q(refspec)),
+           "BASE=$(git -C %s rev-parse %s) && echo %s\"$BASE\"" % (q(main), q(tracking), q("fetched %s = " % tracking))]
     if r["kind"] == "new-worktree":
-        out.append("git -C %s worktree add -b %s %s \"$BASE\"" % (q(main), r["branch"], q(r["path"])))
+        out.append("git -C %s worktree add -b %s %s \"$BASE\"" % (q(main), q(r["branch"]), q(r["path"])))
     else:
         out.append("test -z \"$(git -C %s status --porcelain)\" && git -C %s merge --ff-only \"$BASE\"" % (
             q(r["path"]), q(r["path"])))
@@ -192,9 +198,10 @@ def render_list(info):
                                                           info["base"]["last_fetched"] or "never")]
     for w in info["worktrees"]:
         state = "missing" if not w["exists"] else ("%d uncommitted" % w["uncommitted"] if w["uncommitted"] else "clean")
-        lines.append("worktree    %s\n            branch %s, HEAD %s, %s%s" % (
+        lines.append("worktree    %s\n            branch %s, HEAD %s, %s%s%s" % (
             w["path"], w["branch"] or "(detached)", (w["head"] or "?")[:12], state,
-            ", contains the last fetched base" if w.get("contains_last_fetched_base") else ""))
+            ", contains the last fetched base" if w.get("contains_last_fetched_base") else "",
+            ", %d commit(s) not in the fetched base" % w["ahead_of_base"] if w.get("ahead_of_base") else ""))
     return "\n".join(lines)
 
 
@@ -213,7 +220,8 @@ def render_plan(info, shells=("bash", "powershell")):
     return "\n".join(lines)
 
 
-def main(argv=None):
+def parser():
+    """The `pai worktree` command line (also read by tools/command_inventory.py)."""
     import argparse
     ap = argparse.ArgumentParser(prog="pai worktree", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -258,6 +266,8 @@ def main(argv=None):
     st.add_argument("--draft", dest="draft", action="store_const", const=True)
     st.add_argument("--ready", dest="draft", action="store_const", const=False)
     pb.add_argument("--no-pr", action="store_true", help="stop after the push")
+    pb.add_argument("--expect-plan", metavar="SHA256", help="the reviewed plan's sha256 (the preview prints it; at least "
+                    "12 hex digits): refuse any other plan file")
     it = sub.add_parser("init", help="this worktree's AGENTS.md section: goal, scope, checks, owner rules (preview; --write)")
     it.add_argument("path")
     it.add_argument("--goal", required=True)
@@ -269,6 +279,8 @@ def main(argv=None):
     it.add_argument("--profile", help="a rule profile exported earlier")
     it.add_argument("--jev", action="store_true", help="let JEV score the rule library for this goal (optional)")
     it.add_argument("--accept", action="append", default=[], metavar="RULE", help="add a proposed rule (repeatable)")
+    it.add_argument("--reserve", action="append", default=[], choices=("implementation", "testing", "design"),
+                    help="keep this kind of decision with the owner (repeatable; by default the worker owns all three)")
     it.add_argument("--export-profile", metavar="FILE", help="write the accepted rules and checks as a profile (with --write)")
     it.add_argument("--write", action="store_true")
     it.add_argument("--json", action="store_true")
@@ -279,6 +291,11 @@ def main(argv=None):
     wb.add_argument("--queues", help="folder of the worker queues (`pai plan accept --queues`), to show their states")
     wb.add_argument("--port", type=int, default=0)
     wb.add_argument("--no-browser", action="store_true")
+    return ap
+
+
+def main(argv=None):
+    ap = parser()
     a = ap.parse_args(argv)
     try:
         if a.wcmd == "web":
@@ -296,7 +313,8 @@ def main(argv=None):
                     if not sep or not name.strip() or not cmd.strip():
                         raise agentsmd.InitError("--check looks like NAME=COMMAND, not %r" % c)
                     checks.append((name.strip(), cmd.strip()))
-                p = agentsmd.plan(a.path, a.goal, a.scope, a.owner, a.lane, checks, a.file, a.jev, a.accept, a.profile)
+                p = agentsmd.plan(a.path, a.goal, a.scope, a.owner, a.lane, checks, a.file, a.jev, a.accept, a.profile,
+                                  reserve=a.reserve)
                 if a.json:
                     print(json.dumps({k: v for k, v in p.items() if k != "new"}, indent=1))
                 else:
@@ -323,7 +341,7 @@ def main(argv=None):
             import wtpr
             try:
                 if a.wcmd == "publish":
-                    return wtpr.publish(a.plan, a.yes, a.draft, a.no_pr)
+                    return wtpr.publish(a.plan, a.yes, a.draft, a.no_pr, expect=a.expect_plan)
                 def read(p):
                     if not p:
                         return ""
@@ -338,7 +356,9 @@ def main(argv=None):
             if a.out and not info["problems"]:
                 wtpr.save(info, a.out)
                 if not a.json:
-                    print("plan        %s (review it, then: pai worktree publish %s --yes --draft|--ready)" % (a.out, a.out))
+                    dig = wtpr.plan_digest(a.out)[:16]
+                    print("plan        %s (sha256 %s; review it, then: pai worktree publish %s --expect-plan %s --yes "
+                          "--draft|--ready)" % (a.out, dig, shlex.quote(a.out), dig))
             return 1 if info["problems"] else 0
         if a.wcmd == "list":
             info = describe(a.repo, a.remote, a.base)

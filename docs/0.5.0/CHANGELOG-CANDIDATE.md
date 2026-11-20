@@ -52,3 +52,30 @@ unchanged (saved fixture `swarm/tests/fixtures/run-0.4.0`, package check `083`).
 
 `pai web` (real browser unverified), Remote Control lanes (live session unverified), WSL, macOS
 workbench, native Windows workbench (not offered), real agents (owner runs).
+
+## R4: the owner-to-worker loop (on top of the merged worktree publishing, PR #13)
+
+New:
+- `pai plan status PLAN --queues DIR [--lane L]`: per lane, current, blocked (with the reason),
+  owner-only, remaining, done and ready items.
+- `pai plan split-owner PLAN SLICE` and goals lines with `owner: yes`: a slice that needs live
+  access becomes a local rehearsal for the worker and an owner decision queued as owner-only;
+  `plan check` warns about goals that mention live work.
+- `pai queue show FILE [ID]`: checkpoints with their handoff and whether it still matches, or one
+  item's text and full history; `pai queue mark ID todo --reason` reopens an item (an owner's retry);
+  item ids may have several prefix words (`R4-PAI-001`).
+- `pai worktree init --reserve implementation|testing|design`; the managed section now lists the
+  lanes' write scopes, the decisions the worker owns, what needs the owner, and what to do above
+  the worker's authority; the preview prints the same.
+- `pai worktree publish --expect-plan SHA` (the preview prints the plan's sha256) and an `outcome`
+  line after every `--yes` run; `pai worktree list` shows commits not in the fetched base.
+- `pai handoff new --decision` and `--needs-owner`.
+
+Changed:
+- `pai worktree publish` refuses a plan made before modes were recorded: preview again.
+- The refresh commands quote every value for bash and PowerShell (a branch name could run code).
+- AGENTS.md generation refuses broken, duplicate or malformed markers and non-UTF-8, UTF-16 and
+  CR-only files, with the line numbers and the fix; nothing is written.
+- The worktree page: the dialog keeps keyboard focus inside it; a refused save moves focus to its
+  notice; split rows stack on a phone; a late answer can no longer show another worktree's file.
+- `tools/build_bundle.py` accepts pre-release versions such as `0.5.0rc2`.
