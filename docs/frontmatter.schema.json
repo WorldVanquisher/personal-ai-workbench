@@ -22,6 +22,17 @@
    "match": {
     "pai_managed": "decision/1"
    },
+   "optional": [
+    "round",
+    "id",
+    "question",
+    "recommendation",
+    "default",
+    "deadline",
+    "blocks",
+    "answer",
+    "updated"
+   ],
    "owner_fields": [
     "choice",
     "choice_note"
@@ -35,6 +46,34 @@
     "pai_sha256"
    ],
    "written_by": "pai round (round lane, swarm/round_vault.py)"
+  },
+  "eval": {
+   "fields": {
+    "type": {
+     "enum": [
+      "pai-eval"
+     ]
+    }
+   },
+   "match": {
+    "template": "pai-eval/1"
+   },
+   "optional": [
+    "contract_version",
+    "artifacts",
+    "mean_pass",
+    "all_pass",
+    "behaviour_warnings",
+    "generated"
+   ],
+   "owner_fields": [],
+   "required": [
+    "type",
+    "template",
+    "round",
+    "contract"
+   ],
+   "written_by": "pai prompt eval --note (prompts lane, pai/prompteval.py)"
   },
   "handoff": {
    "fields": {
@@ -91,6 +130,20 @@
    "match": {
     "format": "pai-handoff/2"
    },
+   "optional": [
+    "task",
+    "created",
+    "generator",
+    "sealed_at",
+    "sealed_sha256",
+    "approval",
+    "approved_by",
+    "approved_at",
+    "rejected_reason",
+    "jev_done",
+    "jev_checked",
+    "jev_verify"
+   ],
    "owner_fields": [
     "approved"
    ],
@@ -109,6 +162,57 @@
    ],
    "written_by": "the worker (pai handoff new); seal adds status, sealed_sha256, approval"
   },
+  "home": {
+   "fields": {
+    "pai_sha256": {
+     "pattern": "[0-9a-f]{64}"
+    }
+   },
+   "match": {
+    "pai_managed": "home/1"
+   },
+   "optional": [
+    "title",
+    "rounds_open",
+    "lanes_need_owner",
+    "decisions_open",
+    "handoffs_unapproved",
+    "updated"
+   ],
+   "owner_fields": [],
+   "required": [
+    "pai_managed",
+    "pai_sha256"
+   ],
+   "written_by": "pai round (round lane, swarm/round_vault.py: PAI/Home.md)"
+  },
+  "integration": {
+   "fields": {
+    "pai_sha256": {
+     "pattern": "[0-9a-f]{64}"
+    }
+   },
+   "match": {
+    "pai_managed": "integration/1"
+   },
+   "optional": [
+    "base",
+    "order",
+    "patches",
+    "conflicts",
+    "hot_files",
+    "test_exit",
+    "integrated_at",
+    "updated"
+   ],
+   "owner_fields": [],
+   "required": [
+    "pai_managed",
+    "round",
+    "pai_sha256"
+   ],
+   "written_by": "pai round integrate (round lane, swarm/round_integrate.py: INTEGRATION.md)"
+  },
   "lane": {
    "fields": {
     "needs_owner": {
@@ -119,11 +223,32 @@
     },
     "pai_sha256": {
      "pattern": "[0-9a-f]{64}"
+    },
+    "queued": {
+     "enum": [
+      "true",
+      "false"
+     ]
     }
    },
    "match": {
     "pai_managed": "lane/1"
    },
+   "optional": [
+    "project",
+    "lane",
+    "dialog",
+    "queued",
+    "current_id",
+    "last_cp",
+    "totals",
+    "blockers",
+    "needs_owner",
+    "needs_owner_why",
+    "branch",
+    "worktree_state",
+    "updated"
+   ],
    "owner_fields": [],
    "required": [
     "pai_managed",
@@ -131,7 +256,31 @@
     "status",
     "pai_sha256"
    ],
-   "written_by": "pai round (round lane)"
+   "written_by": "pai round (round lane, swarm/round_vault.py: PAI/rounds/<ROUND>/<lane>.md)"
+  },
+  "log": {
+   "fields": {
+    "date": {
+     "pattern": "\\d{4}-\\d\\d-\\d\\d"
+    },
+    "pai_sha256": {
+     "pattern": "[0-9a-f]{64}"
+    }
+   },
+   "match": {
+    "pai_managed": "log/1"
+   },
+   "optional": [
+    "entries",
+    "updated"
+   ],
+   "owner_fields": [],
+   "required": [
+    "pai_managed",
+    "date",
+    "pai_sha256"
+   ],
+   "written_by": "pai round (round lane, swarm/round_board.py: the daily log)"
   },
   "request": {
    "fields": {
@@ -163,6 +312,38 @@
     "created"
    ],
    "written_by": "a lane or the mastermind asking another lane or the owner for something"
+  },
+  "round": {
+   "fields": {
+    "pai_sha256": {
+     "pattern": "[0-9a-f]{64}"
+    },
+    "status": {
+     "enum": [
+      "open",
+      "closed"
+     ]
+    }
+   },
+   "match": {
+    "pai_managed": "round/1"
+   },
+   "optional": [
+    "project",
+    "base",
+    "lanes",
+    "needs_owner",
+    "round_json",
+    "updated"
+   ],
+   "owner_fields": [],
+   "required": [
+    "pai_managed",
+    "round",
+    "status",
+    "pai_sha256"
+   ],
+   "written_by": "pai round (round lane, swarm/round_vault.py: PAI/rounds/<ROUND>/ROUND.md)"
   }
  }
 }

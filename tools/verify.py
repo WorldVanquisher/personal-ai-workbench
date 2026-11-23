@@ -112,6 +112,17 @@ CI_SIGNATURES = {
 }
 
 
+def doc_check_cmd(root):
+    """tools/doc_check.py's arguments, with --schema when the front matter schema is in the tree (R6-COR-079:
+    every front-matter field the manuals and templates name must be in docs/frontmatter.schema.json);
+    None when doc_check is not in the tree."""
+    tool = os.path.join(root, "tools", "doc_check.py")
+    if not os.path.exists(tool):
+        return None
+    schema = os.path.join(root, "docs", "frontmatter.schema.json")
+    return [tool] + (["--schema", schema] if os.path.exists(schema) else [])
+
+
 def ci_runs(root=None):
     """The `run:` text of every workflow under ROOT/.github/workflows (comments dropped)."""
     d = os.path.join(root or ROOT, ".github", "workflows")
@@ -222,9 +233,9 @@ def main(argv=None):
              needs=("git", "tmux"), timeout=2400)
         for g in extra:  # a test folder nobody listed is still run
             step("tests:" + g, PY + [os.path.join(ROOT, "tools", "strict_unittest.py"), g, "-v"])
-    doc_check = os.path.join(ROOT, "tools", "doc_check.py")
-    if os.path.exists(doc_check):  # docs lane, R6-COR-008: manuals against the real --help, links, anchors
-        step("doc-check", PY + [doc_check])
+    doc_check = doc_check_cmd(ROOT)
+    if doc_check:  # docs lane, R6-COR-008: manuals against the real --help, links, anchors; R6-COR-079: + schema
+        step("doc-check", PY + doc_check)
     else:
         rows.append(("doc-check", "SKIPPED", "tools/doc_check.py is not in this tree"))
         state["doc-check"], timings["doc-check"] = "SKIPPED", None

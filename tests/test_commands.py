@@ -2,6 +2,8 @@
 pai/cli.py only registers them."""
 
 import argparse
+import contextlib
+import io
 import sys
 import unittest
 from pathlib import Path
@@ -16,7 +18,8 @@ class Registry(unittest.TestCase):
         self.addCleanup(commands.FEATURES.__setitem__, slice(None), self.saved)
 
     def test_cli_registers_the_features_in_order(self):
-        self.assertEqual([f.name for f in self.saved], ["handoff-v2", "vault", "context-worktree", "secrets"])
+        names = [f.name for f in self.saved]  # core's four first; other lanes' features follow (R6-COR-081)
+        self.assertEqual(names[:4], ["handoff-v2", "vault", "context-worktree", "secrets"])
 
     def test_add_dispatch_and_replace(self):
         commands.FEATURES[:] = []
@@ -33,12 +36,73 @@ class Registry(unittest.TestCase):
         self.assertEqual(commands.dispatch(p.parse_args(["x"]), lambda: "project"), 3)
         self.assertIsNone(commands.dispatch(p.parse_args(["y"]), lambda: "project"))
 
+    def test_the_usage_line_lists_every_command(self):  # R6-COR-080 (F5)
+        p = cli._parser()
+        usage = " ".join(p.format_usage().split())
+        sub = next(a for a in p._actions if isinstance(a, argparse._SubParsersAction))
+        listed = usage[usage.index("{") + 1:usage.index("}")].split(",")
+        self.assertEqual(listed, list(sub.choices), "generated from argparse, not written by hand")
+        registered = [c for f in commands.FEATURES for c in commands.ADDED.get(f.name, [])]
+        self.assertTrue({"vault", "secrets"} <= set(registered), registered)
+        for name in registered + ["init", "doctor", "install", "check", "context", "handoff", "queue"]:
+            self.assertIn(name, listed)
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()) as err:
+            p.parse_args(["no-such-command"])
+        self.assertIn("vault", err.getvalue(), "the error lists the registered commands too")
+
+    def test_hooks_for_init(self):  # R6-COR-081: the shape the prompt library uses
+        commands.FEATURES[:] = []
+        seen = []
+        feat = commands.Feature(
+            "lib", add=lambda sub, ps: (sub.add_parser("lib"), ps["init"].add_argument("--lib-dir", default="L")),
+            run=lambda a, lp: 0 if a.cmd == "lib" else None,
+            hooks={"init before-write": lambda a: seen.append(("before", a.lib_dir)),
+                   "init after-write": lambda a: seen.append(("after", a.lib_dir))})
+        commands.use(feat)
+        p = argparse.ArgumentParser()
+        sub = p.add_subparsers(dest="cmd")
+        init = sub.add_parser("init")
+        commands.add_all(sub, {"init": init})
+        self.assertEqual(commands.ADDED["lib"], ["lib"])
+        a = p.parse_args(["init", "--lib-dir", "X"])
+        commands.hook("init before-write", a)
+        commands.hook("init after-write", a)
+        self.assertEqual(seen, [("before", "X"), ("after", "X")])
+        self.assertEqual(commands.dispatch(p.parse_args(["lib"]), lambda: None), 0)
+        with self.assertRaises(ValueError):
+            commands.hook("init during", a)
+        with self.assertRaises(ValueError):
+            commands.Feature("bad", None, None, hooks={"befor-write": print})
+
+    def test_pai_init_calls_the_hooks(self):  # R6-COR-081
+        text = (Path(cli.__file__)).read_text(encoding="utf-8")
+        init = text[text.index("def _init("):text.index("def main(")]
+        self.assertLess(init.index('commands.hook("init before-write", a)'), init.index("if not a.write:"))
+        self.assertLess(init.index("initcfg.write(path, text)"), init.index('commands.hook("init after-write", a)'))
+
     def test_cli_py_holds_registrations_not_command_code(self):
         text = (Path(cli.__file__)).read_text(encoding="utf-8")
-        self.assertEqual(text.count("commands.use("), 4)
+        self.assertEqual(text.count("commands.use("), len(self.saved), "one line per registered feature")
         for moved in ('add_parser("seal"', 'add_parser("vault"', "def _seal", "def _vault"):
             self.assertNotIn(moved, text)
 
+
+
+class FreshHomeWording(unittest.TestCase):
+    """R6-COR-090: what a new user read in a fresh HOME and could not act on."""
+
+    def test_secrets_where_names_nothing_an_installed_pai_lacks(self):
+        for row in commands.secrets_where(env={}, home="/nonexistent"):
+            self.assertNotIn("tools/", row["where"], "tools/ is not packaged")
+        where = {r["name"]: r["where"] for r in commands.secrets_where(env={}, home="/nonexistent")}
+        self.assertIn("anthropic-workspace-id: <workspace id>", where["ANTHROPIC_CUSTOM_HEADERS"])
+        self.assertIn("secret-tool", where["TYPESAFE_API_KEY"])
+
+    def test_the_init_example_does_not_trigger_its_own_layout_warning(self):
+        import re
+        memory = re.search(r'--memory "([^"]+)"', cli.INIT_EPILOG).group(1)
+        inbox = re.search(r'--inbox "([^"]+)"', cli.INIT_EPILOG).group(1)
+        self.assertFalse(memory.startswith(inbox + "/"), (memory, inbox))
 
 if __name__ == "__main__":
     unittest.main()

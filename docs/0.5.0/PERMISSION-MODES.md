@@ -33,17 +33,26 @@ Not covered: a program that writes files by itself (a build tool, `python script
 `--allowedTools` list and a review of the diff stay the controls for those
 (`swarm/tests/test_guard.py`).
 
-## Default since R6-COR-068: `manual`
+## Default: `acceptEdits` (R6-COR-077, owner decision D-R6-1 = A)
 
-`pai_swarm.py run` now passes `--permission-mode manual` unless told otherwise: the strictest mode that still
-lets a headless worker do its job. The tools it needs (Read, Edit, Write, Glob, Grep and the listed Bash
-patterns) are in `--allowedTools`; anything else would ask, and with `--permission-prompts none` nobody
-answers, so it is refused. Tested with the fake claude only (swarm/tests/run_tests.sh); the owner's real
-check is `PAI_SMOKE_PERMISSION_MODE=manual bash tools/real_agent_smoke.sh` (the smoke's default now). If a
-real run shows manual blocking something a worker needs, add it to --allow-bash, or pass
-`--permission-mode acceptEdits`.
+`pai_swarm.py run` passes `--permission-mode acceptEdits` unless told otherwise. The guard hook (below)
+refuses writes outside the task's `paths:` in every mode, so the default does not depend on the mode for
+that. `--permission-mode manual` stays available, for sessions where a person is present to approve.
 
-## Recommendation before R6-COR-068 (kept for the record)
+**Headless, `manual` blocks even the writes the task asks for.** This is a real-run result, not an
+inference (reported-by-mastermind, 2026-11-22, WSL Ubuntu, Claude Code 2.1.330, haiku,
+`tools/real_agent_smoke.sh`):
+
+| Mode | Result | Cost |
+| --- | --- | --- |
+| `manual` (the default from R6-COR-068 to R6-COR-077) | 6 passed, 1 failed: the worker could not write SMOKE.md, the write its task asks for. The permission system wanted a person to approve the edit, and in `-p` mode there is nobody to ask; the task ended in review | $0.004 |
+| `acceptEdits` | 7/7 passed; the write to OUTSIDE.md, outside the task's paths, was still refused by the guard hook; JEV scored done 0.91, checked 0.96 | $0.002 |
+
+R6-COR-068 had made `manual` the default on the assumption that Edit and Write in `--allowedTools` would
+still run without a prompt; that assumption was tested with the fake claude only, and the real run
+disproved it. The fake-claude test (swarm/tests/run_tests.sh) now asserts `acceptEdits` again.
+
+## Recommendation before R6-COR-068 (kept for the record; superseded by the section above)
 
 1. Keep `acceptEdits` as the default for now. It is the only mode with a recorded real headless
    run, and the guard hook now enforces `paths:` for shell writes.
@@ -61,11 +70,11 @@ real run shows manual blocking something a worker needs, add it to --allow-bash,
 run it once per mode and compare the `Bash` calls each run made, from the run's JSON output:
 
 ```bash
-for m in manual acceptEdits dontAsk; do PAI_SMOKE_PERMISSION_MODE=$m bash tools/real_agent_smoke.sh; done
+for m in acceptEdits manual dontAsk; do PAI_SMOKE_PERMISSION_MODE=$m bash tools/real_agent_smoke.sh; done
 ```
 
-Record per mode: which commands ran, which were denied, and the cost. The default changes only
-after that record exists (a decision for the owner, in the core cp-B handoff).
+Record per mode: which commands ran, which were denied, and the cost. The 2026-11-22 record for `manual` and
+`acceptEdits` is in the table above; `dontAsk` has not been measured.
 
 ## Guard: what the Bash hook checks, and its known limits (R6-COR-067)
 

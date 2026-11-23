@@ -199,5 +199,72 @@ class SchemaDoc(unittest.TestCase):
         self.assertEqual(json.loads(out)["format"], "pai-frontmatter-schema/1")
 
 
+SWARM = ROOT / "swarm"
+
+
+@unittest.skipUnless((SWARM / "round_vault.py").exists() and (ROOT / "pai" / "prompteval.py").exists(),
+                     "the round and prompts lanes' note writers are not in this tree")
+class EveryWriterMatchesTheSchema(unittest.TestCase):
+    """R6-COR-078 (F3): the notes the round lane (lane, ROUND, decision, Home, integration, log) and the
+    prompts lane (eval) really write are recognised by the schema, carry only keys it lists, and lint
+    reports no PROBLEM for them. Synthetic round; the writers are the real code."""
+
+    def test_generated_notes(self):
+        import importlib
+        import shutil
+        sys.path[:0] = [str(SWARM), str(SWARM / "tests")]
+        try:
+            rv, rb, ri = (importlib.import_module(m) for m in ("round_vault", "round_board", "round_integrate"))
+            make_round = importlib.import_module("test_round_board").make_round
+            rows = importlib.import_module("test_round_vault").rows
+            from pai import prompteval
+        finally:
+            del sys.path[:2]
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        r = make_round(tmp)
+        r["_path"], r["status"] = os.path.join(r["state_dir"], "ROUND.json"), "open"
+        with open(os.path.join(r["vault"], "sheet.md"), "w", encoding="utf-8") as f:
+            f.write("- [ ] **D7 Budget**: is $5 enough.\n  - 选项：A $5；B $10\n  - 推荐：A\n  - 默认：A\n")
+        with open(r["_path"], "w", encoding="utf-8") as f:
+            json.dump(r, f)
+        quiet = lambda s: None  # noqa: E731
+        rv.write_vault(r, rows(), None, quiet)
+        rb.write_daily(r, "2026-11-22", [["20:00", "R9", "go", "because"]], quiet)
+        rep = {"order": ["alpha"], "patches": [], "conflicts": [], "hot_files": [], "test": {"exit": 0},
+               "at": "2026-11-22T20:00:00Z"}
+        orig = ri.render
+        ri.render = lambda r_, rep_: "\n" + rv.BEGIN + "\n# x\n" + rv.END + "\n"
+        try:
+            ri.write(r, rep, quiet)
+        finally:
+            ri.render = orig
+        res = {"artifact": "a.md", "passed": 1, "total": 1, "score": 1.0, "behaviour": {}}
+        prompteval.write_note(os.path.join(r["vault"], "PAI", "eval-R9.md"), [res], {"name": "c", "version": 1}, "R9", [])
+        seen = {}
+        for d, _, files in os.walk(r["vault"]):
+            for name in files:
+                if name.endswith(".md"):
+                    with open(os.path.join(d, name), encoding="utf-8") as f:
+                        fm = vault.front_matter(f.read())
+                    kind = vault.kind_of(fm) if fm else None
+                    if kind and kind != "handoff":
+                        seen[kind] = name
+                        self.assertEqual(set(fm) - vault.known_fields(kind), set(), "%s (%s): keys not in the schema"
+                                         % (name, kind))
+        self.assertEqual(sorted(seen), ["decision", "eval", "home", "integration", "lane", "log", "round"])
+        problems = [x for x in vault.lint(r["vault"], decision_check=None) if x["level"] != "INFO"]
+        self.assertEqual(problems, [])
+
+
+
+class EmptyVault(unittest.TestCase):
+    def test_none_yet_says_what_counts(self):  # R6-COR-090
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "PAI", "prompts"))
+            msg = [x["message"] for x in vault.lint(d, decision_check=None) if x["level"] == "INFO"][-1]
+        self.assertIn("none yet", msg)
+        self.assertIn("pai vault schema", msg)
+
 if __name__ == "__main__":
     unittest.main()

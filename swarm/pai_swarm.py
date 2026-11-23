@@ -47,11 +47,13 @@ GUARD = os.path.join(HERE, "guard.py")
 CACHE = wtlock.home()  # $PAI_SWARM_HOME or ~/.cache/pai-swarm: run files, worktree locks, task records
 
 DEFAULT_TOOLS = ["Read", "Edit", "Write", "MultiEdit", "Glob", "Grep", "TodoWrite"]
-# R6-COR-068: the strictest mode that still works headless. With `manual` only --allowedTools run
-# (Edit/Write are in that list, so a worker can still edit) and, with --permission-prompts none,
-# everything else is refused instead of approved: acceptEdits approved printf, od and cat outside the
-# list in the 2026-11-22 real smoke. acceptEdits stays available with --permission-mode.
-DEFAULT_PERMISSION_MODE = "manual"
+# R6-COR-077 (owner decision D-R6-1 = A): acceptEdits. A real run (2026-11-22, Claude Code 2.1.330,
+# haiku) showed that a headless worker under `manual` cannot even make the writes its task asks for:
+# the edit waits for an approval nobody can give in -p mode, and the task ends in review. Under
+# acceptEdits the same smoke passed 7/7 and the write outside the task's paths was still refused by
+# the guard hook (swarm/guard.py), which enforces `paths:` whatever the mode. `--permission-mode
+# manual` stays available for sessions where a person is present to approve.
+DEFAULT_PERMISSION_MODE = "acceptEdits"
 DEFAULT_BASH = [
     "npm test *", "npm run test *", "npm run lint *", "npm run build *", "npx tsc *",
     "pnpm test *", "yarn test *", "pytest *", "python -m pytest *", "python3 -m pytest *",
@@ -832,8 +834,9 @@ def main(argv=None):
     r.add_argument("--only", help="comma-separated task note names to run")
     r.add_argument("--model", default="sonnet", help="default model when a note has none (default sonnet)")
     r.add_argument("--permission-mode", default=DEFAULT_PERMISSION_MODE,
-                   help="manual (default: only the allowed tools run; anything that would ask is refused, since nobody "
-                        "answers in -p mode), acceptEdits, dontAsk (docs/0.5.0/PERMISSION-MODES.md)")
+                   help="acceptEdits (default; the guard hook still refuses writes outside the task's paths), "
+                        "manual (only with a person present: headless, it blocks even the task's own writes), "
+                        "dontAsk (docs/0.5.0/PERMISSION-MODES.md)")
     r.add_argument("--allow-bash", help="extra comma-separated Bash patterns, e.g. 'npm run e2e *,uv run *'")
     r.add_argument("--bash-all", action="store_true", help="allow every shell command (git still blocked)")
     r.add_argument("--timeout-min", type=int, default=45)

@@ -43,6 +43,8 @@ SCHEMA = {
                 "approval": {"enum": ["pending", "approved", "rejected", "stale"]},
             },
             "owner_fields": ["approved"],
+            "optional": ["task", "created", "generator", "sealed_at", "sealed_sha256", "approval", "approved_by",
+                         "approved_at", "rejected_reason", "jev_done", "jev_checked", "jev_verify"],
             "written_by": "the worker (pai handoff new); seal adds status, sealed_sha256, approval",
         },
         "decision": {
@@ -55,14 +57,60 @@ SCHEMA = {
                 "pai_sha256": {"pattern": HEX["sha256"]},
             },
             "owner_fields": ["choice", "choice_note"],
+            "optional": ["round", "id", "question", "recommendation", "default", "deadline", "blocks", "answer",
+                         "updated"],
             "written_by": "pai round (round lane, swarm/round_vault.py)",
         },
         "lane": {
             "match": {"pai_managed": "lane/1"},
             "required": ["pai_managed", "round", "status", "pai_sha256"],
-            "fields": {"needs_owner": {"enum": ["true", "false"]}, "pai_sha256": {"pattern": HEX["sha256"]}},
+            "fields": {"needs_owner": {"enum": ["true", "false"]}, "pai_sha256": {"pattern": HEX["sha256"]},
+                       "queued": {"enum": ["true", "false"]}},
             "owner_fields": [],
-            "written_by": "pai round (round lane)",
+            "optional": ["project", "lane", "dialog", "queued", "current_id", "last_cp", "totals", "blockers",
+                         "needs_owner", "needs_owner_why", "branch", "worktree_state", "updated"],
+            "written_by": "pai round (round lane, swarm/round_vault.py: PAI/rounds/<ROUND>/<lane>.md)",
+        },
+        # R6-COR-078: the other notes the round and prompts lanes write (F3 of the 2026-11-22 acceptance)
+        "round": {
+            "match": {"pai_managed": "round/1"},
+            "required": ["pai_managed", "round", "status", "pai_sha256"],
+            "fields": {"status": {"enum": ["open", "closed"]}, "pai_sha256": {"pattern": HEX["sha256"]}},
+            "owner_fields": [],
+            "optional": ["project", "base", "lanes", "needs_owner", "round_json", "updated"],
+            "written_by": "pai round (round lane, swarm/round_vault.py: PAI/rounds/<ROUND>/ROUND.md)",
+        },
+        "home": {
+            "match": {"pai_managed": "home/1"},
+            "required": ["pai_managed", "pai_sha256"],
+            "fields": {"pai_sha256": {"pattern": HEX["sha256"]}},
+            "owner_fields": [],
+            "optional": ["title", "rounds_open", "lanes_need_owner", "decisions_open", "handoffs_unapproved", "updated"],
+            "written_by": "pai round (round lane, swarm/round_vault.py: PAI/Home.md)",
+        },
+        "integration": {
+            "match": {"pai_managed": "integration/1"},
+            "required": ["pai_managed", "round", "pai_sha256"],
+            "fields": {"pai_sha256": {"pattern": HEX["sha256"]}},
+            "owner_fields": [],
+            "optional": ["base", "order", "patches", "conflicts", "hot_files", "test_exit", "integrated_at", "updated"],
+            "written_by": "pai round integrate (round lane, swarm/round_integrate.py: INTEGRATION.md)",
+        },
+        "log": {
+            "match": {"pai_managed": "log/1"},
+            "required": ["pai_managed", "date", "pai_sha256"],
+            "fields": {"date": {"pattern": r"\d{4}-\d\d-\d\d"}, "pai_sha256": {"pattern": HEX["sha256"]}},
+            "owner_fields": [],
+            "optional": ["entries", "updated"],
+            "written_by": "pai round (round lane, swarm/round_board.py: the daily log)",
+        },
+        "eval": {
+            "match": {"template": "pai-eval/1"},
+            "required": ["type", "template", "round", "contract"],
+            "fields": {"type": {"enum": ["pai-eval"]}},
+            "owner_fields": [],
+            "optional": ["contract_version", "artifacts", "mean_pass", "all_pass", "behaviour_warnings", "generated"],
+            "written_by": "pai prompt eval --note (prompts lane, pai/prompteval.py)",
         },
         "request": {
             "match": {"pai_managed": "request/1"},
@@ -158,6 +206,13 @@ def front_matter(text):
 def _unquote(v):
     v = v.strip()
     return v[1:-1] if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"" else v
+
+
+def known_fields(kind):
+    """Every key a note of KIND may carry: match, required, typed, owner and optional keys."""
+    spec = SCHEMA["kinds"][kind]
+    return (set(spec["match"]) | set(spec["required"]) | set(spec["fields"]) | set(spec["owner_fields"])
+            | set(spec.get("optional", [])))
 
 
 def kind_of(fm):
@@ -291,7 +346,9 @@ def lint(vault, roots=LINT_ROOTS, decision_check="auto"):
         out.append({"path": "", "level": "INFO", "message": "decision sha checks need the round lane's "
                     "swarm/round_vault.py in this tree; only the form and the choice were checked"})
     out.append({"path": "", "level": "INFO", "message": "PAI notes checked: " + (
-        ", ".join("%s %d" % kv for kv in sorted(counts.items())) or "none")})
+        ", ".join("%s %d" % kv for kv in sorted(counts.items())) or "none yet (notes are recognised by "
+        "their front matter, see `pai vault schema`; the prompt library and templates are not notes. `pai handoff "
+        "seal` and `pai round status --write-vault` write the first ones)")})
     return out
 
 

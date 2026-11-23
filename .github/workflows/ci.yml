@@ -70,9 +70,9 @@ jobs:
       - name: Manuals match the commands (doc_check)
         if: runner.os == 'Linux'
         timeout-minutes: 3
-        run: |
-          # until the docs lane's tools/doc_check.py is merged, say so instead of failing
-          if [ -f tools/doc_check.py ]; then python -B tools/doc_check.py; else echo "doc_check: not in this tree yet"; fi
+        # R6-COR-079: --schema also checks every front-matter field the manuals and templates name
+        # against docs/frontmatter.schema.json (`pai vault schema`)
+        run: python -B tools/doc_check.py --schema docs/frontmatter.schema.json
 
       - name: Build both release archives
         timeout-minutes: 3

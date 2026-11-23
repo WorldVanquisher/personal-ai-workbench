@@ -2,19 +2,38 @@
 
 A feature module describes its subcommands once, as a Feature: `add(sub, parsers)` adds its
 argparse parsers (`sub` is the top-level subparsers object; `parsers` names the existing ones a
-feature may extend, such as "handoff" and "handoff new"), and `run(a, load_project)` runs the
-command when it is the feature's, returning an exit code, or returns None when it is not. pai/cli.py
-then needs one `commands.use(...)` line per feature, plus the two calls below, instead of a parser
-block and a dispatch branch per command, so lanes adding commands do not edit the same lines.
+feature may extend: "init", "context", "handoff", "handoff new"), and `run(a, load_project)` runs the
+command when it is the feature's, returning an exit code, or returns None when it is not. A feature
+that must act inside another command gives `hooks`, {event: fn(a)}; the events are HOOK_EVENTS
+(R6-COR-081: `pai init` calls "init before-write" after its preview and "init after-write" after the
+configuration is written). pai/cli.py then needs one `commands.use(...)` line per feature instead of
+a parser block, a dispatch branch and hook calls per command, so lanes adding commands do not edit
+the same lines. The usage line of `pai --help` lists whatever is registered (R6-COR-080).
 Standard library only.
+
+A feature in another module, for example the prompt library (pai/promptlib.py):
+
+    CLI = commands.Feature(
+        "prompt",
+        add=lambda sub, parsers: (add_parser(sub), parsers["init"].add_argument("--prompts", ...)),
+        run=lambda a, load_project: main(a) if a.cmd == "prompt" else None,
+        hooks={"init before-write": lambda a: init_hook(a, "before-write"),
+               "init after-write": lambda a: init_hook(a, "after-write")})
+
+and in pai/cli.py, next to the other registrations: `commands.use(promptlib.CLI)`.
 """
 
 FEATURES = []
+ADDED = {}  # feature name -> the top-level commands its add() created (filled by add_all)
+HOOK_EVENTS = ("init before-write", "init after-write")
 
 
 class Feature:
-    def __init__(self, name, add, run):
-        self.name, self.add, self.run = name, add, run
+    def __init__(self, name, add, run, hooks=None):
+        unknown = set(hooks or {}) - set(HOOK_EVENTS)
+        if unknown:
+            raise ValueError("unknown hook event(s) %s; known: %s" % (", ".join(sorted(unknown)), ", ".join(HOOK_EVENTS)))
+        self.name, self.add, self.run, self.hooks = name, add, run, dict(hooks or {})
 
     def __repr__(self):
         return "Feature(%r)" % self.name
@@ -29,7 +48,18 @@ def use(feature):
 def add_all(sub, parsers):
     """Add every registered feature's parsers, in registration order."""
     for f in FEATURES:
+        before = set(sub.choices)
         f.add(sub, parsers)
+        ADDED[f.name] = [c for c in sub.choices if c not in before]
+
+
+def hook(event, a):
+    """Run every registered feature's hook for EVENT (one of HOOK_EVENTS), in registration order."""
+    if event not in HOOK_EVENTS:
+        raise ValueError("unknown hook event %r" % event)
+    for f in FEATURES:
+        if event in f.hooks:
+            f.hooks[event](a)
 
 
 def dispatch(a, load_project):
@@ -131,11 +161,13 @@ CONTEXT_WORKTREE = Feature("context-worktree", _context_add, _context_run)
 SECRETS = (
     # (name, what it is for, where it belongs)
     ("TYPESAFE_API_KEY", "JEV (optional judgments)", "the environment, or ~/.config/pai/jev.env (mode 600, sourced "
-     "with `set -a; . ~/.config/pai/jev.env; set +a`), or the credential store `pai init` offers"),
+     "with `set -a; . ~/.config/pai/jev.env; set +a`), or the system credential store (secret-tool on Linux, the macOS Keychain), which the "
+     "workbench's interactive `pai init` offers to fill"),
     ("ANTHROPIC_API_KEY", "real Claude Code workers (or your `claude` login)", "the environment of the shell that "
      "starts the worker, or `claude` login; never a pai file, note or manifest"),
     ("ANTHROPIC_CUSTOM_HEADERS", "an organization key not scoped to a workspace (anthropic-workspace-id: ...)",
-     "the environment of that shell (tools/real_agent_smoke.sh says when it is needed)"),
+     "the environment of that shell, as `anthropic-workspace-id: <workspace id>`; needed only when the API answers "
+     "400 \"This API key is not scoped to a workspace\""),
     ("GH_TOKEN", "GitHub for `pai worktree publish` / `pai pr` (or `gh auth login`)", "gh's own login, or the environment"),
 )
 SECRET_FILES = (("~/.config/pai/jev.env", "TYPESAFE_API_KEY"),)

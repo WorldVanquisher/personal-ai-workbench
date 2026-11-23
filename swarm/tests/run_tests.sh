@@ -42,10 +42,10 @@ FAKE_LOG="$T/fake.log" python3 "$ROOT/pai_swarm.py" run --repo "$T/repo" --tasks
 [ "$(git -C "$T/repo" rev-parse HEAD)" = "$HEAD0" ] && ok "no commits made" || bad "HEAD moved"
 [ "$(git -C "$T/repo" symbolic-ref --short HEAD)" = "swarm/t1" ] && ok "workers ran on the new task branch" || bad "branch"
 [ ! -e "$T/home/locks" ] || [ -z "$(ls "$T/home/locks")" ] && ok "worktree lock released after the run" || bad "lock left behind"
-python3 - "$T/fake.log" <<'EOF' && ok "default permission mode is manual (R6-COR-068)" || bad "permission mode"
+python3 - "$T/fake.log" <<'EOF' && ok "default permission mode is acceptEdits (R6-COR-077, D-R6-1)" || bad "permission mode"
 import json, sys
 modes = {r.get("permission_mode") for r in (json.loads(l) for l in open(sys.argv[1])) if not r.get("extra")}
-assert modes == {"manual"}, modes
+assert modes == {"acceptEdits"}, modes
 EOF
 python3 - "$T/home/jev-usage.jsonl" <<'EOF' && ok "worker cost in the usage ledger (R6-COR-071)" || bad "ledger"
 import json, sys

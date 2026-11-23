@@ -52,6 +52,18 @@ class CiCoverage(unittest.TestCase):
         for step in ("core", "workbench", "headless", "archives", "bundle", "doc-check"):
             self.assertEqual(verify.ci_covers(step, self.runs), "yes", step)
 
+    def test_doc_check_runs_with_the_schema(self):  # R6-COR-079
+        cmd = verify.doc_check_cmd(ROOT)
+        self.assertEqual(cmd[1:], ["--schema", os.path.join(ROOT, "docs", "frontmatter.schema.json")])
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(verify.doc_check_cmd(d))
+            os.makedirs(os.path.join(d, "tools"))
+            open(os.path.join(d, "tools", "doc_check.py"), "w").close()
+            self.assertEqual(verify.doc_check_cmd(d), [os.path.join(d, "tools", "doc_check.py")], "no schema: no flag")
+
+    def test_the_doc_check_step_in_ci_uses_the_schema(self):  # R6-COR-079
+        self.assertIn("doc_check.py --schema docs/frontmatter.schema.json", self.runs)
+
     def test_local_only_steps_say_so(self):
         for step in ("quickstart", "console", "path-zsh", "no-such-step"):
             self.assertEqual(verify.ci_covers(step, self.runs), "no", step)

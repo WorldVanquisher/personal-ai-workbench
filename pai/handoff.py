@@ -271,10 +271,12 @@ def layout_warnings(project):
     memory, inbox = os.path.realpath(project.memory), os.path.realpath(project.inbox)
     if memory != inbox and inside(memory, inbox):
         return [f"the memory package ({project.memory_rel}) is inside the inbox ({project.inbox_rel}): "
-                "handoff discovery will see it as a folder without HANDOFF.md; keep them side by side"]
+                "`pai handoff list` and `pai context` will find it there, report it as a folder without HANDOFF.md and "
+                "skip it; to avoid that, give --memory a folder beside the inbox (for example Memory/PAI-001)"]
     if memory != inbox and inside(inbox, memory):
         return [f"the inbox ({project.inbox_rel}) is inside the memory package ({project.memory_rel}): "
-                "unapproved handoffs would sit among human decisions; keep them side by side"]
+                "unapproved handoffs would sit among the notes you approved; give --inbox a folder beside the memory "
+                "package (for example \"Agent Inbox\")"]
     if memory == inbox:
         return [f"the memory package and the inbox are the same folder ({project.inbox_rel}); keep them apart"]
     return []

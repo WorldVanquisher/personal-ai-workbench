@@ -150,7 +150,7 @@ class Workflow(unittest.TestCase):
         steps = {s.get("name"): s for s in self.doc["jobs"]["test"]["steps"]}
         step = steps["Manuals match the commands (doc_check)"]
         self.assertEqual(step["if"], "runner.os == 'Linux'")
-        self.assertIn("python -B tools/doc_check.py", step["run"])
+        self.assertIn("python -B tools/doc_check.py --schema docs/frontmatter.schema.json", step["run"])  # R6-COR-079
 
     def test_the_parser_rejects_broken_yaml(self):
         for bad in ("a: 1\n\tb: 2\n", "a: 1\na: 2\n", "a:\n  b: 1\n   c: 2\n", "jobs:\n  x:\n    - a\n   - b\n"):

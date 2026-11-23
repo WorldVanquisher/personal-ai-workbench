@@ -24,8 +24,16 @@
 #                               export ANTHROPIC_CUSTOM_HEADERS="anthropic-workspace-id: <workspace id>"
 #                             (2026-11-22: the first run failed this way, the second passed with it).
 #   PAI_SMOKE_MODEL           default haiku.     PAI_SMOKE_BUDGET   default 0.5 (USD, per worker).
-#   PAI_SMOKE_PERMISSION_MODE default manual (pai_swarm's default); acceptEdits, dontAsk to compare.
+#   PAI_SMOKE_PERMISSION_MODE default acceptEdits (pai_swarm's default); manual, dontAsk to compare.
 #   TYPESAFE_API_KEY          optional: adds --jev-verify (a few hundred tokens).
+#
+# Recorded real runs (R6-COR-083; reported-by-mastermind, 2026-11-22, WSL Ubuntu, Claude Code 2.1.330, haiku):
+#   PAI_SMOKE_PERMISSION_MODE=manual       6 passed, 1 failed ($0.004): the worker could not write SMOKE.md,
+#                                          the write the task asks for; the permission system wanted a person
+#                                          to approve it, and headless (-p) there is nobody to ask.
+#   PAI_SMOKE_PERMISSION_MODE=acceptEdits  7/7 passed ($0.002); OUTSIDE.md was still refused by the guard
+#                                          hook; JEV scored done 0.91, checked 0.96.
+#   That is why the default went back to acceptEdits (R6-COR-077, owner decision D-R6-1 = A).
 # Exit: 0 every check passed; 1 a check failed; 2 cannot start (missing tool, worker never ran).
 set -uo pipefail
 
@@ -90,7 +98,7 @@ both results. Do not commit.
 EOF
 args=(run --repo "$repo" --tasks "$vault/Tasks" --task-id smoke-1 --workers 1 --pai smoke --pai-bin "$here/bin/pai.py"
       --pai-config "$cfg" --model "${PAI_SMOKE_MODEL:-haiku}" --max-budget-usd "${PAI_SMOKE_BUDGET:-0.5}"
-      --permission-mode "${PAI_SMOKE_PERMISSION_MODE:-manual}" --allow-bash 'grep *' --timeout-min 10)
+      --permission-mode "${PAI_SMOKE_PERMISSION_MODE:-acceptEdits}" --allow-bash 'grep *' --timeout-min 10)
 [ -n "${TYPESAFE_API_KEY:-}" ] && args+=(--jev-verify)
 if [ "$fake" = 1 ]; then
   args+=(--claude-bin "$here/swarm/tests/fake_claude.py"); export FAKE_LOG="$T/fake.log" FAKE_SLEEP=0.2

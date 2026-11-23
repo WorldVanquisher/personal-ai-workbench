@@ -1,4 +1,4 @@
-"""Command line: `python3 -m pai {init,doctor,check,context,handoff,install,queue} …`."""
+"""Command line: `python3 -m pai COMMAND …` (`pai --help` lists the commands)."""
 
 import argparse
 import os
@@ -16,7 +16,7 @@ from pai import promptlib  # R6-PRM-011: the prompt library (pai prompt ...; pai
 INIT_EPILOG = """examples:
   preview (writes nothing):
     pai init flh --repo /abs/path/repo --vault /abs/path/vault \\
-      --memory "Agent Inbox/PAI-001-X" --inbox "Agent Inbox" \\
+      --memory "Memory/PAI-001-X" --inbox "Agent Inbox" \\
       --markdown-root "30 Projects" --project-note "30 Projects/Project.md"
   (Windows: --repo "C:\\path\\to\\repo" --vault "D:\\path\\to\\vault"; on PowerShell continue lines with `)
   then write it, exactly as previewed:
@@ -31,7 +31,7 @@ def _parser():
     p.add_argument("--config", help="configuration file (default: $PAI_CONFIG, else %s)" % (
         config.DEFAULT_CONFIG.replace("%", "%%") if config.PACKAGED else "pai.local.toml in the pai directory"))
     p.add_argument("--version", action="version", version=f"pai {__version__}")
-    sub = p.add_subparsers(dest="cmd", required=True, metavar="{init,doctor,check,context,handoff,install,queue}")
+    sub = p.add_subparsers(dest="cmd", required=True)  # the usage line lists every command (R6-COR-080)
 
     i = sub.add_parser("init", help="create a local configuration from explicit paths (preview unless --write)",
                        epilog=INIT_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -95,7 +95,7 @@ def _parser():
                    "write nothing")
     n.add_argument("--keep-private", action="store_true", help="keep agent session links and credential-like text "
                    "(removed by default, so a handoff can be shared)")
-    commands.add_all(sub, {"handoff": hs, "handoff new": n, "context": c})
+    commands.add_all(sub, {"init": i, "handoff": hs, "handoff new": n, "context": c})
     workqueue.add_parser(sub)
     promptlib.add_parser(sub)
     return p
@@ -120,11 +120,13 @@ def _init(a):
         print(f"#   {s.status:8} {s.kind:12} {s.label}{'  (' + s.reason + ')' if s.reason else ''}")
     print("".join(f"# WARNING: {w}\n" for w in handoff.layout_warnings(project)), end="")  # R6-COR-016
     promptlib.init_hook(a, "before-write")
+    commands.hook("init before-write", a)  # registered features (R6-COR-081)
     if not a.write:
         print(f"\n# Re-run with --write to create {path}. Existing files are never overwritten.")
         return 0
     initcfg.write(path, text)
     promptlib.init_hook(a, "after-write")
+    commands.hook("init after-write", a)
     print(f"\n# Wrote {path} ({initcfg.permission_note()}). Next: pai doctor {a.project}")
     return 0
 
