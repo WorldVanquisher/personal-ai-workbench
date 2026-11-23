@@ -567,12 +567,16 @@ def parser():
     la.add_argument("--paste-prompt", action="store_true", help="paste the lane's prompt once the input box is ready")
     la.add_argument("--wait", type=float, default=60.0, help="seconds to wait for the input box (with --paste-prompt)")
     la.add_argument("--write", action="store_true")
+    la.add_argument("--allow-unbracketed", action="store_true", help="paste even when this tmux cannot tell whether the program asked for bracketed paste and it is not "
+                    "claude, node or codex (each line may then be entered on its own)")
     nx = sub.add_parser("next", help="a short resume message from the lane's latest RESTART.md")
     nx.add_argument("lane")
     nx.add_argument("--round-file")
     nx.add_argument("--send", action="store_true", help="send it with the same checks as pai round inject")
     nx.add_argument("--no-enter", action="store_true", help="with --send: paste only, do not press Enter")
     nx.add_argument("--queue-ok", action="store_true", help="with --send: let a busy Claude queue it")
+    nx.add_argument("--allow-unbracketed", action="store_true", help="paste even when this tmux cannot tell whether the program asked for bracketed paste and it is not "
+                    "claude, node or codex (each line may then be entered on its own)")
     ij = sub.add_parser("inject", help="one message into a lane, only when safe (no dialog, no draft, window there)")
     ij.add_argument("lane")
     ij.add_argument("--file", required=True, help="the message (UTF-8 text)")
@@ -583,6 +587,8 @@ def parser():
     ij.add_argument("--again", action="store_true", help="send a text that was already sent once more")
     ij.add_argument("--no-enter", action="store_true", help="paste only; Enter is yours")
     ij.add_argument("--wait", type=float, default=10.0, help="seconds to wait for the lane to become ready")
+    ij.add_argument("--allow-unbracketed", action="store_true", help="paste even when this tmux cannot tell whether the program asked for bracketed paste and it is not "
+                    "claude, node or codex (each line may then be entered on its own)")
     b = sub.add_parser("brief", help="a 1-2k token package for a fresh mastermind")
     b.add_argument("round_file", nargs="?")
     b.add_argument("--out", help="also write it to this file")
@@ -627,6 +633,7 @@ def parser():
     ig.add_argument("--order", help="lane order, comma-separated (default: ROUND.json's)")
     ig.add_argument("--proposals", choices=("all", "none"), default="all")
     ig.add_argument("--write", action="store_true", help="write INTEGRATION.md / INTEGRATION.json to the state folder")
+    ig.add_argument("--resolutions", help="approved ways to settle listed conflicts (pai-resolutions/1 JSON; off by default)")
     w = sub.add_parser("web", help="the read-only round board in the browser (127.0.0.1 only)")
     w.add_argument("round_file", nargs="?")
     w.add_argument("--port", type=int, default=0)

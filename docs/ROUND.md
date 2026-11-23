@@ -236,7 +236,7 @@ prompt.
 ## pai round launch
 
 ```
-pai round launch LANE [--paste-prompt] [--wait SECONDS] [--write]
+pai round launch LANE [--paste-prompt] [--wait SECONDS] [--allow-unbracketed] [--write]
 ```
 
 - Opens the lane's tmux window in its worktree. If the round's tmux session does not exist,
@@ -263,6 +263,28 @@ Each step is recorded in `<work_dir>/round-dispatch.json`, using dispatch.py's w
 - Nothing is pasted while the trust dialog is on screen: the keys would answer it.
 - If the trust dialog appears, or the Claude process changes, between the paste and Enter, Enter
   is not pressed and the record becomes `unknown`.
+
+### tmux version and bracketed paste
+
+A multi-line prompt must arrive as one bracketed paste; otherwise each line could be entered on
+its own. Whether the program in the pane asked for bracketed paste is something only **tmux 3.8
+and later** can report (`#{bracket_paste_flag}`). tmux 3.6, the version on Ubuntu and WSL, and
+3.5a cannot.
+
+| tmux | What launch, inject and `next --send` do |
+|---|---|
+| 3.8 or later | Use tmux's answer. If tmux says bracketed paste is off, they refuse (`--allow-unbracketed` overrides). |
+| below 3.8 | Infer it from the program. If `#{pane_current_command}` is `claude`, `node` or `codex`, or the round status found the lane's Claude process in the pane's process tree, they send. A lane started by `pai round launch` runs claude under a login shell, so the pane command reads `bash` and the process tree decides. Any other program is refused unless `--allow-unbracketed`. |
+
+How it was decided is recorded with each send, as `bracketed_by` in the ROUND.json event and in
+`round-dispatch.json`. Values are `reported by tmux`, `inferred from the command name (…)` or
+`--allow-unbracketed (…)`. `--dry-run` prints it too. tmux still sends the bracketed-paste
+markers whenever the program asked for them, so with Claude Code the inference changes nothing
+on the wire. It only lets pai stop refusing.
+
+The tests cover both paths. `test_round_launch` and `test_round_inject` run once against the real
+tmux, and once more (`LaunchTmux36`, `InjectTmux36`) through a wrapper whose `tmux -V` says 3.6
+and which blanks `#{bracket_paste_flag}`, as 3.6 does.
 
 ## pai round next
 
@@ -535,6 +557,14 @@ Markdown viewer), and check:
 5. **`PAI/log/<date>.md`**: 4 columns (时间, 轮次, 决定, 理由).
 6. **Sync**: no `*.sync-conflict-*` copies under `PAI/`. If one appears, PAI stops writing that
    note until you remove the copy.
+7. **Links inside tables** (`[[path\|label]]`). PAI escapes the pipe in a table link so that
+   Markdown does not read it as a column break. In Obsidian's reading view **and** live preview,
+   check one such link in `PAI/Home.md` and one in `ROUND.md`:
+   - only the label shows (`R6-20261122`, `core`, `D7`), with no `\`, no `|` and no path;
+   - clicking it opens the right note;
+   - the row keeps its column count, and the cell to its right holds what its header says.
+   If Obsidian shows `\` or splits the cell, write down the Obsidian version in BOARD.md. A
+   plain `[[path]]` link without a label is the fallback.
 
 Anything wrong: note it in the round's BOARD.md, below the generated block. That part is yours
 and is never overwritten.
@@ -542,7 +572,7 @@ and is never overwritten.
 ## pai round inject
 
 ```
-pai round inject LANE --file MESSAGE.md [--dry-run] [--queue-ok] [--again] [--no-enter] [--wait S]
+pai round inject LANE --file MESSAGE.md [--dry-run] [--queue-ok] [--again] [--no-enter] [--wait S] [--allow-unbracketed]
 ```
 
 This puts one message into a lane's Claude Code session, the way the mastermind did it by hand
@@ -558,7 +588,8 @@ in R6, but only when that is safe. In order, it checks:
 5. Claude is idle. With `--queue-ok`, a working Claude is accepted as well (Claude queues the
    message), but a draft still refuses.
 
-Then it sends one bracketed paste. Before pressing Enter it looks again: if a dialog appeared or
+Then it sends one bracketed paste. On tmux below 3.8, see *tmux version and bracketed paste*
+under launch. Before pressing Enter it looks again: if a dialog appeared or
 the Claude process changed, Enter is not pressed and the send is recorded as `unknown`.
 
 Every send is recorded twice:
@@ -614,7 +645,7 @@ views:
 ## pai round integrate
 
 ```
-pai round integrate [ROUND.json] --plan [--order L1,L2,...] [--proposals all|none] [--test] [--write]
+pai round integrate [ROUND.json] --plan [--order L1,L2,...] [--proposals all|none] [--resolutions FILE] [--test] [--write]
 ```
 
 This is a rehearsal of the merge, on a scratch copy and never on a branch. It reads only from the
@@ -666,4 +697,49 @@ keeps the exit code, each step's status and the tail of the output.
 round's state folder. The owner approves the merge plan there; each lane is then previewed with
 `pai round prplan` and published by the owner with `pai worktree publish`.
 
-Exit code: 1 when any conflict remains or the tests fail.
+### Stale data is refused
+
+R6 showed the problem (review finding F6). The round lane ran integrate at 20:25Z. docs and core
+sealed their finals at 20:34–20:36Z, and prompts was not in the plan. INTEGRATION.md looked
+complete, but it was out of date. integrate now marks a run **STALE** when:
+
+- a lane's queue (`<work_dir>/queue.log`) has a checkpoint event newer than the checkpoint folder
+  the plan used. The event's `handoff` path names another folder, or, without a path, the event is
+  more than 10 minutes newer than that folder;
+- a lane of ROUND.json is not in `--order`.
+
+A stale run still writes its report, but INTEGRATION.md starts with a `STALE` warning listing
+each reason, front matter `stale: true`, and the exit code is **3**. `pai round brief` also marks
+the last integration STALE when any lane checkpointed after it. Rerun after every lane's final,
+covering all lanes.
+
+### Approved resolutions (`--resolutions FILE`, off by default)
+
+Some conflicts have a known answer that the owner or the mastermind already approved. For
+example, in the R6 merge, `pai/cli.py` kept both core's registry and prompts' promptlib. Write it
+down once, and integrate applies it instead of reporting the same conflict again:
+
+```json
+{"format": "pai-resolutions", "version": 1, "approved_by": "mastermind",
+ "resolutions": [
+   {"file": "pai/cli.py", "how": "both", "patch": "prompts-lane",
+    "note": "core 的注册表和 prompts 的 promptlib 两边都保留", "by": "owner: Dispatch as recommended"}
+ ]}
+```
+
+| `how` | What the file becomes |
+|---|---|
+| `both` | `git merge-file --union` of the copy before this patch, the base, and the patch's own result on the base. Both sides' lines are kept, with no conflict markers. |
+| `ours` | the copy as it was before this patch. The patch's change to this file is dropped. |
+| `theirs` | the patch's own result on the base. Earlier patches' changes to this file are dropped. |
+| `file` | the content at `path` (relative to the list), checked against `sha256` when given |
+
+- `patch` (optional) limits an entry to one patch name, such as `prompts-lane` or
+  `docs-doctor-merged`.
+- A settled file is reported as `ok (resolved: HOW)`.
+- INTEGRATION.md lists every file settled this way under *按已审定的解决方式处理*, with the
+  list's path and sha256 and who approved it.
+- Files the list does not name stay conflicts. `both` is a textual union: for code, check the
+  result with `--test`, or use `file` with the resolved content.
+
+Exit code: 3 when the run is STALE; otherwise 1 when any conflict remains or the tests fail.

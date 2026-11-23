@@ -1,6 +1,12 @@
 """pai round launch / next with a fake `claude` on an isolated tmux server: the login-shell
 command, idempotent starts, one bracketed prompt paste recorded as sending/typed/sent, never a
-second paste, never a paste or Enter while the folder-trust dialog is up."""
+second paste, never a paste or Enter while the folder-trust dialog is up.
+
+By tmux version: 3.8 and later report #{bracket_paste_flag}, so the paste goes through as
+"reported by tmux". Below 3.8 the flag is unknown and the paste is let through only because the
+pane runs Claude ("inferred from the command name"). LaunchTmux36 runs every test again through a
+wrapper whose `tmux -V` says 3.6 and which blanks #{bracket_paste_flag}, as 3.6 does."""
+import re
 import json
 import os
 import shutil
@@ -22,11 +28,41 @@ import round_status as rs  # noqa: E402
 
 needs_tmux = unittest.skipUnless(shutil.which("tmux") and os.path.isdir("/proc") and shutil.which("bash"),
                                  "needs tmux, bash and /proc")
+
+
+def tmux_version(binary):
+    p = subprocess.run([binary, "-V"], capture_output=True, text=True)
+    m = re.search(r"(\d+)\.(\d+)", p.stdout)
+    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+
+OLD_TMUX = """#!%s
+import os, sys
+args = sys.argv[1:]
+if args == ["-V"]:
+    print("tmux 3.6")
+    sys.exit(0)
+os.execv(%r, [%r] + [a.replace("#{bracket_paste_flag}", "") for a in args])
+"""
+
+
+def fake_tmux_36(folder):
+    """A `tmux` that reports 3.6 and cannot tell bracketed paste, around the real one."""
+    real = shutil.which("tmux")
+    path = os.path.join(folder, "tmux")
+    with open(path, "w") as f:
+        f.write(OLD_TMUX % (sys.executable, real, real))
+    os.chmod(path, 0o755)
+    return path
+
+
 PROMPT = "你是 R9 的 worker。\n线名：alpha。\n第三行，带 \"引号\" 和 $HOME。\n"
 
 
 @needs_tmux
 class Launch(unittest.TestCase):
+    OLD = False  # True: run through the 3.6 wrapper
+
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="prl", dir="/tmp")
         self.addCleanup(shutil.rmtree, self.tmp, True)
@@ -39,7 +75,10 @@ class Launch(unittest.TestCase):
         shutil.copy(os.path.join(HERE, "fake_claude_round.py"), self.claude)
         os.chmod(self.claude, 0o755)
         env = {"PAI_ROUND_CLAUDE": self.claude, "PAI_ROUND_SHELL": shutil.which("bash"), "FAKE_ROUND_DIR": self.fake,
-               "HOME": self.tmp}
+               "HOME": self.tmp, "PAI_SWARM_TMUX": shutil.which("tmux")}
+        if getattr(self, "OLD", False):
+            env["PAI_SWARM_TMUX"] = fake_tmux_36(bindir)
+        self.old_tmux = tmux_version(env["PAI_SWARM_TMUX"]) < (3, 8)
         old = {k: os.environ.get(k) for k in env}
         os.environ.update(env)
         self.addCleanup(lambda: [os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v) for k, v in old.items()])
@@ -119,6 +158,12 @@ class Launch(unittest.TestCase):
         self.assertEqual(got[0]["text"].replace("\r", "\n"), PROMPT.rstrip("\n"))
         rec = rl.load_records(self.ln)["entries"]
         self.assertEqual([e["state"] for e in rec.values()], ["sent"])
+        how = list(rec.values())[0]["bracketed_by"]
+        if self.old_tmux:  # below 3.8: inferred from the program, and said so
+            self.assertTrue(how.startswith("inferred from the command name"), how)
+            self.assertIsNone(list(rec.values())[0]["bracketed"])
+        else:
+            self.assertEqual(how, "reported by tmux")
         # again: the record is final, nothing is pasted twice
         self.assertEqual(self.launch(paste=True), 1)
         self.assertIn("NOT SENT: this prompt was already sent", "\n".join(self.lines))
@@ -186,6 +231,50 @@ class Launch(unittest.TestCase):
     def test_next_without_restart(self):
         with self.assertRaises(rnd.RoundError):
             rl.next_message(self.r, self.ln)
+
+
+class LaunchTmux36(Launch):
+    OLD = True
+
+
+class Bracketing(unittest.TestCase):
+    """rl.bracketing() decides without a pane: tmux's answer when it has one, else the program."""
+    def decide(self, flag, cmd, agent_pid=None, allow=False):
+        old = rl.panes.info, rl.pane_command
+        self.addCleanup(lambda: (setattr(rl.panes, "info", old[0]), setattr(rl, "pane_command", old[1])))
+        rl.panes.info = lambda tmux, pane: {"bracketed": flag}
+        rl.pane_command = lambda tmux, pane: cmd
+        return rl.bracketing(None, "%1", {"agent_pid": agent_pid}, allow)
+
+    def test_tmux_38_answer_is_used_as_is(self):
+        self.assertEqual(self.decide(True, "bash"), (False, "reported by tmux"))
+        self.assertFalse(self.decide(False, "claude")[0])  # tmux says off: refused even for claude
+        self.assertTrue(self.decide(False, "claude", allow=True)[0])
+
+    def test_below_38_claude_node_codex_are_inferred(self):
+        for cmd in ("claude", "node", "codex"):
+            ok, how = self.decide(None, cmd)
+            self.assertTrue(ok)
+            self.assertIn("inferred from the command name (pane_current_command=%s" % cmd, how)
+        ok, how = self.decide(None, "bash", agent_pid=4242)  # pai round launch: claude under a login shell
+        self.assertTrue(ok)
+        self.assertIn("Claude process pid 4242", how)
+
+    def test_below_38_other_programs_need_allow_unbracketed(self):
+        ok, why = self.decide(None, "vim")
+        self.assertFalse(ok)
+        self.assertIn("--allow-unbracketed", why)
+        ok, how = self.decide(None, "vim", allow=True)
+        self.assertTrue(ok)
+        self.assertTrue(how.startswith("--allow-unbracketed"))
+
+    def test_the_wrapper_reports_36(self):
+        if not shutil.which("tmux"):
+            self.skipTest("needs tmux")
+        import tempfile as tf
+        d = tf.mkdtemp(prefix="prl36", dir="/tmp")
+        self.addCleanup(shutil.rmtree, d, True)
+        self.assertEqual(tmux_version(fake_tmux_36(d)), (3, 6))
 
 
 if __name__ == "__main__":

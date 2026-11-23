@@ -201,6 +201,13 @@ def integration_summary(r):
         rep.get("at"), ",".join(rep.get("order") or []), len(rep.get("patches") or []), len(rep.get("conflicts") or []),
         "退出码 %s" % t.get("exit") if t else "没跑")]
     out += ["- 冲突：%s（%s）" % (c["patch"], "、".join(c.get("files") or [])) for c in (rep.get("conflicts") or [])[:6]]
+    import round_integrate as ri
+    later = [ln["name"] for ln in r.get("lanes", []) if (ri.last_checkpoint_event(ln) or {}).get("at", "") > (rep.get("at") or "")]
+    if rep.get("stale") or later:
+        out[0] = "**STALE** " + out[0]
+        out += ["- STALE：%s" % x for x in (rep.get("stale") or [])[:4]]
+        if later:
+            out.append("- STALE：集成之后 %s 又交了 checkpoint，要重跑 pai round integrate" % "、".join(later))
     return out
 
 

@@ -1,6 +1,8 @@
 """pai round integrate with synthetic lane patches: checkpoint patch vs worktree fallback, order,
 conflicts reported and kept going, hot files, dependencies, a merge plan draft, --test on the
-merged copy, INTEGRATION.md as a managed note; the repository itself is never changed."""
+merged copy, INTEGRATION.md as a managed note; the repository itself is never changed. Stale data
+(a newer queue checkpoint, a lane left out) is flagged STALE with exit 3; an approved resolutions
+list (off by default) settles the conflicts it names."""
 import json
 import os
 import subprocess
@@ -17,7 +19,11 @@ VERIFY = '''import json, os, sys
 w = sys.argv[sys.argv.index("--work") + 1]
 os.makedirs(w)
 ok = open("README.md").read().count("alpha") == 1
-json.dump({"steps": [{"step": "core", "result": "PASS" if ok else "FAIL", "seconds": 1, "detail": "1 test"}]},
+import socket
+s = socket.socket(socket.AF_UNIX)
+s.bind(os.path.join(w, "tmux.sock"))  # verify's onboarding leaves a tmux socket behind
+s.close()
+json.dump({"steps": [{"step": "core", "result": "PASS" if ok else "FAIL", "seconds": 1, "detail": "1 test; logs in " + w}]},
           open(os.path.join(w, "verify-report.json"), "w"))
 print("core PASS" if ok else "core FAIL")
 sys.exit(0 if ok else 1)
@@ -103,6 +109,16 @@ class Integrate(RoundFixture):
         rep = self.run_it(order=["alpha"], proposals="none", test=True)
         self.assertEqual(rep["test"]["exit"], 0)
         self.assertEqual(rep["test"]["steps"]["core"]["status"], "PASS")
+        # verify ran in a short folder (tmux's socket under TMPDIR=<work>/tmp must fit 107 bytes); its logs are kept
+        final = os.path.join(os.path.dirname(rep["tree"]), "verify")
+        self.assertEqual(rep["test"]["steps"]["core"]["summary"], "1 test; logs in " + final)
+        self.assertTrue(os.path.isfile(os.path.join(final, "verify-report.json")))
+        self.assertFalse(os.path.exists(os.path.join(final, "tmux.sock")))  # a socket is not copied (it used to crash)
+
+    def test_verify_work_folder_is_short_enough_for_a_tmux_socket(self):
+        w = ri.short_work()
+        self.addCleanup(os.rmdir, w)
+        self.assertLessEqual(len(os.path.join(w, "v", "tmp", "tmux-%d" % os.getuid(), "default")), 107)
         rep = self.run_it(order=["alpha", "beta"], proposals="none", test=True)  # beta's partial apply leaves alpha's line
         self.assertIn(rep["test"]["exit"], (0, 1))
 
@@ -147,10 +163,143 @@ class Integrate(RoundFixture):
 
     def test_cli(self):
         code, out, err = self.run_round("integrate", self.path, "--plan", "--order", "alpha", "--proposals", "none", "--write")
-        self.assertEqual(code, 0, out + err)
+        self.assertEqual(code, 3, out + err)  # beta and gamma are left out: stale
         self.assertIn("0 conflict(s)", out)
+        self.assertIn("not in the plan: beta, gamma", out)
+        res = self.resolutions({"file": "README.md", "how": "both"})
+        code, out, err = self.run_round("integrate", self.path, "--plan", "--order", "alpha,beta,gamma", "--resolutions", res)
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("ok (resolved: both)", out)
         code, out, err = self.run_round("integrate", self.path)
         self.assertEqual(code, 2)
+
+    # -- stale data (R6-RND-083) ----------------------------------------------------------------
+    def queue_event(self, lane, handoff=None, at="2026-11-22T20:36:00Z"):
+        ln = {l["name"]: l for l in self.r["lanes"]}[lane]
+        os.makedirs(ln["work_dir"], exist_ok=True)
+        with open(os.path.join(ln["work_dir"], "queue.log"), "a") as f:
+            f.write(json.dumps({"at": at, "event": "checkpoint", "id": "R9-%s-009" % lane.upper(),
+                                "handoff": handoff}) + "\n")
+        return ln
+
+    def test_a_newer_queue_checkpoint_is_stale(self):
+        ln = self.queue_event("alpha", os.path.join(self.r["lanes"][0]["handoff_dir"], "cp-A", "HANDOFF.md"))
+        rep = self.run_it()
+        self.assertEqual(rep["stale"], [])  # the queue's checkpoint is the folder the plan used
+        self.queue_event("alpha", os.path.join(ln["handoff_dir"], "cp-B", "HANDOFF.md"))  # sealed after: not on disk yet
+        rep = self.run_it()
+        self.assertEqual(len(rep["stale"]), 1)
+        self.assertIn("alpha: queue checkpoint R9-ALPHA-009", rep["stale"][0])
+        self.assertIn("is cp-B, the plan used cp-A", rep["stale"][0])
+        ri.write(self.r, rep, self.lines.append)
+        with open(os.path.join(self.r["state_dir"], "INTEGRATION.md"), encoding="utf-8") as f:
+            text = f.read()
+        self.assertLess(text.index("STALE"), text.index("## 补丁"))  # at the top
+        self.assertNotIn("stale:", text.split("---")[1])  # front matter keys stay within core's schema
+
+    def test_a_checkpoint_event_without_a_handoff_path_is_judged_by_time(self):
+        self.queue_event("alpha", None, at="2099-01-01T00:00:00Z")
+        self.assertIn("is newer than cp-A", self.run_it()["stale"][0])
+        self.queue_event("alpha", None, at="2000-01-01T00:00:00Z")  # the newest event wins
+        self.assertEqual(self.run_it()["stale"], [])
+
+    def test_the_brief_says_stale_when_a_lane_checkpoints_after_the_integration(self):
+        import round_board as rb
+        rep = self.run_it()
+        ri.write(self.r, rep, self.lines.append)
+        self.assertNotIn("STALE", "\n".join(rb.integration_summary(self.r)))
+        self.queue_event("beta", None, at="2099-01-01T00:00:00Z")  # F6: a lane sealed its final after the run
+        got = rb.integration_summary(self.r)
+        self.assertTrue(got[0].startswith("**STALE**"))
+        self.assertIn("集成之后 beta 又交了 checkpoint", "\n".join(got))
+
+    def test_final_folders_and_the_queue_sealed_folder_are_used(self):
+        ln = {l["name"]: l for l in self.r["lanes"]}["alpha"]
+        fj = os.path.join(ln["handoff_dir"], "final-J")  # R6 round lane: final-J was ignored (only cp-* and final)
+        os.makedirs(fj)
+        with open(os.path.join(fj, "cumulative.patch"), "w") as f:
+            f.write(diff_new("f.txt", "final"))
+        os.utime(fj, (2e9, 2e9))
+        self.assertEqual(ri.lane_patch(self.r, ln, self.tmp)["checkpoint"], "final-J")
+        later = os.path.join(ln["handoff_dir"], "cp-K")  # a newer folder the queue has not sealed yet
+        os.makedirs(later)
+        with open(os.path.join(later, "cumulative.patch"), "w") as f:
+            f.write(diff_new("k.txt", "half done"))
+        os.utime(later, (2.1e9, 2.1e9))
+        self.queue_event("alpha", os.path.join(fj, "HANDOFF.md"))
+        self.assertEqual(ri.lane_patch(self.r, ln, self.tmp)["checkpoint"], "final-J")
+        rep = self.run_it(order=["alpha", "beta", "gamma"])
+        self.assertEqual(rep["stale"], [])
+        import round_status as rs
+        self.assertEqual(rs.latest_checkpoint(ln["handoff_dir"])["name"], "cp-K")  # status still shows the newest folder
+
+    def test_lanes_left_out_are_stale(self):
+        self.assertEqual(self.run_it(order=["alpha", "beta"])["stale"], ["lane(s) in ROUND.json not in the plan: gamma"])
+
+    # -- approved resolutions (R6-RND-084) ------------------------------------------------------
+    def resolutions(self, *entries, **top):
+        path = os.path.join(self.tmp, "resolutions.json")
+        with open(path, "w") as f:
+            json.dump(dict({"format": "pai-resolutions", "version": 1, "approved_by": "mastermind",
+                            "resolutions": list(entries)}, **top), f)
+        return path
+
+    def readme(self, rep):
+        with open(os.path.join(rep["tree"], "README.md")) as f:
+            return f.read().split()
+
+    def test_off_by_default(self):
+        self.assertEqual(self.run_it()["conflicts"][0]["files"], ["README.md"])
+
+    def test_both_keeps_both_sides_and_is_written_down(self):
+        res = ri.load_resolutions(self.resolutions({"file": "README.md", "how": "both", "note": "两边都保留", "by": "owner"}))
+        rep = self.run_it(resolutions=res)
+        beta = rep["patches"][1]
+        self.assertEqual(beta["result"], "ok (resolved: both)")
+        self.assertEqual(rep["conflicts"], [])
+        self.assertEqual(self.readme(rep), ["hello", "alpha", "beta"])
+        self.assertEqual(rep["resolved"][0]["patch"], "beta-lane")
+        with open(os.path.join(rep["tree"], "b.txt")) as f:  # the rest of beta is still there
+            self.assertEqual(f.read(), "b\n")
+        ri.write(self.r, rep, self.lines.append)
+        with open(os.path.join(self.r["state_dir"], "INTEGRATION.md"), encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn("## 按已审定的解决方式处理", text)
+        self.assertIn("**beta-lane** `README.md`：both（两边都保留）", text)
+        self.assertIn("审定：mastermind", text)
+        self.assertIn(res["sha256"][:12], text)
+
+    def test_ours_and_theirs(self):
+        rep = self.run_it(resolutions=ri.load_resolutions(self.resolutions({"file": "README.md", "how": "ours"})))
+        self.assertEqual(self.readme(rep), ["hello", "alpha"])
+        rep = self.run_it(resolutions=ri.load_resolutions(self.resolutions({"file": "README.md", "how": "theirs"})))
+        self.assertEqual(self.readme(rep), ["hello", "beta"])
+
+    def test_file_resolution_checks_its_sha(self):
+        good = os.path.join(self.tmp, "README.resolved")
+        with open(good, "w") as f:
+            f.write("hello\nalpha + beta\n")
+        import hashlib
+        sha = hashlib.sha256(b"hello\nalpha + beta\n").hexdigest()
+        rep = self.run_it(resolutions=ri.load_resolutions(self.resolutions(
+            {"file": "README.md", "how": "file", "path": good, "sha256": sha})))
+        self.assertEqual(rep["patches"][1]["result"], "ok (resolved: file)")
+        self.assertEqual(self.readme(rep), ["hello", "alpha", "+", "beta"])
+        with self.assertRaises(rnd.RoundError):
+            ri.load_resolutions(self.resolutions({"file": "README.md", "how": "file", "path": good, "sha256": "0" * 64}))
+
+    def test_an_entry_for_another_patch_or_file_does_not_apply(self):
+        for e in ({"file": "README.md", "how": "both", "patch": "gamma-allowlist"}, {"file": "b.txt", "how": "both"}):
+            rep = self.run_it(resolutions=ri.load_resolutions(self.resolutions(e)))
+            self.assertEqual(rep["patches"][1]["result"], "CONFLICT")
+            self.assertEqual(rep["resolved"], [])
+
+    def test_malformed_lists_are_refused(self):
+        for bad in ({"file": "README.md", "how": "merge"}, {"how": "both"}):
+            with self.assertRaises(rnd.RoundError):
+                ri.load_resolutions(self.resolutions(bad))
+        with self.assertRaises(rnd.RoundError):
+            ri.load_resolutions(os.path.join(self.tmp, "missing.json"))
 
 
 if __name__ == "__main__":

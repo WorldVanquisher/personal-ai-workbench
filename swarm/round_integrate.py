@@ -23,6 +23,17 @@ breaks, before anything is merged.
   swarm/workbench.py, release/allowlist.txt, pyproject.toml) first.
   Open dependencies: the Blockers section of each lane's newest HANDOFF.md and the lines of its
   NEXT-PR.md that name a precondition (前提 / 依赖 / depends / requires / after).
+Stale data (refused): a lane whose queue (<work_dir>/queue.log) records a checkpoint newer than
+  the checkpoint folder the plan used, or a lane of ROUND.json left out of --order. INTEGRATION.md
+  then starts with a STALE warning and the exit code is 3 (1 for conflicts or failed tests).
+--resolutions FILE (off by default)
+  Approved ways to settle a conflict, written by the owner or the mastermind (JSON, format
+  pai-resolutions/1): {"resolutions": [{"file": "pai/cli.py", "how": "both", "patch": "prompts-lane",
+  "note": "...", "by": "mastermind"}]}. how: both (git merge-file --union of the copy before the
+  patch, the base and the patch's own result: both sides' lines kept), ours (keep the copy, drop
+  the patch's change to that file), theirs (the patch's own result on the base), or file (the
+  resolved content at "path", checked against "sha256" when given). "patch" (optional) limits the
+  entry to one patch name. A settled file is `ok (resolved: HOW)` and listed in INTEGRATION.md.
 --test
   On the merged copy: `tools/verify.py` (which runs tests/ and swarm/tests strictly, and the rest
   this machine can run), with a test-only git identity (example.invalid). The summary and exit
@@ -55,7 +66,7 @@ IDENT = {"GIT_AUTHOR_NAME": "PAI Test", "GIT_AUTHOR_EMAIL": "test@example.invali
 def checkpoints(handoff_dir):
     """Checkpoint folders, newest first (cp-* and final)."""
     try:
-        cps = [e for e in os.scandir(handoff_dir) if e.is_dir() and (e.name.startswith("cp-") or e.name == "final")]
+        cps = [e for e in os.scandir(handoff_dir) if e.is_dir() and (e.name.startswith(("cp-", "final-")) or e.name == "final")]
     except OSError:
         return []
     return [e.path for e in sorted(cps, key=lambda e: (e.stat().st_mtime, e.name), reverse=True)]
@@ -86,6 +97,11 @@ def lane_patch(r, ln, scratch):
     """{"lane", "source", "path", "sha256", "checkpoint"} or None when there is nothing to apply."""
     cps = checkpoints(ln.get("handoff_dir") or "")
     newest = cps[0] if cps else None
+    ev = last_checkpoint_event(ln)  # the folder the lane's queue last sealed beats the newest by mtime
+    hand = (ev or {}).get("handoff") or ""
+    if hand and os.path.isabs(hand) and os.path.isfile(os.path.join(os.path.dirname(hand), "cumulative.patch")) and \
+            os.path.realpath(os.path.dirname(os.path.dirname(hand))) == os.path.realpath(ln.get("handoff_dir") or ""):
+        newest = os.path.dirname(hand)
     if newest and os.path.isfile(os.path.join(newest, "cumulative.patch")):
         path = os.path.join(newest, "cumulative.patch")
         return {"lane": ln["name"], "source": "checkpoint", "checkpoint": os.path.basename(newest), "path": path,
@@ -120,9 +136,8 @@ def _git_env(tree):
     return env
 
 
-def same_as_proposed(tree, base_tree, rel, patch_path):
-    """True when the merged copy's `rel` is exactly what the patch makes of the base's `rel`
-    (a proposal written against the base that the lanes already applied, e.g. "base -> both")."""
+def patched_base(base_tree, rel, patch_path):
+    """What the patch alone makes of the base's `rel` (bytes), or None when it does not apply there."""
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(base_tree, rel)
@@ -132,15 +147,113 @@ def same_as_proposed(tree, base_tree, rel, patch_path):
             shutil.copy(src, dst)
         p = subprocess.run([gitprep.git_bin(), "apply", "--whitespace=nowarn", "--include=" + rel, patch_path], cwd=tmp,
                            env=_git_env(tmp), capture_output=True, text=True)
-        if p.returncode != 0 or not os.path.isfile(dst) or not os.path.isfile(os.path.join(tree, rel)):
-            return False
-        with open(dst, "rb") as a, open(os.path.join(tree, rel), "rb") as b:
-            return a.read() == b.read()
+        if p.returncode != 0 or not os.path.isfile(dst):
+            return None
+        with open(dst, "rb") as f:
+            return f.read()
 
 
-def apply_patch(tree, item, rejects_dir, base_tree=None):
+def same_as_proposed(tree, base_tree, rel, patch_path):
+    """True when the merged copy's `rel` is exactly what the patch makes of the base's `rel`
+    (a proposal written against the base that the lanes already applied, e.g. "base -> both")."""
+    got = patched_base(base_tree, rel, patch_path)
+    if got is None or not os.path.isfile(os.path.join(tree, rel)):
+        return False
+    with open(os.path.join(tree, rel), "rb") as b:
+        return got == b.read()
+
+
+# -- approved resolutions (--resolutions) ----------------------------------------------------------
+HOWS = ("both", "ours", "theirs", "file")
+
+
+def load_resolutions(path):
+    """{"path", "sha256", "entries": [...]} from a pai-resolutions/1 JSON file; RoundError when malformed."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        raise rnd.RoundError("cannot read the resolutions file %s: %s" % (path, e))
+    if not isinstance(data, dict) or data.get("format", "pai-resolutions") != "pai-resolutions" or \
+            not isinstance(data.get("resolutions"), list):
+        raise rnd.RoundError("%s is not a pai-resolutions/1 file ({\"resolutions\": [...]})" % path)
+    entries = []
+    for i, e in enumerate(data["resolutions"], 1):
+        if not isinstance(e, dict) or not e.get("file") or e.get("how") not in HOWS:
+            raise rnd.RoundError("%s: resolution %d needs \"file\" and \"how\" (one of %s)" % (path, i, ", ".join(HOWS)))
+        if e["how"] == "file":
+            src = e.get("path") or ""
+            src = src if os.path.isabs(src) else os.path.join(os.path.dirname(os.path.abspath(path)), src)
+            if not os.path.isfile(src):
+                raise rnd.RoundError("%s: resolution %d (how file) names a missing path %r" % (path, i, e.get("path")))
+            if e.get("sha256") and rnd.sha256_file(src) != e["sha256"]:
+                raise rnd.RoundError("%s: resolution %d: %s does not match its sha256" % (path, i, src))
+            e = dict(e, path=src)
+        entries.append(e)
+    return {"path": os.path.abspath(path), "sha256": rnd.sha256_file(path), "entries": entries,
+            "approved_by": data.get("approved_by")}
+
+
+def find_resolution(res, rel, patch_name):
+    for e in (res or {}).get("entries", []):
+        if e["file"] == rel and (not e.get("patch") or e["patch"] == patch_name):
+            return e
+    return None
+
+
+def resolve(tree, base_tree, rel, patch_path, before, entry):
+    """Settle one conflicting file by an approved entry. Returns None (done) or why it could not."""
+    target = os.path.join(tree, rel)
+    how = entry["how"]
+    if how == "file":
+        shutil.copy(entry["path"], target)
+        return None
+    if how == "ours":
+        if before is None:
+            if os.path.exists(target):
+                os.remove(target)
+        else:
+            with open(target, "wb") as f:
+                f.write(before)
+        return None
+    theirs = patched_base(base_tree, rel, patch_path)
+    if theirs is None:
+        return "the patch does not apply to the base's %s on its own" % rel
+    if how == "theirs":
+        with open(target, "wb") as f:
+            f.write(theirs)
+        return None
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        paths = []
+        for name, data in (("ours", before or b""), ("base", None), ("theirs", theirs)):
+            fp = os.path.join(tmp, name)
+            if data is None:
+                src = os.path.join(base_tree, rel)
+                data = b""
+                if os.path.isfile(src):
+                    with open(src, "rb") as fb:
+                        data = fb.read()
+            with open(fp, "wb") as f:
+                f.write(data)
+            paths.append(fp)
+        p = subprocess.run([gitprep.git_bin(), "merge-file", "-p", "--union"] + paths, capture_output=True, env=_git_env(tmp))
+        if p.returncode < 0 or p.returncode > 127:
+            return "git merge-file failed: %s" % p.stderr.decode("utf-8", "replace")[-200:]
+        with open(target, "wb") as f:
+            f.write(p.stdout)
+    return None
+
+
+def apply_patch(tree, item, rejects_dir, base_tree=None, resolutions=None):
     """Apply one patch to the copy: ok | CONFLICT (with rejected files) | FAILED (nothing applied)."""
     env = _git_env(tree)
+    before = {}
+    for rel in touched(item["path"]):  # the copy before this patch, for an approved resolution
+        fp = os.path.join(tree, rel)
+        if os.path.isfile(fp):
+            with open(fp, "rb") as f:
+                before[rel] = f.read()
     base = [gitprep.git_bin(), "apply", "--whitespace=nowarn"]
     chk = subprocess.run(base + ["--check", item["path"]], cwd=tree, env=env, capture_output=True, text=True)
     if chk.returncode == 0:
@@ -164,13 +277,32 @@ def apply_patch(tree, item, rejects_dir, base_tree=None):
     for rel in list(kept) + [m.split(": ")[1] for m in msgs if "already exists in working directory" in m]:
         if rel in LINE_SETS and rel not in unions:
             unions[rel] = union_merge(tree, rel, item["path"])
-    if unions and set(kept) <= set(unions) and not any(u["removals"] for u in unions.values()) and \
-            all(m.split(": ")[1] in unions for m in msgs if "already exists" in m):
-        return {"result": "ok (line union)", "files": sorted(unions), "union": unions,
-                "detail": "; ".join("%s: +%d, already there %d, skipped (file not in the copy) %d" % (
-                    k, len(u["added"]), len(u["present"]), len(u["missing_file"])) for k, u in unions.items())}
-    return {"result": "CONFLICT" if kept or p.returncode != 0 else "ok", "files": kept, "detail": "; ".join(msgs[:6])[-800:],
-            "union": unions or None}
+    exists = [m.split(": ")[1] for m in msgs if "already exists in working directory" in m]
+    union_ok = {k for k, u in unions.items() if not u["removals"]}
+    open_files = [f for f in dict.fromkeys(list(kept) + exists) if f not in union_ok]
+    resolved = []
+    if resolutions and base_tree:
+        for rel in list(open_files):
+            e = find_resolution(resolutions, rel, item["name"])
+            if not e:
+                continue
+            why = resolve(tree, base_tree, rel, item["path"], before.get(rel), e)
+            resolved.append({"file": rel, "how": e["how"], "note": e.get("note"), "by": e.get("by") or resolutions.get("approved_by"),
+                             "ok": why is None, "why": why})
+            if why is None:
+                open_files.remove(rel)
+    if not open_files and (unions or resolved):
+        hows = sorted({x["how"] for x in resolved if x["ok"]})
+        return {"result": "ok (resolved: %s)" % ", ".join(hows) if resolved else "ok (line union)",
+                "files": sorted(set(kept) | set(exists)), "union": unions or None, "resolved": resolved or None,
+                "detail": "; ".join(["%s: +%d, already there %d, skipped (file not in the copy) %d" % (
+                    k, len(u["added"]), len(u["present"]), len(u["missing_file"])) for k, u in unions.items()] +
+                    ["%s: approved resolution %s%s" % (x["file"], x["how"], " (%s)" % x["note"] if x.get("note") else "")
+                     for x in resolved])}
+    if p.returncode == 0 and not kept and not exists:
+        return {"result": "ok", "files": [], "detail": ""}
+    return {"result": "CONFLICT", "files": open_files or kept, "detail": "; ".join(msgs[:6])[-800:],
+            "union": unions or None, "resolved": resolved or None}
 
 
 def patch_lines(patch_path, rel):
@@ -261,17 +393,53 @@ def pr_plan(r, order):
     return plan
 
 
+def short_work():
+    """A short new folder for verify's --work. verify sets TMPDIR=<work>/tmp and tmux puts its socket
+    at $TMPDIR/tmux-UID/default; a Unix socket path holds at most 107 bytes, so under
+    <work_root>/integrate/<time>-<random>/verify the socket cannot be created and every tmux-based
+    test fails with "no window" (R6-RND-090: test_onboarding, test_guide_next, onboarding)."""
+    import tempfile
+    root = "/tmp" if os.path.isdir("/tmp") and os.access("/tmp", os.W_OK) else None
+    return tempfile.mkdtemp(prefix="piv-", dir=root)
+
+
+def _specials(folder, names):
+    """copytree ignore: sockets and FIFOs (tmux.sock) are not files and cannot be copied."""
+    import stat
+    out = []
+    for n in names:
+        try:
+            m = os.lstat(os.path.join(folder, n)).st_mode
+        except OSError:
+            continue
+        if stat.S_ISSOCK(m) or stat.S_ISFIFO(m):
+            out.append(n)
+    return out
+
+
 def run_tests(tree, out_dir, timeout=3600):
     env = dict(_git_env(tree), **IDENT)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    work = os.path.join(out_dir, "verify")
+    final = os.path.join(out_dir, "verify")
+    short = short_work()
+    work = os.path.join(short, "v")
     t0 = time.time()
+    code, text, note = None, "", ""
     try:
         p = subprocess.run(["python3", "-B", "tools/verify.py", "--work", work], cwd=tree, env=env, capture_output=True,
                            text=True, timeout=timeout)
         code, text = p.returncode, p.stdout + p.stderr
     except subprocess.TimeoutExpired:
         code, text = None, "timed out after %ds" % timeout
+    finally:  # keep the logs beside the report; the short folder goes
+        if os.path.isdir(work):
+            try:
+                shutil.copytree(work, final, symlinks=True, ignore=_specials, dirs_exist_ok=True)
+            except (OSError, shutil.Error) as e:  # the report must not be lost to a log that cannot be copied
+                note = "(some verify files were not copied back: %s)\n" % str(e)[:300]
+        shutil.rmtree(short, ignore_errors=True)
+    text = note + text.replace(work, final)
+    work = final
     with open(os.path.join(out_dir, "verify.out"), "w", encoding="utf-8") as f:
         f.write(text)
     steps = {}
@@ -281,15 +449,73 @@ def run_tests(tree, out_dir, timeout=3600):
         for s in rep.get("steps") or []:  # verify-report.json: [{"step", "result", "detail", "seconds", "ci"}]
             name = isinstance(s, dict) and (s.get("step") or s.get("name"))
             if name:
+                summ = s.get("detail") or s.get("summary") or s.get("reason")
                 steps[name] = {"status": s.get("result") or s.get("status"), "seconds": s.get("seconds"),
-                               "summary": s.get("detail") or s.get("summary") or s.get("reason")}
+                               "summary": summ.replace(os.path.join(short, "v"), final) if isinstance(summ, str) else summ}
     except (OSError, ValueError):
         pass
     tail = [l for l in text.splitlines() if re.search(r"\b(PASS|FAIL|SKIPPED|passed|failed|skipped)\b", l)][-25:]
     return {"exit": code, "seconds": round(time.time() - t0), "steps": steps, "summary": tail}
 
 
-def integrate(r, order=None, proposals="all", test=False, log=print):
+def last_checkpoint_event(ln):
+    """The newest checkpoint event in the lane's queue log (<work_dir>/queue.log), or None."""
+    last = None
+    try:
+        with open(os.path.join(ln.get("work_dir") or "", "queue.log"), encoding="utf-8") as f:
+            for line in f:
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                if e.get("event") == "checkpoint":
+                    last = e
+    except OSError:
+        return None
+    return last
+
+
+def _utc(ts):
+    import calendar
+    try:
+        return calendar.timegm(time.strptime(ts, "%Y-%m-%dT%H:%M:%SZ"))
+    except (TypeError, ValueError):
+        return None
+
+
+STALE_GRACE = 600  # seconds a checkpoint event may follow its own folder (seal, then HANDOFF, then the event)
+
+
+def stale_reasons(r, order, items):
+    """Why this plan works on stale data: a lane's queue has a checkpoint newer than the folder the
+    plan used, or a lane of ROUND.json is not in the plan."""
+    out = []
+    left = [l["name"] for l in r["lanes"] if l["name"] not in order]
+    if left:
+        out.append("lane(s) in ROUND.json not in the plan: %s" % ", ".join(left))
+    used = {it["lane"]: it for it in items if it.get("kind") == "lane"}
+    for n in order:
+        ln = rnd.lane(r, n)
+        ev = last_checkpoint_event(ln)
+        if not ev:
+            continue
+        it = used.get(n)
+        cp_name = it.get("checkpoint") if it else None
+        cp_path = os.path.join(ln.get("handoff_dir") or "", cp_name) if cp_name else None
+        hand = ev.get("handoff")
+        if hand and os.path.isabs(hand):
+            folder = os.path.dirname(hand)
+            if not cp_path or os.path.realpath(folder) != os.path.realpath(cp_path):
+                out.append("%s: queue checkpoint %s (%s) is %s, the plan used %s" % (
+                    n, ev.get("id"), ev.get("at"), os.path.basename(folder), cp_name or "no checkpoint"))
+            continue
+        t = _utc(ev.get("at"))
+        if t and (not cp_path or not os.path.isdir(cp_path) or t > os.stat(cp_path).st_mtime + STALE_GRACE):
+            out.append("%s: queue checkpoint %s at %s is newer than %s" % (n, ev.get("id"), ev.get("at"), cp_name or "any checkpoint folder"))
+    return out
+
+
+def integrate(r, order=None, proposals="all", test=False, log=print, resolutions=None):
     names = [l["name"] for l in r["lanes"]]
     order = order or names
     for n in order:
@@ -326,7 +552,7 @@ def integrate(r, order=None, proposals="all", test=False, log=print):
         it["paths"] = sorted(touched(it["path"]))
         for pth in it["paths"]:
             seen.setdefault(pth, []).append(it["name"])
-        res = apply_patch(tree, it, os.path.join(out_dir, "rejects"), base_tree)
+        res = apply_patch(tree, it, os.path.join(out_dir, "rejects"), base_tree, resolutions)
         it.update(res)
         log("  %-9s %-40s %s%s" % (it["result"], it["name"], it["sha256"][:12],
                                    "  (%s)" % ", ".join(res.get("files") or []) if res.get("files") else ""))
@@ -335,7 +561,10 @@ def integrate(r, order=None, proposals="all", test=False, log=print):
     report = {"format": "pai-integration", "version": 1, "round": r["round"], "base_sha": r["base_sha"], "at": rnd.now(),
               "order": order, "proposals": proposals, "tree": tree,
               "patches": [{k: it.get(k) for k in ("name", "lane", "kind", "source", "checkpoint", "sha256", "result", "files", "union",
-                                                  "detail", "paths")} for it in items],
+                                                  "resolved", "detail", "paths")} for it in items],
+              "stale": stale_reasons(r, order, items),
+              "resolutions": {k: resolutions[k] for k in ("path", "sha256", "approved_by")} if resolutions else None,
+              "resolved": [dict(x, patch=it["name"]) for it in items for x in (it.get("resolved") or [])],
               "conflicts": [{"patch": it["name"], "files": it.get("files") or [], "detail": it.get("detail")}
                             for it in items if not it["result"].startswith("ok")],
               "unions": [{"patch": it["name"], "detail": it.get("detail"), "union": it.get("union")}
@@ -344,6 +573,8 @@ def integrate(r, order=None, proposals="all", test=False, log=print):
                             if it["result"] == "ok (already in the merged copy)"],
               "hot_files": [{"path": p, "patches": ns} for p, ns in hot], "dependencies": deps, "pr_plan": pr_plan(r, order),
               "test": None}
+    for why in report["stale"]:
+        log("  STALE     %s" % why)
     leftover = [p for p in glob.glob(os.path.join(glob.escape(tree), "**", "__pycache__"), recursive=True)]
     if test:
         log("  running tools/verify.py on the merged copy (this takes a while)")
@@ -362,7 +593,11 @@ def render(r, rep):
     c = rv.cell
     L = ["", rv.BEGIN, "# %s 集成预演（%s）" % (r["round"], rep["at"]), "",
          "PAI 生成（`pai round integrate`）。在 base `%s` 的导出副本上按顺序打补丁，只是预演：没有 commit，没有 push，没有合并。" % rep["base_sha"][:12],
-         "副本：`%s`" % rep["tree"], "", "## 补丁（按打的顺序）", "", "| # | 补丁 | 来源 | sha256 | 结果 |", "|---|---|---|---|---|"]
+         "副本：`%s`" % rep["tree"], ""]
+    if rep.get("stale"):
+        L += ["> [!warning] STALE：这次集成用的是过期数据，结果不能作为合并依据。修正后重跑（每条线交 final 之后，覆盖所有线）。"]
+        L += [">", *["> - %s" % c(x) for x in rep["stale"]], ""]
+    L += ["## 补丁（按打的顺序）", "", "| # | 补丁 | 来源 | sha256 | 结果 |", "|---|---|---|---|---|"]
     for i, p in enumerate(rep["patches"], 1):
         L.append("| %d | %s | %s | `%s` | %s |" % (i, c(p["name"]), c(p["source"]), p["sha256"], c(p["result"] + (
             "：" + "、".join(p.get("files") or []) if p.get("files") else ""))))
@@ -373,6 +608,13 @@ def render(r, rep):
     L += ["- **%s**：%s%s" % (x["patch"], c(x["detail"]), "；跳过：" + "、".join(
         v for u in (x["union"] or {}).values() for v in u["missing_file"]) if any(
         u["missing_file"] for u in (x["union"] or {}).values()) else "") for x in rep.get("unions", [])] or ["（没有）"]
+    if rep.get("resolutions"):
+        rz = rep["resolutions"]
+        L += ["", "## 按已审定的解决方式处理", "",
+              "清单：`%s`（sha256 `%s`%s）。" % (rz["path"], rz["sha256"][:12], "，审定：%s" % rz["approved_by"] if rz.get("approved_by") else "")]
+        L += ["- **%s** `%s`：%s%s%s" % (x["patch"], x["file"], x["how"], "（%s）" % c(x["note"]) if x.get("note") else "",
+                                        "" if x["ok"] else "，**没处理成**：%s" % c(x["why"])) for x in rep.get("resolved") or []] \
+            or ["（清单里的文件这次都没有冲突）"]
     L += ["", "## 已经包含（补丁的结果和合并后的副本一致）", ""]
     L += ["- **%s**：%s" % (x["patch"], "、".join(x["files"] or [])) for x in rep.get("contained", [])] or ["（没有）"]
     L += ["", "## 热点文件", "", "| 文件 | 改它的补丁 |", "|---|---|"]
@@ -411,6 +653,8 @@ def write(r, rep, log=print):
     fm = {"round": r["round"], "base": r["base_sha"], "order": rep["order"], "patches": len(rep["patches"]),
           "conflicts": len(rep["conflicts"]), "hot_files": len(rep["hot_files"]),
           "test_exit": (rep.get("test") or {}).get("exit"), "integrated_at": rep["at"]}
+    # stale / resolved stay out of the front matter: core's schema (integration kind) does not list them;
+    # they are in the body (STALE warning at the top, the resolutions section) and in INTEGRATION.json
     return rv.write_note(os.path.join(r["state_dir"], "INTEGRATION.md"), "integration/1", fm, render(r, rep), log)
 
 
@@ -419,11 +663,15 @@ def main(a, r, out):
     if not (a.plan or a.test):
         raise rnd.RoundError("give --plan (and --test to run the checks on the merged copy)")
     order = [x.strip() for x in a.order.split(",")] if a.order else None
-    rep = integrate(r, order, a.proposals, a.test, log)
+    res = load_resolutions(a.resolutions) if getattr(a, "resolutions", None) else None
+    rep = integrate(r, order, a.proposals, a.test, log, resolutions=res)
     log("  %d patch(es), %d conflict(s), %d hot file(s), %d open dependenc(ies)" % (
         len(rep["patches"]), len(rep["conflicts"]), len(rep["hot_files"]), len(rep["dependencies"])))
     if a.write:
         log("  INTEGRATION.md: %s" % write(r, rep, log))
     else:
         log("  (add --write for INTEGRATION.md / INTEGRATION.json in %s)" % r["state_dir"])
+    if rep["stale"]:
+        log("  STALE: %d reason(s); exit 3" % len(rep["stale"]))
+        return 3
     return 1 if rep["conflicts"] or (rep.get("test") and rep["test"]["exit"] != 0) else 0

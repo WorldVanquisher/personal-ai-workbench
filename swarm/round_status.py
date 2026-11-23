@@ -277,7 +277,7 @@ def capture(tmux, pane_id, colours=True):
 def latest_checkpoint(handoff_dir):
     """{"name", "path", "handoff", "restart", "sums"} of the newest cp-* folder, or None."""
     try:
-        cps = [e for e in os.scandir(handoff_dir) if e.is_dir() and (e.name.startswith("cp-") or e.name == "final")]
+        cps = [e for e in os.scandir(handoff_dir) if e.is_dir() and (e.name.startswith(("cp-", "final-")) or e.name == "final")]
     except OSError:
         return None
     if not cps:

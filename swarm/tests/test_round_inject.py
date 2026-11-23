@@ -21,6 +21,7 @@ needs_tmux = _tl.needs_tmux
 
 @needs_tmux
 class Inject(unittest.TestCase):
+    OLD = False  # True: through the tmux 3.6 wrapper (see test_round_launch)
     setUp = _tl.Launch.setUp
     kill_fakes, behave, jsonl = _tl.Launch.kill_fakes, _tl.Launch.behave, _tl.Launch.jsonl
     launch, wait_until = _tl.Launch.launch, _tl.Launch.wait_until
@@ -57,6 +58,7 @@ class Inject(unittest.TestCase):
         ev = self.events()
         self.assertEqual(ev[-1]["sha256"], hashlib.sha256(text.encode()).hexdigest())
         self.assertEqual((ev[-1]["kind"], ev[-1]["state"]), ("inject", "sent"))
+        self.assertEqual(ev[-1]["bracketed_by"].startswith("inferred from the command name"), self.old_tmux, ev[-1])
         self.assertTrue(ev[-1]["at"])
         time.sleep(0.8)
         self.lines.clear()
@@ -127,6 +129,10 @@ class Inject(unittest.TestCase):
         self.assertEqual(rl.inject(self.r, self.ln, msg, log=self.lines.append, tmux=self.tmux, kind="next", wait=1.0), 0)
         self.assertTrue(self.wait_until(lambda: self.jsonl("received.jsonl")))
         self.assertEqual(self.events()[-1]["kind"], "next")
+
+
+class InjectTmux36(Inject):
+    OLD = True
 
 
 if __name__ == "__main__":
