@@ -1431,7 +1431,33 @@ def cmd_doctor(a):
     else:
         doctor.show(rows)
         log("\ndoctor changed nothing.%s" % ("" if proj else " (No pai project here: `pai init` in your checkout.)"))
+        log(doctor_next(proj, doctor.failing(rows)))
     return 0 if not doctor.failing(rows) else 1
+
+
+def manual(name):
+    """A manual's local copy (archive or checkout: docs/ beside swarm/), else the file on GitHub
+    for this version (an installed package has no docs/)."""
+    local = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", name)
+    if os.path.isfile(local):
+        return local
+    try:
+        from pai import __version__ as v
+        ref = "v" + v
+    except ImportError:
+        ref = "main"
+    return "https://github.com/WorldVanquisher/personal-ai-workbench/blob/%s/docs/%s" % (ref, name)
+
+
+def doctor_next(proj, failing):
+    """doctor's last line: the manual section that matches what it found."""
+    if failing:
+        return 'Next: fix each line marked for pai run above, then `pai doctor` again. Stuck? %s, section 8 ' \
+               '"When something goes wrong".' % manual("FIRST-USE.md")
+    if not proj:
+        return 'Next: %s, section 5 "Save this checkout\'s defaults: pai init".' % manual("FIRST-USE.md")
+    return 'Next: %s, section 6 "Your first round" (or `pai guide` first); for a later round, %s, part (b).' % (
+        manual("FIRST-USE.md"), manual("REFRESH.md"))
 
 
 def cmd_setup(a):
