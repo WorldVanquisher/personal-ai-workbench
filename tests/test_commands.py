@@ -225,13 +225,19 @@ class SecretsWhere(unittest.TestCase):
             os.chmod(path, 0o644)
             rows = commands.secrets_where(env={"TYPESAFE_API_KEY": "secret-value-123"}, home=home)
             jev = rows[0]
-            self.assertEqual((jev["name"], jev["env"], jev["file_mode"]), ("TYPESAFE_API_KEY", True, "644"))
-            self.assertIn("chmod 600", jev["problem"])
+            if os.name == "nt":  # POSIX modes are not Windows ACLs, and pai says so
+                self.assertEqual((jev["name"], jev["env"], jev["file"], jev["file_mode"], jev["problem"]),
+                                 ("TYPESAFE_API_KEY", True, "~/.config/pai/jev.env", None, None))
+            else:
+                self.assertEqual((jev["name"], jev["env"], jev["file_mode"]), ("TYPESAFE_API_KEY", True, "644"))
+                self.assertIn("chmod 600", jev["problem"])
             self.assertNotIn("secret-value-123", json.dumps(rows))
             os.chmod(path, 0o600)
             self.assertIsNone(commands.secrets_where(env={}, home=home)[0]["problem"])
-            with mock.patch.dict(os.environ, {"HOME": home, "TYPESAFE_API_KEY": "secret-value-123"}):
+            # expanduser reads USERPROFILE on Windows and HOME elsewhere
+            with mock.patch.dict(os.environ, {"HOME": home, "USERPROFILE": home, "TYPESAFE_API_KEY": "secret-value-123"}):
                 rc, out, _ = run_cli("secrets", "where")
             self.assertEqual(rc, 0, out)
             self.assertIn("TYPESAFE_API_KEY          set in the environment", out)
+            self.assertIn("does not apply on Windows" if os.name == "nt" else "exists (mode 600)", out)
             self.assertNotIn("secret-value-123", out)

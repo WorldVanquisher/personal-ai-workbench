@@ -175,7 +175,8 @@ SECRET_FILES = (("~/.config/pai/jev.env", "TYPESAFE_API_KEY"),)
 
 def secrets_where(env=None, home=None):
     """[{name, purpose, where, env, file, file_mode, problem}] for every secret pai knows: whether it is set
-    and where it should live. Values are never read into the result: only presence, and file modes."""
+    and where it should live. Values are never read into the result: only presence, and file modes (none on
+    Windows, where a file's POSIX mode says nothing about who can read it)."""
     import os
     import stat as st
     env = os.environ if env is None else env
@@ -187,7 +188,9 @@ def secrets_where(env=None, home=None):
             if key != name:
                 continue
             full = os.path.expanduser(path) if home is None else os.path.join(home, path[2:])
-            if os.path.isfile(full):
+            if os.path.isfile(full) and os.name == "nt":
+                row.update(file=path)  # POSIX modes are not Windows ACLs: no mode to judge (pai init says so too)
+            elif os.path.isfile(full):
                 mode = st.S_IMODE(os.stat(full).st_mode)
                 row.update(file=path, file_mode="%03o" % mode)
                 if mode & 0o077:
@@ -212,8 +215,11 @@ def _secrets_run(a, load_project):
     else:
         for r in rows:
             have = "set in the environment" if r["env"] else "not in the environment"
-            if r["file"]:
+            if r["file"] and r["file_mode"]:
                 have += "; %s exists (mode %s)" % (r["file"], r["file_mode"])
+            elif r["file"]:
+                from pai import initcfg
+                have += "; %s exists (%s)" % (r["file"], initcfg.permission_note())
             print("%-25s %s" % (r["name"], have))
             print("%-25s for: %s" % ("", r["purpose"]))
             print("%-25s belongs in: %s" % ("", r["where"]))
