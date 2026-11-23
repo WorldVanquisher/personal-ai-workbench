@@ -24,7 +24,9 @@ def pai(*args, cwd=None, env=None):
     e = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
     e.pop("TYPESAFE_API_KEY", None)
     e.update(env or {})
-    return subprocess.run([sys.executable, "-B", PAI, *args], capture_output=True, text=True, cwd=cwd, env=e)
+    # pai writes UTF-8 on every platform (pai/__main__.py), also into a pipe on Windows
+    return subprocess.run([sys.executable, "-B", PAI, *args], capture_output=True, text=True, encoding="utf-8",
+                          cwd=cwd, env=e)
 
 
 def prompt_file(body, name="t", vars_="RUN_ID,LANE", kind="other", extra=""):
@@ -526,13 +528,13 @@ class Registry(unittest.TestCase):
     def test_help_lists_every_command_once_and_keeps_the_prompt_texts(self):
         env = dict(os.environ, COLUMNS="100")
         pai_m = [sys.executable, "-B", "-m", "pai"]
-        top = subprocess.run(pai_m + ["--help"], capture_output=True, text=True, env=env, cwd=ROOT).stdout
+        top = subprocess.run(pai_m + ["--help"], capture_output=True, text=True, encoding="utf-8", env=env, cwd=ROOT).stdout
         for cmd in ("init", "doctor", "install", "check", "context", "handoff", "vault", "secrets", "queue", "prompt"):
             self.assertEqual(len([ln for ln in top.splitlines() if ln.startswith("    " + cmd + " ")]), 1, cmd)
         self.assertIn("the prompt library: render, lint, diff, init, eval", top)
-        init = subprocess.run(pai_m + ["init", "--help"], capture_output=True, text=True, env=env, cwd=ROOT).stdout
+        init = subprocess.run(pai_m + ["init", "--help"], capture_output=True, text=True, encoding="utf-8", env=env, cwd=ROOT).stdout
         self.assertIn("--prompts PROMPTS", init)
         self.assertIn("(default PAI/prompts;", init.replace("\n", " ").replace("  ", " "))
-        p = subprocess.run(pai_m + ["prompt", "--help"], capture_output=True, text=True, env=env, cwd=ROOT)
+        p = subprocess.run(pai_m + ["prompt", "--help"], capture_output=True, text=True, encoding="utf-8", env=env, cwd=ROOT)
         self.assertEqual(p.returncode, 0)
         self.assertIn("{list,render,lint,diff,init,templates,eval,optimize}", p.stdout)
