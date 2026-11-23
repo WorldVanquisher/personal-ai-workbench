@@ -232,6 +232,12 @@ def check_file(path, root, pai):
                     # usage it prints still lists the real options, and the error part is ignored
                     if rc == 2 and has_flag(out2.split("error:", 1)[0], f):
                         rc = 0
+                    if not (rc == 0 and has_flag(out2, f)) and len(flags) > 1:
+                        # the other flags route too (`pai init P … --vault V --write`: --write alone goes to the
+                        # workbench init, with --vault to PAI's own): ask with the command's flags as written
+                        rc, out2 = pai.help(list(prefix) + ["PROJECT"] + [g for g in flags if g != f] + [f])
+                        if rc == 2 and has_flag(out2.split("error:", 1)[0], f):
+                            rc = 0
                 exists = rc == 0 and has_flag(out2, f)
             if pf:
                 tail = "%s %s" % (pf, f)

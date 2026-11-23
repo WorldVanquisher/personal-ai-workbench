@@ -367,7 +367,10 @@ class SSH(WB):
         self.assertIn('eval "$(ssh-agent -s)"', out)
         # Whatever the folder (verify.py's --work under $HOME made it `~/...`), the printed command
         # must name this key in a form a shell expands back to it.
-        add = [ln.split("#")[0].strip() for ln in out.splitlines() if ln.strip().startswith("ssh-add ") and "-l" not in ln]
+        # `ssh-add -l` is the listing line; compare the argument, not a substring (R6-FIN-028: a temp folder
+        # named pai-swarm-test-l… contains "-l" and dropped the key line)
+        add = [ln.split("#")[0].strip() for ln in out.splitlines()
+               if ln.strip().startswith("ssh-add ") and ln.split()[1] != "-l"]
         self.assertEqual(len(add), 1, out)
         sh = subprocess.run(["bash", "--norc", "--noprofile", "-c", "printf %s " + add[0][len("ssh-add "):]],
                             capture_output=True, text=True, env=dict(os.environ, HOME=os.path.expanduser("~")))

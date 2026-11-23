@@ -180,8 +180,18 @@ class Clients(TwoAgents):
         p = self.pai("--help")
         for line in ("exit codes (every command; scripts may rely on them across upgrades):",
                      "  0  done, or a preview with nothing in the way",
-                     "  2  usage error, or input that cannot be read; nothing was changed"):
+                     "  2  usage error, or input that cannot be read; nothing was changed",
+                     # R6-FIN-002 (docs N8): 1 is not "still at work"; swarm/rc.py lane_ok returns 0 for a busy lane
+                     "     pai status: a lane waits for you, has no task yet, or its agent has exited",
+                     "     (0 while every agent runs with its task, even busy)"):
             self.assertIn(line, p.stdout)
+        self.assertNotIn("still at work", p.stdout)
+        # R6-FIN-026 (newbie F14, F18): which init/doctor is which, the first-use commands first, worktree listed
+        for line in ("PAI's own commands (project context and handoffs;",
+                     "  first use (docs/FIRST-USE.md, in this order):",
+                     "    worktree (list, refresh, verify, preview, publish, init), plan,"):
+            self.assertIn(line, p.stdout)
+        self.assertLess(p.stdout.index("PAI's own commands"), p.stdout.index("usage: pai"))
         self.assertEqual(self.pai("--version").returncode, 0)
         self.assertEqual(self.pai("status", "--run", "no-such-run").returncode, 2)
         self.assertEqual(self.pai("task", "import", os.path.join(self.tmp, "missing.json")).returncode, 2)

@@ -46,5 +46,25 @@ class NextStep(unittest.TestCase):
         self.assertTrue(r.lines[-1].startswith("Next: "), r.lines[-1])
 
 
+class OptionalInstructions(unittest.TestCase):
+    """R6-FIN-004 (core NOTES-FOR-docs C10): a missing AGENTS.md is a WARNING that says it is optional,
+    and doctor still ends with NO PROBLEMS FOUND."""
+
+    def test_a_missing_agents_md_is_called_optional(self):
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from test_pai import Fixture
+        with tempfile.TemporaryDirectory() as d:
+            f = Fixture(d)
+            (f.repo / "AGENTS.md").unlink()
+            r = doctor.run(str(f.cfg), "demo")
+        text = "\n".join(r.lines)
+        line = [x for x in r.lines if "AGENTS.md" in x]
+        self.assertEqual(len(line), 1, text)
+        self.assertIn("instructions source MISSING: AGENTS.md (not found; optional: pai context uses it when present)",
+                      line[0])
+        self.assertTrue(line[0].startswith("WARNING"), line[0])
+        self.assertIn("NO PROBLEMS FOUND", text)
+
+
 if __name__ == "__main__":
     unittest.main()

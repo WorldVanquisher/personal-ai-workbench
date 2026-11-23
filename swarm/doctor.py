@@ -180,9 +180,11 @@ def repair(tool, plat):
     return None, "; ".join(problems) or "no installer for it here"
 
 
-def check(agent_names=("claude",)):
+def check(agent_names=("claude",), agents_essential=True):
     """[{tool, used_by, state, detail, fix, need}] with state ok | missing | not-logged-in | rc-not-ready | unknown |
-    info, and need essential | optional | info. Backend rows also carry `capabilities` and `gaps`."""
+    info, and need essential | optional | later | info. Backend rows also carry `capabilities` and `gaps`.
+    agents_essential=False (no agent chosen yet: `pai doctor` before `pai init`): the agents' own rows are
+    `later`, needed from the first `pai run` on, and do not fail doctor (R6-FIN-020, newbie F2-F4)."""
     rows = []
 
     def add(tool, used_by, state, detail, fix=None, **extra):
@@ -256,7 +258,13 @@ def check(agent_names=("claude",)):
                 capabilities=caps, gaps=gaps)
     for r in rows:
         r["need"] = need(r)
+        if not agents_essential and r["need"] == "essential" and any(
+                r["tool"] == a or r["tool"].startswith(a + " ") for a in agent_names):
+            r["need"] = "later"
     return rows
+
+
+LATER_TITLE = "FOR YOUR FIRST RUN (install and log in to the agent you will use before `pai run`; FIRST-USE section 6)"
 
 
 def install_plan(missing, plat=None):
@@ -313,7 +321,8 @@ def show(rows):
     for r in rows:
         r.setdefault("need", need(r))
     for group, title in (("essential", "ESSENTIAL (pai run needs these)"),
-                         ("optional", "OPTIONAL (only the feature named needs it)"), ("info", "INFO")):
+                         ("optional", "OPTIONAL (only the feature named needs it)"), ("later", LATER_TITLE),
+                         ("info", "INFO")):
         mine = [r for r in rows if r["need"] == group]
         if not mine:
             continue
@@ -325,14 +334,14 @@ def show(rows):
     fixes = [(r["need"], r["fix"]) for r in rows if r["state"] not in ("ok", "info") and r["fix"]]
     if fixes:
         print("\nREPAIR (copy and run in this shell; doctor ran none of them):")
-        for grp in ("essential", "optional"):
+        for grp in ("essential", "optional", "later"):
             for f in dict.fromkeys(f for g, f in fixes if g == grp):
-                print("  %s%s" % (f, "" if grp == "essential" else "   # optional"))
+                print("  %s%s" % (f, {"essential": "", "optional": "   # optional"}.get(grp, "   # before pai run")))
 
 
 def failing(rows):
-    """Rows that keep pai run from working (an optional gap is reported, not failing)."""
-    return [r for r in rows if r["state"] not in ("ok", "info") and r.get("need", need(r)) != "optional"]
+    """Rows that keep pai run from working (an optional gap, or an agent not chosen yet, is reported, not failing)."""
+    return [r for r in rows if r["state"] not in ("ok", "info") and r.get("need", need(r)) not in ("optional", "later")]
 
 
 def show_platform(plat):

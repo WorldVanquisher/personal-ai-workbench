@@ -673,8 +673,10 @@ def plan_templates(src, dest):
             text = f.read()
         target = os.path.join(dest, fn)
         rec = manifest.get("files", {}).get(fn)
+        # what the template is, in place of the library's version column (R6-FIN-003, core C5)
+        what = "%s, sha256 %s" % ((template_frontmatter(text) or {}).get("template") or "template", sha256(text)[:12])
         if not os.path.exists(target):
-            rows.append((fn, "create", "", text))
+            rows.append((fn, "create", what, text))
         else:
             with open(target, encoding="utf-8", errors="replace") as f:
                 cur = f.read()
@@ -685,7 +687,7 @@ def plan_templates(src, dest):
                 rows.append((fn, "conflict", "changed since PAI wrote it (yours now); left alone", None))
                 continue
             if cur == text:
-                rows.append((fn, "same", "", None))
+                rows.append((fn, "same", what, None))
                 continue
             rows.append((fn, "update", "unchanged since PAI wrote it", text))
         new_files[fn] = {"sha256": sha256(text), "template": (template_frontmatter(text) or {}).get("template", "")}
@@ -695,7 +697,7 @@ def plan_templates(src, dest):
 def install_templates(src, dest, write=False, out=print):
     rows, manifest = plan_templates(src, dest)
     for fn, action, detail, _ in rows:
-        out("%-8s %-18s %s" % (action.upper(), fn, detail))
+        out(("%-8s %-18s %s" % (action.upper(), fn, detail)).rstrip())
     changes = [r for r in rows if r[3] is not None]
     if write and changes:
         for fn, _, _, text in changes:

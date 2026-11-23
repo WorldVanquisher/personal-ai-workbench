@@ -90,5 +90,32 @@ class CiCoverage(unittest.TestCase):
         self.assertEqual(verify.ci_covers("package", runs), "no")
 
 
+class TmuxSocketLength(unittest.TestCase):
+    """R6-FIN-007 (round NOTES-FOR-core cp-K): a long --work makes tmux's socket path too long."""
+
+    def test_the_limit_is_107_bytes(self):
+        tail = "/tmp/tmux-1000/default"
+        ok = "/" + "w" * (107 - len(tail) - 1)
+        self.assertEqual(len(ok + tail), 107)
+        self.assertIsNone(verify.tmux_socket_warning(ok, uid=1000))
+        msg = verify.tmux_socket_warning(ok + "x", uid=1000)
+        self.assertIn("108 bytes (at most 107)", msg)
+        self.assertIn('"no window"', msg)
+
+    def test_main_warns_before_it_creates_anything(self):
+        import contextlib
+        import io
+        from unittest import mock
+        work = os.path.join(tempfile.gettempdir(), "pai-verify-never-created-" + "w" * 100)
+        err = io.StringIO()
+        with mock.patch.object(verify, "groups", return_value={}), \
+                mock.patch.object(verify.os, "makedirs", side_effect=SystemExit(9)) as mk:
+            with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+                verify.main(["--work", work])
+        self.assertIn("WARNING: --work is too long for tmux", err.getvalue())
+        self.assertEqual(mk.call_count, 1, "the warning comes before the first folder is made")
+        self.assertFalse(os.path.exists(work))
+
+
 if __name__ == "__main__":
     unittest.main()

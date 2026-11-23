@@ -194,7 +194,9 @@ def check_config(r, path, only=None):
         counts = {}
         for s in proj.sources:
             counts[s.status] = counts.get(s.status, 0) + 1
-            if s.status != "ok":
+            if s.status == "missing" and s.kind == "instructions":  # R6-FIN-004 (core NOTES C10): not a failure
+                r.warn(f"{key}: instructions source MISSING: {s.label} (not found; optional: pai context uses it when present)")
+            elif s.status != "ok":
                 r.warn(f"{key}: {s.kind} source {s.status.upper()}: {s.label} ({s.reason})")
         r.ok(f"{key}: roots valid; sources " + ", ".join(f"{v} {k}" for k, v in sorted(counts.items())))
 

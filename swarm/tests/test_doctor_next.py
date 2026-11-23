@@ -30,5 +30,41 @@ class DoctorNext(unittest.TestCase):
             self.assertTrue(workbench.manual("FIRST-USE.md").endswith("/blob/v%s/docs/FIRST-USE.md" % __version__))
 
 
+class AgentsBeforeInit(unittest.TestCase):
+    """R6-FIN-020 (newbie F2-F4, decision D-FIN-2 = A): before an agent is chosen, a missing claude or codex is
+    listed for the first run and does not fail doctor; once chosen, it is essential and doctor says so."""
+
+    def rows(self, essential):
+        import doctor
+        have = {"git", "tmux", "ps", "npm"}
+        with mock.patch.object(doctor.shutil, "which", lambda t: "/usr/bin/" + t if t in have else None), \
+                mock.patch.object(doctor, "_run", lambda argv, timeout=25: (0, "x 1.0", "")):
+            return doctor, doctor.check(("claude", "codex"), agents_essential=essential)
+
+    def test_not_chosen_yet_is_later_and_not_failing(self):
+        doctor, rows = self.rows(False)
+        need = {r["tool"]: r["need"] for r in rows}
+        self.assertEqual((need["claude"], need["codex"], need["git"]), ("later", "later", "essential"))
+        self.assertEqual(doctor.failing(rows), [])
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            doctor.show(rows)
+        self.assertIn("FOR YOUR FIRST RUN", out.getvalue())
+        self.assertNotIn("MISSING        claude", out.getvalue().split("FOR YOUR FIRST RUN")[0])
+        self.assertIn("npm install -g @openai/codex   # before pai run", out.getvalue())
+
+    def test_chosen_agent_is_essential_and_next_names_it(self):
+        doctor, rows = self.rows(True)
+        failing = doctor.failing(rows)
+        self.assertEqual({r["tool"] for r in failing}, {"claude", "codex"})
+        line = workbench.doctor_next({"name": "p"}, failing, ("claude", "codex"))
+        self.assertIn("install and log in to claude or codex", line)
+        self.assertIn('section 6 "Your first round" needs it', line)
+        other = [{"tool": "tmux", "state": "missing"}]
+        self.assertIn('section 8 "When something goes wrong"', workbench.doctor_next({"name": "p"}, other, ("claude",)))
+
+
 if __name__ == "__main__":
     unittest.main()

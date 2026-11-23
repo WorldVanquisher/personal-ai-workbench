@@ -131,6 +131,12 @@ class New(RoundFixture):
         self.assertEqual(os.stat(a["prompt_file"]).st_mode & 0o777, 0o600)
         self.assertTrue(os.path.isfile(os.path.join(r["state_dir"], "BOARD.md")))
 
+    def test_a_missing_github_names_the_configuration_file(self):  # R6-FIN-005 (docs N7)
+        args = ["new", "widget", "R9-TEST", "--search", self.search, "--tmux-session", "r9"]
+        code, out, err = self.run_round(*args)
+        self.assertNotEqual(code, 0)
+        self.assertIn('add github = "OWNER/NAME" under [project.widget] in ~/.config/pai/round.toml', out + err)
+
     def test_preview_writes_nothing(self):
         code, out, _ = self.new("--prompt", self.prompt, write=False)
         self.assertEqual(code, 0, out)

@@ -208,6 +208,8 @@ class Status(unittest.TestCase):
         self.assertEqual(rows["shell"]["state"], "exited")
         self.assertEqual(rows["delta"]["state"], "no-window")
         self.assertEqual(rows["alpha"]["agent_name"], "W R9 alpha")
+        # R6-FIN-005 (docs N7): the window by its name, as `pai round launch` prints it, never by index
+        self.assertEqual((rows["alpha"]["window"], rows["beta"]["window"]), ("r9:alpha", "r9:beta"))
         self.assertTrue(rows["alpha"]["name_ok"])
         self.assertEqual(rows["alpha"]["worktree"], "clean")
         self.assertEqual(rows["delta"]["worktree"], "missing")

@@ -146,6 +146,23 @@ def ci_covers(step, runs):
 PY = [sys.executable, "-B"]
 
 
+SOCKET_MAX = 107  # sun_path is 108 bytes on Linux, with the closing NUL
+
+
+def tmux_socket_warning(work, uid=None):
+    """A warning when tmux's socket under WORK would be too long (R6-FIN-007, round NOTES-FOR-core cp-K).
+    The steps run with TMPDIR=WORK/tmp, so tmux puts its socket at WORK/tmp/tmux-UID/default; past 107 bytes
+    tmux cannot create it and the tests fail later with a puzzling "no window". None when it fits."""
+    if uid is None:
+        uid = os.getuid() if hasattr(os, "getuid") else 0
+    sock = os.path.join(work, "tmp", "tmux-%d" % uid, "default")
+    n = len(sock.encode("utf-8"))
+    if n <= SOCKET_MAX:
+        return None
+    return ("WARNING: --work is too long for tmux: its socket %s would be %d bytes (at most %d), so the tmux steps "
+            "will fail with \"no window\". Use a shorter --work, e.g. /tmp/pv-1." % (sock, n, SOCKET_MAX))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__.split("\n\n", 1)[1])
@@ -167,6 +184,9 @@ def main(argv=None):
         return 0
     started = time.time()
     work = os.path.abspath(a.work) if a.work else tempfile.mkdtemp(prefix="pai-verify-")
+    warn = tmux_socket_warning(work)
+    if warn:  # before any step: the tmux steps would fail much later with only "no window"
+        print(warn, file=sys.stderr, flush=True)
     if a.work:
         if os.path.exists(work):
             ap.error("--work %s exists; give a new folder" % work)

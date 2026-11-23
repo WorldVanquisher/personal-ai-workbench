@@ -429,6 +429,19 @@ class Templates(Base):
         self.assertTrue((dest / "request.md").read_text(encoding="utf-8").endswith("my line\n"))
 
 
+    def test_the_list_names_each_template_and_has_no_empty_column(self):  # R6-FIN-003 (core NOTES C5)
+        dest = self.tmp / "vault" / "99 Templates" / "PAI"
+        for write in (False, True, True):  # preview: CREATE; after the write: SAME
+            r = pai("prompt", "templates", "--dest", str(dest), *(["--write"] if write else []))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            rows = [l for l in r.stdout.splitlines() if l.split()[:1] in (["CREATE"], ["SAME"])]
+            self.assertEqual(len(rows), 3, r.stdout)
+            for line in rows:
+                self.assertEqual(line, line.rstrip(), "no trailing spaces")
+                self.assertRegex(line, r"^(CREATE|SAME)\s+[\w-]+\.md\s+pai-[a-z-]+/\d+, sha256 [0-9a-f]{12}$")
+        self.assertIn("SAME", r.stdout)
+
+
 class PaiInitHook(Base):
     def make(self):
         repo, vault = self.tmp / "repo", self.tmp / "vault"

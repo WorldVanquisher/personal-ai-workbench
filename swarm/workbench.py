@@ -1409,8 +1409,10 @@ def cmd_doctor(a):
         proj = current_project(types.SimpleNamespace(project=a.project))
     except Stop:
         pass
-    names = a.agent or ([proj["default_agent"]] if proj and proj.get("default_agent") else list(agents.names()))
-    rows = self_rows(proj) + doctor.check(tuple(names))
+    chosen = a.agent or ([proj["default_agent"]] if proj and proj.get("default_agent") else None)
+    names = chosen or list(agents.names())
+    # before an agent is chosen (pai init), a missing agent is for later, not a failure (R6-FIN-020)
+    rows = self_rows(proj) + doctor.check(tuple(names), agents_essential=bool(chosen))
     if proj:
         res = gitprep.remote_auth(proj["repo"], proj["remote"], "refs/heads/" + proj["base_branch"])
         rows.append({"tool": "remote access", "used_by": "run, next", "state": "ok" if res["ok"] else "unknown",
@@ -1431,7 +1433,7 @@ def cmd_doctor(a):
     else:
         doctor.show(rows)
         log("\ndoctor changed nothing.%s" % ("" if proj else " (No pai project here: `pai init` in your checkout.)"))
-        log(doctor_next(proj, doctor.failing(rows)))
+        log(doctor_next(proj, doctor.failing(rows), names))
     return 0 if not doctor.failing(rows) else 1
 
 
@@ -1449,8 +1451,13 @@ def manual(name):
     return "https://github.com/WorldVanquisher/personal-ai-workbench/blob/%s/docs/%s" % (ref, name)
 
 
-def doctor_next(proj, failing):
+def doctor_next(proj, failing, agent_names=()):
     """doctor's last line: the manual section that matches what it found."""
+    if failing and isinstance(failing, list) and all(
+            any(r["tool"] == a or r["tool"].startswith(a + " ") for a in agent_names) for r in failing):
+        # only the chosen agent is missing or logged out: that is the step before section 6, not a breakdown
+        return ('Next: install and log in to %s (the REPAIR lines above), then `pai doctor` again; %s, section 6 '
+                '"Your first round" needs it.' % (" or ".join(agent_names), manual("FIRST-USE.md")))
     if failing:
         return 'Next: fix each line marked for pai run above, then `pai doctor` again. Stuck? %s, section 8 ' \
                '"When something goes wrong".' % manual("FIRST-USE.md")

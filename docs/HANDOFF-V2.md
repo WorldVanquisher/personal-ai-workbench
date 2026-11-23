@@ -97,15 +97,18 @@ draft ──seal──▶ sealed ──approve --expect-sha──▶ approved �
                   └──a later checkpoint──▶ superseded
 ```
 
-- `pai handoff seal FILE --project P [--queue Q] [--jev-verify]`: checks the format, checks
+- `pai handoff seal PROJECT FILE [--queue Q] [--item ID] [--next-pr FILE] [--jev-verify] [--dry-run]`: checks the format, checks
   NEXT-PR.md item IDs, compares Items/Totals with the queue when given, records the sha256 in the
   queue log (`pai queue checkpoint`), and copies HANDOFF.md, NEXT-PR.md and SEAL.json into
   `<inbox>/<round>/<lane>/<checkpoint>/`. The files and the directory are fsynced. It is idempotent
   by (task, sha256): sealing the same bytes again changes nothing. Different bytes for a
   checkpoint that is already sealed are refused; write the correction into the next checkpoint.
-- `pai handoff approve|reject DIR --expect-sha SHA256 [--reason TEXT]`: refuses unless the sealed
-  HANDOFF.md still has the sha256 the owner read. It records the decision in `DECISION.json` next
-  to it; the sealed file is not rewritten, so its sha256 stays the one in the queue log.
+- `pai handoff approve PROJECT DIR --expect-sha SHA256 [--by NAME]` (or `--from-vault`, after `approved: true` in
+  the sealed note) and `pai handoff reject PROJECT DIR --expect-sha SHA256 --reason TEXT`: refuse unless the sealed
+  HANDOFF.md's body still has the sha256 the owner read (`sealed_sha256`). They record the decision in
+  `DECISION.json` next to it and set `status` and `approval` in the front matter; the body is never
+  rewritten, so its sha256 stays the one sealed. `--from-vault` marks a body edited after sealing
+  `approval: stale` and records nothing.
 - `pai worktree preview --handoff DIR --require-approved-handoff`: the plan records `task`,
   `queue_sha256` and `handoff_sha256`, and refuses a handoff that is not approved.
 

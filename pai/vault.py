@@ -255,11 +255,20 @@ def check_note(fm, text=None, decision_check=None):
                          "`pai handoff approve PROJECT DIR --from-vault`")
     if kind == "decision":  # R6-COR-041
         choice = fm.get("choice")
-        if choice and isinstance(fm.get("options"), list) and choice not in fm["options"]:
+        if choice and isinstance(fm.get("options"), list) and not choice_matches(choice, fm["options"]):
             probs.append(f"decision: choice {choice!r} is not one of the options ({'; '.join(fm['options'])})")
         if decision_check is not None:
             probs += ["decision: %s" % p for p in decision_check(fm, text)]
     return kind, probs
+
+
+def choice_matches(choice, options):
+    """The rule `pai decide answer --from-note` applies (swarm/round_vault.py answer_from_note): the whole
+    option, or its leading label (`A` for "A $5", "A：…"). R6-FIN-010: lint refused `choice: A`, which the
+    round lane accepts."""
+    choice = str(choice).strip()
+    return not options or any(choice == o or o.startswith(choice + " ") or o.startswith(choice + "：")
+                              or (o.split() or [""])[0] == choice for o in options)
 
 
 def _round_decision_check(vault):
@@ -282,9 +291,11 @@ def _round_decision_check(vault):
     def check(fm, text):
         out = []
         try:
-            body = text.split("\n---", 2)[-1] if text else ""
-            if hasattr(rv, "content_sha") and fm.get("pai_sha256") and \
-                    rv.content_sha(dict(fm), body.split("\n", 1)[-1], "decision/1") != fm["pai_sha256"]:
+            # the round lane's own reader (JSON values: escaped quotes, commas inside an option), so the sha is
+            # computed on exactly what it wrote (R6-FIN-010: this module's simple reader gave false "edited")
+            rfm, _, rbody = rv.split((text or "").replace("\r\n", "\n"))
+            if rfm and rfm.get("pai_sha256") and \
+                    rv.content_sha(rfm, rbody, "decision/1") != rfm["pai_sha256"]:
                 out.append("the PAI-written part was edited (pai_sha256 differs)")
             src = os.path.join(vault, str(fm.get("source") or ""))
             if fm.get("source") and os.path.isfile(src):

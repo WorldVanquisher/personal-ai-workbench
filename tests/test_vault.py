@@ -134,17 +134,6 @@ class Lint(Base):
         self.write("PAI/decisions/R6-D9.md", (DECISION % ("", "0" * 64)).replace('["(a) Obsidian", "(b) web"]', "[]"))
         self.assertTrue(any("nothing to choose from" in m for _, _, m in self.findings()))
 
-    def test_the_question_sha_is_checked_through_the_round_lanes_code_when_present(self):
-        seen = []
-
-        def check(fm, text):
-            seen.append(fm["source_sha"])
-            return ["the question changed in 30 Projects/sheet.md"]
-        self.write("PAI/decisions/R6-D9.md", DECISION % ("(a) Obsidian", "0" * 64))
-        rows = vault.lint(str(self.v), decision_check=check)
-        self.assertEqual(seen, ["b578b6050b861690"])
-        self.assertTrue(any(r["message"] == "decision: the question changed in 30 Projects/sheet.md" for r in rows))
-
     def test_sync_conflicts_are_reported_never_deleted(self):  # R6-COR-042
         p = self.write("PAI/decisions/R6-D9.sync-conflict-20261122-101010-ABCDEFG.md", "x")
         q = self.write("Agent Inbox/R6/core/cp-A/HANDOFF.sync-conflict-20261122-1-X.md", "y")
@@ -200,6 +189,79 @@ class SchemaDoc(unittest.TestCase):
 
 
 SWARM = ROOT / "swarm"
+
+
+class FieldsSeenInTheOwnersVault(unittest.TestCase):
+    """R6-FIN-009 (docs NOTES-FOR-core N7): lane `dialog` and `queued`, Home `title`; the real vault's notes carry
+    them (pai vault lint on MainVault, read-only, 2026-11-23: no field problem)."""
+
+    def test_the_schema_and_its_json_copy_list_them(self):
+        def names(kind, s):
+            k = s["kinds"][kind]
+            return set(k.get("required", [])) | set(k.get("fields", {})) | set(k.get("optional", [])) | \
+                set(k.get("owner_fields", []))
+        with open(ROOT / "docs" / "frontmatter.schema.json", encoding="utf-8") as f:
+            shipped = json.load(f)
+        for s in (vault.SCHEMA, shipped):
+            self.assertLessEqual({"dialog", "queued"}, names("lane", s))
+            self.assertIn("title", names("home", s))
+
+
+@unittest.skipUnless((SWARM / "round_vault.py").exists() and (SWARM / "decide.py").exists(),
+                     "the round lane's decision notes are not in this tree")
+class DecisionShaWithTheRoundLanesCode(unittest.TestCase):
+    """R6-COR-041 rerun on the merged tree (R6-FIN-010): the stub is gone; the notes are written by
+    swarm/round_vault.py from a real decision sheet and lint uses the round lane's own checks."""
+
+    def setUp(self):
+        import importlib
+        import shutil
+        sys.path[:0] = [str(SWARM), str(SWARM / "tests")]
+        try:
+            self.rv = importlib.import_module("round_vault")
+            make_round = importlib.import_module("test_round_board").make_round
+        finally:
+            del sys.path[:2]
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        self.r = make_round(tmp)
+        self.vault = self.r["vault"]
+        self.sheet = os.path.join(self.vault, "sheet.md")
+        self.write(self.sheet, '- [ ] **D7 预算**：$5 够不够。\n  - 选项：A $5；B $10, or "more"\n  - 推荐：A\n'
+                               '- [ ] **D1 定位**：PAI 是"润滑层"，不重写 Claude Code。\n  - 选项：同意；不同意\n')
+        self.rv.decision_notes(self.r, lambda s: None)
+        self.note = os.path.join(self.vault, "PAI", "decisions", "R9-D7.md")
+        self.assertIsNotNone(vault._round_decision_check(self.vault), "the real check, not a stub")
+
+    @staticmethod
+    def write(path, text):
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+
+    @staticmethod
+    def read(path):
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+
+    def problems(self):
+        return [(r["path"], r["message"]) for r in vault.lint(self.vault, roots=("PAI",)) if r["level"] == "PROBLEM"]
+
+    def test_unedited_notes_pass_even_with_quotes_and_commas(self):
+        self.assertEqual(self.problems(), [])  # before: "the PAI-written part was edited" for both notes
+
+    def test_a_short_choice_the_round_lane_accepts_passes(self):
+        self.write(self.note, self.read(self.note).replace('choice: ""', "choice: A", 1))
+        self.assertEqual(self.problems(), [])  # before: "choice 'A' is not one of the options"
+        self.write(self.note, self.read(self.note).replace("choice: A", "choice: C", 1))
+        self.assertEqual(len(self.problems()), 1)
+
+    def test_an_edited_note_and_a_changed_question_are_reported(self):
+        text = self.read(self.note)
+        self.write(self.note, text.replace("$5 够不够。\n\n|", "$6 够不够。\n\n|", 1))
+        self.assertIn("the PAI-written part was edited", self.problems()[0][1])
+        self.write(self.note, text)
+        self.write(self.sheet, self.read(self.sheet).replace("$5 够不够", "$7 够不够"))
+        self.assertIn("the question changed in sheet.md", self.problems()[0][1])
 
 
 @unittest.skipUnless((SWARM / "round_vault.py").exists() and (ROOT / "pai" / "prompteval.py").exists(),

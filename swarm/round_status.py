@@ -262,7 +262,8 @@ def window(tmux, target):
     for line in p.stdout.splitlines():
         f = line.split("\t")
         if len(f) == 8 and f[0] == win and f[2] in ("0", "1"):
-            return {"window": "%s:%s" % (sess, f[1]), "pane_id": f[3], "pane_pid": int(f[4]) if f[4].isdigit() else None,
+            # the window's name, as `pai round launch` prints it (R6-FIN-005, docs N7); the index is in f[1]
+            return {"window": "%s:%s" % (sess, f[0]), "pane_id": f[3], "pane_pid": int(f[4]) if f[4].isdigit() else None,
                     "pane_dead": f[5] == "1", "path": f[6], "activity": int(f[7]) if f[7].isdigit() else None}
     return None
 

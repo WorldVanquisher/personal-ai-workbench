@@ -356,7 +356,11 @@ def plan_new(a, cfg):
         raise RoundError("round id %r: letters, digits, . _ - only" % a.round)
     github = a.github or pc.get("github")
     if not github or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", github):
-        raise RoundError("which GitHub repository? give --github OWNER/NAME or set [project.%s] github" % a.project)
+        # names the file to edit (R6-FIN-005, docs N7)
+        raise RoundError("which GitHub repository? give --github OWNER/NAME, or add github = \"OWNER/NAME\" under "
+                         "[project.%s] in %s" % (
+                             a.project, getattr(a, "config", None) or os.environ.get("PAI_ROUND_CONFIG")
+                             or "~/.config/pai/round.toml"))
     roots = a.search or cfg.get("search") or ["~", "/srv"]
     repo, repo_how = pick_clone(github, roots, a.repo, depth=int(cfg.get("search_depth") or 5))
     branch = a.base_branch or pc.get("base_branch") or "main"

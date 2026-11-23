@@ -58,6 +58,13 @@ class CheckFile(unittest.TestCase):
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("--bogus-x", problems[0])
 
+    def test_a_flag_that_only_pais_own_init_has_is_found_with_the_commands_other_flags(self):  # R6-FIN-004
+        problems, _ = self.run_on('`pai init PROJECT --repo PATH --vault PATH --memory DIR --inbox "Agent Inbox" --write`\n')
+        self.assertEqual(problems, [])
+        problems, _ = self.run_on("`pai init PROJECT --repo PATH --vault PATH --bogus-y`\n")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("--bogus-y", problems[0])
+
     def test_an_unknown_command_and_an_unknown_flag_fail(self):
         problems, _ = self.run_on("`pai nosuchcommand --x`\n\n`pai queue init q --from x --bogus-flag`\n")
         self.assertEqual(len(problems), 2, problems)
