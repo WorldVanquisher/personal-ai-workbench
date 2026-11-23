@@ -567,13 +567,14 @@ def init_hook(a, stage):
     rel = getattr(a, "prompts", DEFAULT_DEST)
     if not rel or (stage == "before-write") == bool(a.write):
         return 0
-    dest = rel if os.path.isabs(rel) else os.path.join(a.vault, rel)
+    # normpath on the vault-relative part only: "PAI/prompts" is shown as PAI\prompts on Windows, not as a mixed path
+    dest = rel if os.path.isabs(rel) else os.path.join(a.vault, os.path.normpath(rel))
     print("\n# Prompt library (%s/%d) -> %s" % (FORMAT, VERSION, dest))  # the format this pai writes
     try:
         install(PACKAGED, dest, write=a.write, out=lambda s: print("#   " + s))
     except PromptError as e:
         print("#   SKIPPED: %s" % e)
-    tdest = os.path.join(a.vault, DEFAULT_TEMPLATES_DEST)
+    tdest = os.path.join(a.vault, os.path.normpath(DEFAULT_TEMPLATES_DEST))
     print("# Obsidian templates (core Templates plugin) -> %s" % tdest)
     try:
         install_templates(TEMPLATES, tdest, write=a.write, out=lambda s: print("#   " + s))
