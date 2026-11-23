@@ -50,8 +50,13 @@ class CheckFile(unittest.TestCase):
             return doc_check.check_file(p, d, doc_check.Pai(ROOT))
 
     def test_real_commands_and_flags_pass(self):
-        problems, notes = self.run_on("```sh\npai queue init q --from items.txt --write\npai pr plan a\n"
+        problems, notes = self.run_on("```sh\npai queue init q --from items.txt --write\n"
                                       "pai doctor --agents\npai --version\n```\n")
+        self.assertEqual((problems, notes), ([], []))
+
+    @unittest.skipIf(os.name == "nt", "the workbench (pai pr) runs in WSL, not on native Windows")
+    def test_a_real_workbench_command_passes(self):
+        problems, notes = self.run_on("```sh\npai pr plan a\n```\n")
         self.assertEqual((problems, notes), ([], []))
 
     def test_a_flag_of_pais_own_init_found_through_its_positional_routing(self):
