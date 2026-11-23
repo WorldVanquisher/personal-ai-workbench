@@ -2,7 +2,21 @@
 
 [English](README.md) | 简体中文
 
-**第一次使用？** [QUICKSTART.zh-CN.md](QUICKSTART.zh-CN.md)：安装、第一个任务、浏览器控制台、升级、卸载。
+**PAI 是多个编码 agent 并行工作的润滑层。** 每一轮工作所需的东西，由它准备好、串起来、收回来交给你。所有最终决定都由你来做。它不替换、也不包装 Claude Code 或 Codex，而是在它们旁边工作。
+
+和 LangGraph、CrewAI、AutoGen、OpenAI Agents SDK 这类"主 agent 统领子 agent"的框架相比（依据它们自己的文档；reported-by-prompts，见 [docs/WHY-PAI.md](docs/WHY-PAI.md)），区别有三点：
+
+1. **由人决定，不由主 agent 决定。** agent 只提建议；悬而未决的问题会做成决策单交给你，附上选项和推荐。
+2. **状态是文件，不在运行时里。** 交接、queue 和决策都是文件夹里的 Markdown。清空对话或者重启机器都不会丢，任何编辑器都能读。
+3. **不换引擎。** PAI 驱动的就是你已经在用的 Claude Code 和 Codex 会话。驱动它们的 prompt 是一个带版本号的库，只有经你批准才会改。
+
+| 你现在是…… | 去读 |
+| --- | --- |
+| **第一次使用 PAI** | [docs/FIRST-USE.zh-CN.md](docs/FIRST-USE.zh-CN.md)：从零到跑完第一轮，每一步都写了预期输出 |
+| **开始新的一轮，或者要升级** | [docs/REFRESH.zh-CN.md](docs/REFRESH.zh-CN.md)：升级和回滚、从合并后的 main 开新一轮、常见的坑、恢复 |
+| **查资料** | [docs/README.md](docs/README.md)：每份文档回答什么问题；术语见 [docs/GLOSSARY.zh-CN.md](docs/GLOSSARY.zh-CN.md) |
+
+**赶时间？** [QUICKSTART.zh-CN.md](QUICKSTART.zh-CN.md)：安装、第一个任务、浏览器控制台、升级、卸载。
 
 **一行安装**（Linux、macOS 或 WSL；需要 [uv](https://docs.astral.sh/uv/) 和 git）：
 

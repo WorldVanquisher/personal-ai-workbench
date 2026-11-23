@@ -216,4 +216,25 @@ def run(config_path=None, project=None, agents=False):
     if agents:
         check_agents(r)
     r.lines.append(f"\n{'NO PROBLEMS FOUND' if not r.problems else str(r.problems) + ' PROBLEM(S) FOUND'}")
+    r.lines.append(next_step(r.problems))
     return r
+
+
+REPO_URL = "https://github.com/WorldVanquisher/personal-ai-workbench"
+
+
+def manual(name):
+    """Where to read a manual: the copy in this bundle or checkout if there is one (an installed
+    package has none), else the file on GitHub for this version."""
+    from pai import __version__
+    local = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", name)
+    return local if os.path.isfile(local) else f"{REPO_URL}/blob/v{__version__}/docs/{name}"
+
+
+def next_step(problems):
+    """The last line of doctor: which manual section to read next."""
+    if problems:
+        return ("Next: fix each PROBLEM above (the → line says how), then run this doctor again. "
+                f"Stuck? {manual('FIRST-USE.md')}, section 8 \"When something goes wrong\".")
+    return (f"Next: {manual('FIRST-USE.md')}, section 6 \"Your first round\"; "
+            f"for a later round, {manual('REFRESH.md')}, part (b) \"Every round\".")

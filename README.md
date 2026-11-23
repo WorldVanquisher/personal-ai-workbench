@@ -2,7 +2,27 @@
 
 English | [简体中文](README.zh-CN.md)
 
-**New here?** [QUICKSTART.md](QUICKSTART.md): install, first task, the browser console, upgrade, uninstall.
+**PAI is the lubrication layer for running several coding agents in parallel.** It prepares
+each round, connects the agents' work, and collects it back for you. You keep every final
+decision. It does not replace or wrap Claude Code or Codex; it works beside them.
+
+How it differs from lead-agent frameworks such as LangGraph, CrewAI, AutoGen or the OpenAI Agents
+SDK, as their own documentation describes them (reported-by-prompts, [docs/WHY-PAI.md](docs/WHY-PAI.md)):
+
+1. **The person decides, not a lead agent.** Agents propose; open questions reach you as a decision
+   sheet with options and a recommendation.
+2. **State is files, not a runtime.** Handoffs, queues and decisions are Markdown in a folder. They
+   survive a cleared conversation or a reboot, and any editor reads them.
+3. **No new engine.** PAI drives the Claude Code and Codex sessions you already run. Their prompts
+   are a versioned library that changes only with your approval.
+
+| You are … | Read |
+| --- | --- |
+| **using PAI for the first time** | [docs/FIRST-USE.md](docs/FIRST-USE.md): from nothing to a finished first round, every step with its expected output |
+| **starting another round, or upgrading** | [docs/REFRESH.md](docs/REFRESH.md): upgrade and rollback, a new round from the merged main, pitfalls, recovery |
+| **looking something up** | [docs/README.md](docs/README.md): which document answers what; [docs/GLOSSARY.md](docs/GLOSSARY.md) for the words |
+
+**In a hurry?** [QUICKSTART.md](QUICKSTART.md): install, first task, the browser console, upgrade, uninstall.
 
 **Install in one line** (Linux, macOS or WSL; needs [uv](https://docs.astral.sh/uv/) and git):
 
