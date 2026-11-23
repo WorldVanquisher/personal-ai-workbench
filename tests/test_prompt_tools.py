@@ -53,6 +53,17 @@ class Tools(unittest.TestCase):
         self.assertIn("budget $0.00 reached", p.stdout)
 
 
+    def test_replay_e2_out_may_name_a_folder_that_does_not_exist_yet(self):  # R6-FIN-019
+        runs = os.path.join(self.tmp, "runs.jsonl")
+        with open(runs, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"id": "A-00", "variant": "A", "score": 1.0, "checks": {"first-ids": True},
+                                "reply": "我读了 README.md"}, ensure_ascii=False) + "\n")
+        out = os.path.join(self.tmp, "out", "real", "e2", "REPLAY.json")
+        p = run("replay_e2.py", runs, "--out", out)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        with open(out, encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["format"], "pai-replay-e2/1")
+
     def test_experiment_e3_dry_run_separates_the_fake_variants_and_resumes(self):
         out = os.path.join(self.tmp, "e3")
         p = run("experiment_e3.py", "--dry-run", "--runs", "2", "--out", out)

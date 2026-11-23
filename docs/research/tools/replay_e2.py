@@ -64,6 +64,8 @@ def main(argv=None):
         runs = [json.loads(line) for line in f if line.strip()]
     res = replay(runs, prompteval.load_contract("first-reply"), a.jev, a.repeat)
     if a.out:
+        # the folder may not exist yet, as with experiment_e3.py (R6-FIN-019; mastermind's first real replay)
+        os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
         with open(a.out, "w", encoding="utf-8") as f:
             json.dump(res, f, ensure_ascii=False, indent=1)
     for v, g in res["variants"].items():
