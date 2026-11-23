@@ -1,7 +1,7 @@
 # 0.5.0 candidate changelog (draft for the owner; only behaviour demonstrated in this tree)
 
-Not released. The tree still says 0.4.0; the owner sets the version, writes RELEASE_NOTES.md and
-tags. Every line below is shown by a test or a recorded run named in
+Not released. The release branch says 0.5.0 (fin lane R6-FIN-012, owner decision D-RND-4); the owner reviews
+RELEASE_NOTES.md and tags. Every line below is shown by a test or a recorded run named in
 `PAI-0.5.0-R2-HANDOFF-100.md`. Fakes only: no line here is a claim about real Claude Code or Codex.
 
 ## New
@@ -111,8 +111,8 @@ lanes (docs, prompts, round) add their own sections; nothing here is reported-by
   (agrees / DISAGREES, a reference only).
 - **Owner tool:** `tools/real_agent_smoke.sh` repeats the 2026-11-22 headless smoke (owner runs it).
 
-Version: still 0.4.0 in the tree. The bump to 0.5.0 is prepared, not applied: the core lane's
-`proposals/version-0.5.0.patch` in the round's Agent Inbox (owner decision).
+Version: 0.5.0 in the release branch: the core lane's `proposals/version-0.5.0.patch` and the install lines of
+`proposals/version-0.5.0-integ.patch`, applied by the fin lane (R6-FIN-012; owner decision D-RND-4).
 
 ## 0.5.0 release candidate, by feature (R6-COR-082; draft of the release PR body)
 

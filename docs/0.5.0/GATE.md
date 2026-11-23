@@ -14,7 +14,7 @@ pushed or published; `git for-each-ref` and `git tag -l` are unchanged by this w
 | G4 | Real-agent smoke, Claude lane (`docs/1.0/REAL-AGENT-SMOKE.md`) | owner-only | run it |
 | G5 | Real switch run A, Claude to Codex (`docs/1.0/REAL-AGENT-SWITCH.md`) | owner-only | run it, or ship with "continuation verified with fake agents only" |
 | G6 | Owner decisions: COMPATIBILITY.md, EXPERIMENTAL.md boundaries, cards/transfer/queue formats as committed, `pai web` stays experimental | proposals in the docs | decide |
-| G7 | Version set to 0.5.0, release notes from `CHANGELOG-CANDIDATE.md` and MIGRATION.md | not done (version stays 0.4.0 by rule) | set, review, commit |
+| G7 | Version set to 0.5.0, release notes from `CHANGELOG-CANDIDATE.md` and MIGRATION.md | set in the release branch (fin R6-FIN-012, R6-FIN-014); not committed | review, commit |
 | G8 | Tag `v0.5.0` and publish the archives with `.sha256` | not done (owner-only) | separate decision |
 
 Required only for a specific claim in the 0.5.0 notes: switch run B and run C (Codex as a source,
