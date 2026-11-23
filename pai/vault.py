@@ -306,8 +306,8 @@ def _round_decision_check(vault):
                 out.append("the PAI-written part was edited (pai_sha256 differs)")
             src = os.path.join(vault, str(fm.get("source") or ""))
             if fm.get("source") and os.path.isfile(src):
-                with open(src, encoding="utf-8") as f:
-                    blocks = dc.parse(f.read())
+                # the round lane's reader too: its sha covers the bytes, \r\n included (a sheet saved on Windows)
+                blocks = dc.parse(dc.read(src)[1])
                 if not any(b["sha"].startswith(str(fm.get("source_sha"))) for b in blocks):
                     out.append("the question changed in %s (source_sha %s matches no decision there)" % (
                         fm["source"], fm.get("source_sha")))

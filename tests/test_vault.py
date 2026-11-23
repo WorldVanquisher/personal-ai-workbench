@@ -249,6 +249,14 @@ class DecisionShaWithTheRoundLanesCode(unittest.TestCase):
     def test_unedited_notes_pass_even_with_quotes_and_commas(self):
         self.assertEqual(self.problems(), [])  # before: "the PAI-written part was edited" for both notes
 
+    def test_a_sheet_saved_with_crlf_line_ends_passes(self):
+        # an editor on Windows saves \r\n; the round lane hashes the bytes, so lint must read them the same way
+        text = self.read(self.sheet)
+        with open(self.sheet, "w", encoding="utf-8", newline="\r\n") as f:
+            f.write(text)
+        self.rv.decision_notes(self.r, lambda s: None)
+        self.assertEqual(self.problems(), [])
+
     def test_a_short_choice_the_round_lane_accepts_passes(self):
         self.write(self.note, self.read(self.note).replace('choice: ""', "choice: A", 1))
         self.assertEqual(self.problems(), [])  # before: "choice 'A' is not one of the options"
