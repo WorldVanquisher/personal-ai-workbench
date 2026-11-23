@@ -33,11 +33,11 @@ Short, stable and true for every task. Typical sections:
 - the scope discipline;
 - where the contracts are.
 
-Two limits from the agents' own documentation (reported-by-prompts, `docs/research/LANDSCAPE.md`,
+Two limits from the agents' own documentation (reported-by-prompts, [`docs/research/LANDSCAPE.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/research/LANDSCAPE.md),
 re-verified 2026-11-22):
 - Codex stops reading instruction files at 32 KiB, counting L0 and every nested file together. A
-  real example: FLH's 63 KiB AGENTS.md puts every rule past line 519 out of Codex's reach
-  ([analysis §6](research/FLH-AGENTS-ANALYSIS.md#6-context-budget-r6-doc-060)).
+  real example: FLH's (the owner's other project, used as the worked example on this page) 63 KiB AGENTS.md puts every rule past line 519 out of Codex's reach
+  ([analysis §6](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/research/FLH-AGENTS-ANALYSIS.md#6-context-budget-r6-doc-060)).
 - When a `CLAUDE.md` exists, Claude Code does not read `AGENTS.md`, unless each user changes a
   setting, and that setting is ignored in a repository's settings files. A `CLAUDE.md` holding
   `@AGENTS.md` makes both agents read the same L0. Claude Code does not read `.agents/`,
@@ -59,7 +59,7 @@ reading its `AGENTS.md`, unless that `CLAUDE.md` imports it.
 
 What does **not** belong here: status reports ("round 4 delivered …"), one subsystem's details, and
 anything dated. For a worked example of splitting a real 1,074-line file, see
-[research/FLH-AGENTS-ANALYSIS.md](research/FLH-AGENTS-ANALYSIS.md).
+[research/FLH-AGENTS-ANALYSIS.md](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/research/FLH-AGENTS-ANALYSIS.md).
 
 **Windows note.** A `CLAUDE.md` that is a symbolic link to `AGENTS.md` becomes a 9-byte text file on
 a Windows checkout without symlink support, and Claude Code then reads no rules. Replace it with a
@@ -73,7 +73,7 @@ One file per area, loaded only when a session works in that area.
 **Not implemented in PAI.** No `pai` command creates, lists or loads contract files yet. Today,
 you link them from L0 ("before touching tools/extraction, read docs/contracts/extraction.md"). Both
 agents also have a native way to load files by location (reported-by-prompts:
-`docs/research/LANDSCAPE.md`):
+[`docs/research/LANDSCAPE.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/research/LANDSCAPE.md)):
 
 - Claude Code: `.claude/rules/*.md` with a `paths:` front matter;
 - Codex: nested `AGENTS.md` files per directory.

@@ -18,13 +18,13 @@
 
 **赶时间？** [QUICKSTART.zh-CN.md](QUICKSTART.zh-CN.md)：安装、第一个任务、浏览器控制台、升级、卸载。
 
-**一行安装**（Linux、macOS 或 WSL；需要 [uv](https://docs.astral.sh/uv/) 和 git）：
+**安装。** 拿不准用哪种，就用发布归档，[docs/FIRST-USE.zh-CN.md](docs/FIRST-USE.zh-CN.md#2-安装-pai) 里一步一步写了（方式 A：会校验 sha256，下载之后不需要联网，并保留上一个版本方便回滚）。**如果你已经在用 [uv](https://docs.astral.sh/uv/)**，一行就能装（Linux、macOS 或 WSL；需要 git）：
 
 ```sh
-uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.4.0
+uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.5.0
 ```
 
-如果 uv 提示它的 bin 目录不在 PATH 里，运行它打印的那行 `export PATH=…`（或 `uv tool update-shell`），然后打开一个新终端。接着在你的 Git checkout 里依次运行：`pai doctor` → `pai init` → `pai task new "标题" --write` → `pai run --dry-run`。升级：把这一行里的版本号换成新版本再运行一次。卸载：`uv tool uninstall pai-workbench`（配置和任务笔记会保留）。没有 uv？请从 [v0.4.0 发布页](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.4.0) 下载压缩包，按下面的“快速开始”操作。
+如果 uv 提示它的 bin 目录不在 PATH 里，运行它打印的那行 `export PATH=…`（或 `uv tool update-shell`），然后打开一个新终端。接着在你的 Git checkout 里依次运行：`pai doctor` → `pai init` → `pai task new "标题" --write` → `pai run --dry-run`。升级：把这一行里的版本号换成新版本再运行一次。卸载：`uv tool uninstall pai-workbench`（配置和任务笔记会保留）。压缩包在 [v0.5.0 发布页](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.5.0) 上，用法见下面的“快速开始”。
 
 PAI 把一个 AI 辅助项目的“工作记忆”保存在普通的 Markdown 文件里，并在你的控制下让编码 agent 基于它干活。
 
@@ -37,9 +37,9 @@ PAI 把一个 AI 辅助项目的“工作记忆”保存在普通的 Markdown �
 Linux、macOS 或 WSL，需要 Python 3.11+、git 和 tmux。全程不需要 sudo，也不需要把脚本管道给 shell：
 
 ```sh
-sha256sum -c pai-workbench-0.4.0.tar.gz.sha256      # macOS：shasum -a 256 -c pai-workbench-0.4.0.tar.gz.sha256
-tar -xzf pai-workbench-0.4.0.tar.gz
-pai-workbench-0.4.0/bin/pai install                  # 校验后复制到 ~/.local/share/pai-workbench，`pai` 放在 ~/.local/bin
+sha256sum -c pai-workbench-0.5.0.tar.gz.sha256      # macOS：shasum -a 256 -c pai-workbench-0.5.0.tar.gz.sha256
+tar -xzf pai-workbench-0.5.0.tar.gz
+pai-workbench-0.5.0/bin/pai install                  # 校验后复制到 ~/.local/share/pai-workbench，`pai` 放在 ~/.local/bin
 ```
 
 如果 `install` 提示 `~/.local/bin is not on PATH`，运行它为你的 shell 打印的那一行（bash：`echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc`），然后打开一个新终端。接着在你的 Git checkout 里：
@@ -56,7 +56,7 @@ pai web                  # 在浏览器里查看同一次运行（Ctrl-C 停止�
 
 `pai guide` 会在一个可删除的文件夹里，用一个假的 worker 离线走完这整条路径（不需要账号或网络）。单独运行 `pai` 会再次显示这条路径；`pai --help` 列出所有命令。如果某条 lane 在等 agent 首次使用时的“是否信任此文件夹”提示，`pai status` 会说明，`pai trust` 会逐个打开提示让你回答，任务随后送达。升级就是用新压缩包重复上面三行：任何一步失败，旧版本都照常可用；你的配置和任务笔记不会被改动。
 
-**获取压缩包。** 从 [v0.4.0 发布页](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.4.0) 下载 `pai-workbench-0.4.0.tar.gz` 和它的 `.sha256`（`.zip` 内容相同，供 Windows 使用）。也可以在源码 checkout 里构建同样的压缩包：`python3 -B tools/build_bundle.py --out dist`。
+**获取压缩包。** 从 [v0.5.0 发布页](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.5.0) 下载 `pai-workbench-0.5.0.tar.gz` 和它的 `.sha256`（`.zip` 内容相同，供 Windows 使用）。也可以在仓库的 Git clone 里构建同样的压缩包（压缩包里没有 `tools/`）：`python3 -B tools/build_bundle.py --out dist`。
 
 从远程仓库开始时，pai 会克隆到它管理的 checkout，在你审阅之前不启动任何 agent：`pai run --repo https://github.com/OWNER/REPO.git --workers 2 --agent claude --agent codex`。
 
@@ -85,7 +85,7 @@ pai web                  # 在浏览器里查看同一次运行（Ctrl-C 停止�
 - `swarm/WORKBENCH.md`（压缩包和 checkout 里都有）：工作台指南，包括平台安装、配置、文件夹信任、SSH、清理和 JEV 费用。
 - 提交审阅前检查改动：`python3 -B tools/verify.py` 运行核心和工作台测试套件（文件句柄泄漏也算失败），构建两种压缩包并做冒烟测试，然后运行 headless 测试、从刚构建的压缩包开始的新用户验收、QUICKSTART 演练、浏览器控制台演练和安装包检查（安装、升级、卸载）。测试目录自动发现（`--list`）；缺少所需工具（tmux、uv、setuptools）的步骤会标为跳过；汇总给出每一步的耗时和每个被跳过的测试及原因。`--quick` 只运行核心套件和压缩包检查。
 - `swarm/RUN-STATE.md`（运行状态名称、标识符以及每种状态背后的证据）和 `swarm/BACKENDS.md`（每个代理后端提供的能力，以及如何新增一个）；两者都随压缩包发布。
-- [docs/1.0/](docs/1.0/)：给所有者的 1.0 提案：验收清单、平台、兼容性承诺、实验功能政策、能力矩阵、从 0.4.x 迁移、真实代理冒烟清单、待办列表（英文）。
+- [docs/1.0/](https://github.com/WorldVanquisher/personal-ai-workbench/tree/v0.5.0/docs/1.0/)：给所有者的 1.0 提案：验收清单、平台、兼容性承诺、实验功能政策、能力矩阵、从 0.4.x 迁移、真实代理冒烟清单、待办列表（英文）。
 - [SESSION_START.md](SESSION_START.md)：agent 会话的开场提示；[RELEASE_NOTES.md](RELEASE_NOTES.md)：变更与测试记录。
 
 许可证：MIT，见 [LICENSE](LICENSE)。

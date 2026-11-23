@@ -15,7 +15,7 @@ per decision. Obsidian is where you **look, approve and choose**. The rules (own
 
 The vault is just a folder. Any editor, `cat` or `grep` sees the same thing Obsidian does.
 
-The commands on this page are specified in `docs/ROUND.md` and `docs/HANDOFF-V2.md`. The layout below was
+The commands on this page are specified in [`docs/ROUND.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/ROUND.md) and [`docs/HANDOFF-V2.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/HANDOFF-V2.md). The layout below was
 written into the owner's real vault by `pai round status --write-vault` on 2026-11-22.
 
 ## 1. The folders

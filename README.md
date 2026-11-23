@@ -24,18 +24,21 @@ SDK, as their own documentation describes them (reported-by-prompts, [docs/WHY-P
 
 **In a hurry?** [QUICKSTART.md](QUICKSTART.md): install, first task, the browser console, upgrade, uninstall.
 
-**Install in one line** (Linux, macOS or WSL; needs [uv](https://docs.astral.sh/uv/) and git):
+**Install.** Not sure how? Use the release archive, step by step in
+[docs/FIRST-USE.md](docs/FIRST-USE.md#2-install-pai) (path A: the sha256 is checked, no network after
+the download, the previous version is kept for a rollback). **If you already use
+[uv](https://docs.astral.sh/uv/)**, it is one line instead (Linux, macOS or WSL; needs git):
 
 ```sh
-uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.4.0
+uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.5.0
 ```
 
 If uv warns that its bin folder is not on your PATH, run the `export PATH=…` line it prints
 (or `uv tool update-shell`) and open a new terminal. Then, inside your Git checkout:
 `pai doctor` → `pai init` → `pai task new "TITLE" --write` → `pai run --dry-run`.
 Upgrade: the same line with the new version. Remove: `uv tool uninstall pai-workbench`
-(your configuration and task notes stay). No uv? Use the archives on the
-[v0.4.0 release page](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.4.0), as in the Quick start below.
+(your configuration and task notes stay). The archives are on the
+[v0.5.0 release page](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.5.0), as in the Quick start below.
 
 PAI keeps an AI-assisted project's working memory in plain Markdown files, and runs coding
 agents against it under your control.
@@ -62,9 +65,9 @@ Linux, macOS or WSL, with Python 3.11+, git and tmux. Nothing needs sudo, and no
 piped into a shell:
 
 ```sh
-sha256sum -c pai-workbench-0.4.0.tar.gz.sha256      # macOS: shasum -a 256 -c pai-workbench-0.4.0.tar.gz.sha256
-tar -xzf pai-workbench-0.4.0.tar.gz
-pai-workbench-0.4.0/bin/pai install                  # a verified copy in ~/.local/share/pai-workbench, `pai` in ~/.local/bin
+sha256sum -c pai-workbench-0.5.0.tar.gz.sha256      # macOS: shasum -a 256 -c pai-workbench-0.5.0.tar.gz.sha256
+tar -xzf pai-workbench-0.5.0.tar.gz
+pai-workbench-0.5.0/bin/pai install                  # a verified copy in ~/.local/share/pai-workbench, `pai` in ~/.local/bin
 ```
 
 If `install` says `~/.local/bin is not on PATH`, run the one line it prints for your shell
@@ -88,9 +91,10 @@ prompt for you to answer; the task follows. Upgrading is the same three lines wi
 archive: the previous version keeps working if anything fails, and your configuration and
 task notes are not touched.
 
-**Getting the archive.** Download `pai-workbench-0.4.0.tar.gz` and its `.sha256` from the
-[v0.4.0 release page](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.4.0) (the `.zip` is the same files, for Windows). The same archives
-can be built from a checkout: `python3 -B tools/build_bundle.py --out dist`.
+**Getting the archive.** Download `pai-workbench-0.5.0.tar.gz` and its `.sha256` from the
+[v0.5.0 release page](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.5.0) (the `.zip` is the same files, for Windows). The same archives
+can be built from a Git clone of the repository (`tools/` is not in the archive):
+`python3 -B tools/build_bundle.py --out dist`.
 
 From a remote repository, pai clones into a checkout it manages and starts no agent until
 you have reviewed it: `pai run --repo https://github.com/OWNER/REPO.git --workers 2 --agent
@@ -144,7 +148,7 @@ Windows steps for the core.
   reason. `--quick` runs only the core suite and the archives.
 - `swarm/RUN-STATE.md` (lifecycle names, identifiers and the evidence behind each status) and
   `swarm/BACKENDS.md` (what each agent backend exposes; adding one); both ship in the archive.
-- [docs/1.0/](docs/1.0/): the 1.0 proposals for the owner: acceptance checklist, platforms,
+- [docs/1.0/](https://github.com/WorldVanquisher/personal-ai-workbench/tree/v0.5.0/docs/1.0/): the 1.0 proposals for the owner: acceptance checklist, platforms,
   compatibility, experimental policy, capabilities matrix, migration from 0.4.x, real-agent smoke
   checklist, backlog.
 - [SESSION_START.md](SESSION_START.md): the prompt for an agent session;

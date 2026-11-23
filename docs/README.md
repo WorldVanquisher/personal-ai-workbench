@@ -13,7 +13,7 @@ Which document answers which question. Chinese versions sit beside the English o
 | A word is unclear (round, lane, checkpoint, NEXT-PR, JEV, trusted root …) | [GLOSSARY.md](GLOSSARY.md) ([中文](GLOSSARY.zh-CN.md)) |
 | You use Obsidian as the console: Home, boards, lane and decision notes, answering and approving | [OBSIDIAN.md](OBSIDIAN.md) ([中文](OBSIDIAN.zh-CN.md)) |
 | A question that is not a procedure ("can it …", "why does it …") | [FAQ.md](FAQ.md) ([中文](FAQ.zh-CN.md)) |
-| You want a whole round with two lanes to copy from | [examples/two-lane-round/](../examples/two-lane-round/README.md), with its terminal transcript |
+| You want a whole round with two lanes to copy from | [examples/two-lane-round/](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/examples/two-lane-round/README.md), with its terminal transcript |
 
 ## Understand it
 
@@ -37,22 +37,23 @@ Which document answers which question. Chinese versions sit beside the English o
 | What changed, and what was tested | [RELEASE_NOTES.md](../RELEASE_NOTES.md) |
 | The prompt for an agent session | [SESSION_START.md](../SESSION_START.md) |
 
-Formats and commands added in 0.5.0 (each written by the lane that built it; in a checkout, and in
-the archive once they ship):
+Formats and commands added in 0.5.0 (each written by the lane that built it; in a Git clone, and
+on GitHub; not in the archive):
 
-- `docs/ROUND.md` (round lane): `pai round` and ROUND.json.
-- `docs/PROMPTS.md` (prompts lane): the prompt library and `pai prompt`.
-- `docs/HANDOFF-V2.md` (core lane): the handoff format `pai-handoff/2` and NEXT-PR.md.
-- `docs/FRONTMATTER.md` (core lane): the front matter of PAI's notes, and `docs/frontmatter.schema.json`.
+- [`docs/ROUND.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/ROUND.md) (round lane): `pai round` and ROUND.json.
+- [`docs/PROMPTS.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/PROMPTS.md) (prompts lane): the prompt library and `pai prompt`.
+- [`docs/HANDOFF-V2.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/HANDOFF-V2.md) (core lane): the handoff format `pai-handoff/2` and NEXT-PR.md.
+- [`docs/FRONTMATTER.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/FRONTMATTER.md) (core lane): the front matter of PAI's notes, and [`docs/frontmatter.schema.json`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/frontmatter.schema.json).
 
 ## For maintainers
 
 | When | Read |
 | --- | --- |
 | Before a release: what to check in the docs | [the checklist below](#before-a-release-the-documentation-checklist) |
-| 0.5.0 candidate: gate, evidence, checklist | [0.5.0/](0.5.0/GATE.md) |
-| 1.0 proposals: acceptance, platforms, compatibility, real-agent smoke | [1.0/](1.0/ACCEPTANCE.md) |
+| 0.5.0 candidate: gate, evidence, checklist | [0.5.0/](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/0.5.0/GATE.md) |
+| 1.0 proposals: acceptance, platforms, compatibility, real-agent smoke | [1.0/](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/1.0/ACCEPTANCE.md) |
 | Checking the manuals against the commands | `python3 -B tools/doc_check.py` |
+| The maintainer's own R6 setup (Syncthing, NAS, `r6-*.sh`, tmux session `r6`) and its recovery steps | [maintainers/R6-ENVIRONMENT.md](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/maintainers/R6-ENVIRONMENT.md) |
 
 ## Before a release: the documentation checklist
 
@@ -81,7 +82,7 @@ Run these on the release candidate commit, in order. Each one says what passing 
    real runs and CI (with run links), and never from older ones. A cell says **ran** only with a date
    and who ran it.
 6. **Walk the manual.** Walk FIRST-USE once in a brand-new home folder
-   (`HOME=$(mktemp -d)`, fake agents as in [examples/two-lane-round/](../examples/two-lane-round/README.md)).
+   (`HOME=$(mktemp -d)`, fake agents as in [examples/two-lane-round/](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/examples/two-lane-round/README.md)).
    Every command must give the output the page shows. Any surprise becomes a row in its section 8.
 7. **The fresh-reader score (optional, JEV).** Score each FIRST-USE and REFRESH section with the
    question "can a reader follow only this section without asking anyone?". Investigate any section
@@ -99,9 +100,9 @@ Run these on the release candidate commit, in order. Each one says what passing 
 
      Every file must print a share above 0.05. A file near 0 has become English: translate it back,
      or ask the owner.
-   - `docs/PROMPTS.md` must say that the library is Chinese.
+   - [`docs/PROMPTS.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/PROMPTS.md) must say that the library is Chinese.
 10. **A PR only for a release (owner, 2026-11-22).** Lanes and rounds do not open GitHub PRs of their
     own. Their work is merged locally (for 0.5.0 the local branch `integ/0.5.0`) until it adds up to
     a release worth publishing; then **one** release PR is opened, with the version bump and the
-    release notes ([0.5.0 draft](0.5.0/RELEASE-NOTES-DRAFT.md)), and the owner approves, merges and
+    release notes ([0.5.0 draft](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/0.5.0/RELEASE-NOTES-DRAFT.md)), and the owner approves, merges and
     publishes it. Success: the PR's commits are exactly the release candidate this checklist ran on.

@@ -3,16 +3,16 @@
 <!-- doc_check: fields -->
 English | [简体中文](GLOSSARY.zh-CN.md)
 
-The words PAI's manuals use, in the order you meet them. Commands in `code` exist in pai 0.4.0
+The words PAI's manuals use, in the order you meet them. Commands in `code` exist in pai 0.5.0
 unless marked *(planned)*.
 
 ## round
 
 One batch of parallel work that starts from one base commit and ends when its PRs are merged
 or dropped, for example `R6-20261122`. A round has several lanes, one prompt per lane, one
-handoff folder per lane, and one decision sheet. Today a round is prepared with the scripts in
-[REFRESH.md](REFRESH.md#b-every-round) (`r6-prepare.sh`, `r6-worktrees.sh`). `pai round` is
-*(planned, round lane)*.
+handoff folder per lane, and one decision sheet. `pai round` prepares, runs and closes one
+([REFRESH.md](REFRESH.md#b-every-round), part (b)). A single `pai run` with a few task notes is a
+small round of its own.
 
 ## lane
 
@@ -101,7 +101,7 @@ round.
 
 On R6 day (2026-11-22, Claude Code 2.1.330) the owner observed that worktrees created under a
 folder that had already been trusted did not ask again. So keep all rounds under one root,
-for example `~/workspace/pai-workers/<round>/<lane>`, trust it once, and keep using it. This
+for example `~/pai-lanes/<round>/<lane>`, trust it once, and keep using it. This
 is an observation of one Claude Code version, not a documented guarantee: if a prompt
 appears, answer it (`pai trust`).
 

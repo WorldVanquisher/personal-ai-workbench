@@ -458,7 +458,7 @@ Not verified against the real programs:
   the keys were checked byte for byte against a recording terminal program and the fake
   agents), and `pai web` / `pai edit` in a desktop browser on macOS or Windows.
 
-[SMOKE.md](SMOKE.md) is the owner-run checklist for those.
+[SMOKE.md](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/swarm/SMOKE.md) is the owner-run checklist for those.
 
 ## 13. Experimental: the Markdown server (checkout only)
 

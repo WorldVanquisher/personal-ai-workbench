@@ -29,8 +29,8 @@ PAI 把平常堆在这一个文件里的东西拆成四层。每一层的负责�
 - 范围纪律；
 - 契约放在哪里。
 
-两种 agent 官方文档里的两条限制（reported-by-prompts，`docs/research/LANDSCAPE.md`，2026-11-22 重新核实）：
-- Codex 读指令文件，最多读 32 KiB，L0 和所有嵌套文件合起来算。真实的例子：FLH 的 AGENTS.md 有 63 KiB，第 519 行之后的规则 Codex 全都读不到（[分析 §6](research/FLH-AGENTS-ANALYSIS.md#6-context-budget-r6-doc-060)）。
+两种 agent 官方文档里的两条限制（reported-by-prompts，[`docs/research/LANDSCAPE.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/research/LANDSCAPE.md)，2026-11-22 重新核实）：
+- Codex 读指令文件，最多读 32 KiB，L0 和所有嵌套文件合起来算。真实的例子：FLH（owner 的另一个项目，这一页拿它当实例）的 AGENTS.md 有 63 KiB，第 519 行之后的规则 Codex 全都读不到（[分析 §6](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/research/FLH-AGENTS-ANALYSIS.md#6-context-budget-r6-doc-060)）。
 - 有 `CLAUDE.md` 时，Claude Code 不读 `AGENTS.md`，除非每个用户自己改一个设置，而这个设置写在仓库的设置文件里是无效的。用一个只写 `@AGENTS.md` 的 `CLAUDE.md`，两种 agent 就会读同一份 L0。Claude Code 不读 `.agents/`、`AGENTS.local.md` 和 `AGENTS.override.md`。
 
 **Claude Code 实际读哪些文件**（mastermind 2026-11-22 real run，Claude Code 2.1.330，haiku）。严格复测时禁用了所有文件工具，模型只能根据它装载的说明文件作答。每个用例跑 2 次，10 次全部符合预期，每次都是 1 轮就答。
@@ -44,7 +44,7 @@ PAI 把平常堆在这一个文件里的东西拆成四层。每一层的负责�
 
 最要记住的是第 2 条：文件夹里一旦加了 `CLAUDE.md`，Claude Code 就不再读 `AGENTS.md`，而且不会有任何提示，除非这个 `CLAUDE.md` 导入了它。
 
-**不该**放在这里的：进度报告（"第 4 轮交付了……"）、某一个子系统的细节、任何带日期的内容。一个真实的 1074 行文件怎么拆，见 [research/FLH-AGENTS-ANALYSIS.md](research/FLH-AGENTS-ANALYSIS.md)（英文）。
+**不该**放在这里的：进度报告（"第 4 轮交付了……"）、某一个子系统的细节、任何带日期的内容。一个真实的 1074 行文件怎么拆，见 [research/FLH-AGENTS-ANALYSIS.md](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/research/FLH-AGENTS-ANALYSIS.md)（英文）。
 
 **Windows 注意。** 如果 `CLAUDE.md` 是指向 `AGENTS.md` 的符号链接，在不支持符号链接的 Windows checkout 里，它会变成一个 9 字节的文本文件，Claude Code 就读不到任何规则。可以换成一个只写一行 `@AGENTS.md` 的普通 `CLAUDE.md`，也可以直接删掉它（第 4 条）。两种做法见 [下文：把 CLAUDE.md 符号链接改成导入](#把-claudemd-符号链接改成导入)。
 
@@ -52,7 +52,7 @@ PAI 把平常堆在这一个文件里的东西拆成四层。每一层的负责�
 
 每个领域一份文件，只有会话碰到那个领域时才装载。
 
-**PAI 还没有实现。** 目前没有任何 `pai` 命令会创建、列出或装载契约文件。现在的做法是在 L0 里写上链接（"改 tools/extraction 之前，先读 docs/contracts/extraction.md"）。两种 agent 也都有按位置装载文件的原生方式（reported-by-prompts：`docs/research/LANDSCAPE.md`）：
+**PAI 还没有实现。** 目前没有任何 `pai` 命令会创建、列出或装载契约文件。现在的做法是在 L0 里写上链接（"改 tools/extraction 之前，先读 docs/contracts/extraction.md"）。两种 agent 也都有按位置装载文件的原生方式（reported-by-prompts：[`docs/research/LANDSCAPE.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/research/LANDSCAPE.md)）：
 
 - Claude Code：带 `paths:` front matter 的 `.claude/rules/*.md`；
 - Codex：每个目录各自的嵌套 `AGENTS.md`。

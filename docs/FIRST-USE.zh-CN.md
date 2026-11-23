@@ -16,8 +16,6 @@
 > 4. **定预算。** 开几个 worker、用哪个模型、每轮花多少钱。pai 显示它能看到的花费，但从不替你提高上限。
 > 5. **回答决策单。** 每个问题都附了选项和推荐，由你勾选。
 
-<!-- doc_check: pending pai round launch --allow-unbracketed -->
-
 ## 1. 需要准备什么
 
 - Linux、WSL（Ubuntu）或 macOS。workbench 在 macOS 上还没实际跑过，见平台页。原生 Windows 上请把 pai 装进 WSL。
@@ -29,7 +27,7 @@
 
   预期：三行输出，例如 `Python 3.12.3`、`git version 2.43.0`、`tmux 3.4`。要求是 Python 3.11 或更高、任意 git 2.x、任意 tmux 3.x。
 
-  **tmux 低于 3.8**（Ubuntu 和 WSL 自带的是 3.6）时，这一页的所有步骤照常可用。只有 `pai round`（第 9 节）受影响：3.8 以前的 tmux 无法报告 agent 有没有开启 bracketed paste，所以 `pai round launch`、`inject` 和 `next --send` 只往运行着 Claude Code 或 Codex 的 pane 里粘贴，其他程序一律拒绝（reported-by-round，R6-RND-080；见 `docs/ROUND.md` 的 tmux version and bracketed paste 一节）。
+  **tmux 低于 3.8**（Ubuntu 和 WSL 自带的是 3.6）时，这一页的所有步骤照常可用。只有 `pai round`（第 9 节）受影响：3.8 以前的 tmux 无法报告 agent 有没有开启 bracketed paste，所以 `pai round launch`、`inject` 和 `next --send` 只往运行着 Claude Code 或 Codex 的 pane 里粘贴，其他程序一律拒绝（reported-by-round，R6-RND-080；见 [`docs/ROUND.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/ROUND.md) 的 tmux version and bracketed paste 一节）。
 
   如果缺了某一个（`command not found`），或者版本太旧：
 
@@ -39,29 +37,29 @@
   - macOS：`brew install python git tmux`
 
   装好后再跑一遍上面的检查命令。装好 pai（第 2 步）之后，`pai setup --install-missing` 也能帮你装 git 和 tmux。Python 低于 3.11 时，`pai` 会停下，并说出它找到的版本。
-- 以后做真实的工作时，还需要装好并登录 Claude Code 或 Codex。**这一页用不到它们**：第 4 步的演练用的是假 worker。
+- **从第 6 节开始**需要装好并登录 Claude Code 或 Codex。第 1 到 5 节没有它们也能做完：第 4 步的演练用的是假 worker，`pai doctor` 把缺的 agent 列在 `FOR YOUR FIRST RUN` 下面，不算失败。怎么装，第 6 节开头有说明。
 
 ## 2. 安装 pai
 
-下面两种方式选**一种**。拿不准就选方式 A：下载之后不再需要联网，而且会保留上一个版本，方便回滚。
+下面两种方式选**一种**。拿不准就选方式 A：下载之后不再需要联网，而且会保留上一个版本，方便回滚。如果你已经在用 uv，方式 B1 就是 README 里的一行安装。
 
 ### 方式 A：发布归档（下载完就不需要联网，也不需要 Python 打包工具）
 
-从[发布页](https://github.com/WorldVanquisher/personal-ai-workbench/releases)下载 `pai-workbench-<版本>.tar.gz` 和对应的 `.sha256`，或者直接用下面的命令下载。在仓库的 checkout 里也可以自己生成：`python3 -B tools/build_bundle.py --out dist`。
+从[发布页](https://github.com/WorldVanquisher/personal-ai-workbench/releases)下载 `pai-workbench-<版本>.tar.gz` 和对应的 `.sha256`，或者直接用下面的命令下载。在仓库的 Git clone 里也可以自己生成（压缩包里没有 `tools/`）：`python3 -B tools/build_bundle.py --out dist`。
 
 ```sh
 mkdir -p ~/Downloads && cd ~/Downloads
-U=https://github.com/WorldVanquisher/personal-ai-workbench/releases/download/v0.4.0
-curl -fLO "$U/pai-workbench-0.4.0.tar.gz" && curl -fLO "$U/pai-workbench-0.4.0.tar.gz.sha256"
-sha256sum -c pai-workbench-0.4.0.tar.gz.sha256     # macOS：shasum -a 256 -c …
-tar -xzf pai-workbench-0.4.0.tar.gz
-pai-workbench-0.4.0/bin/pai install
+U=https://github.com/WorldVanquisher/personal-ai-workbench/releases/download/v0.5.0
+curl -fLO "$U/pai-workbench-0.5.0.tar.gz" && curl -fLO "$U/pai-workbench-0.5.0.tar.gz.sha256"
+sha256sum -c pai-workbench-0.5.0.tar.gz.sha256     # macOS：shasum -a 256 -c …
+tar -xzf pai-workbench-0.5.0.tar.gz
+pai-workbench-0.5.0/bin/pai install
 ```
 
 预期：
 
-- 先看到 `pai-workbench-0.4.0.tar.gz: OK`；
-- 然后 `install` 打印 `N files match SHA256SUMS`（N 随版本不同）、版本目录（`~/.local/share/pai-workbench/versions/0.4.0`）和启动器（`~/.local/bin/pai`）。
+- 先看到 `pai-workbench-0.5.0.tar.gz: OK`；
+- 然后 `install` 打印 `N files match SHA256SUMS`（N 随版本不同）、版本目录（`~/.local/share/pai-workbench/versions/0.5.0`）和启动器（`~/.local/bin/pai`）。
 
 如果它说 **`~/.local/bin is not on PATH`**，就运行它打印的这两行：
 
@@ -81,7 +79,7 @@ export PATH="$HOME/.local/bin:$PATH"                          # 当前这个终�
 **B1，用 [uv](https://docs.astral.sh/uv/)：**
 
 ```sh
-uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.4.0
+uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.5.0
 ```
 
 成功时显示 `Installed 1 executable: pai`。如果 uv 提示它的 bin 目录不在 PATH 里，运行 `uv tool update-shell`，然后开一个新终端。
@@ -90,11 +88,11 @@ uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.
 
 ```sh
 python3 -m venv ~/.venvs/pai
-~/.venvs/pai/bin/pip install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.4.0
+~/.venvs/pai/bin/pip install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.5.0
 mkdir -p ~/.local/bin && ln -s ~/.venvs/pai/bin/pai ~/.local/bin/pai
 ```
 
-成功时，pip 的最后一行是 `Successfully installed pai-workbench-0.4.0`，`ln` 什么都不输出。`~/.local/bin` 必须在 PATH 里，用方式 A 里那两行 `PATH` 命令；这种方式不会替你打印它们。
+成功时，pip 的最后一行是 `Successfully installed pai-workbench-0.5.0`，`ln` 什么都不输出。`~/.local/bin` 必须在 PATH 里，用方式 A 里那两行 `PATH` 命令；这种方式不会替你打印它们。
 
 B2 出错时：
 
@@ -108,7 +106,7 @@ B2 出错时：
 pai --version
 ```
 
-预期：`pai 0.4.0`。如果看到 **`pai: command not found`**，开一个新终端，或者运行上面那行 `export PATH=…`。
+预期：`pai 0.5.0`。如果看到 **`pai: command not found`**，开一个新终端，或者运行上面那行 `export PATH=…`。
 
 ## 2a. 一个带远端的 Git 仓库
 
@@ -119,7 +117,14 @@ git clone https://github.com/YOU/yourproject.git ~/code/yourproject
 cd ~/code/yourproject
 ```
 
-想练习、又不想碰真实项目的话，可以建一个用完就扔的仓库，用本地目录充当"远端"：
+想练习、又不想碰真实项目的话，可以建一个用完就扔的仓库，用本地目录充当"远端"。在新机器上，先确认 git 知道你的名字，不然第一次提交会停在 `Author identity unknown`。下面每一行要么显示你已经设好的值，要么设一个（换成你自己的）：
+
+```sh
+git config --global user.name  || git config --global user.name "Your Name"
+git config --global user.email || git config --global user.email "you@example.com"
+```
+
+然后建仓库：
 
 ```sh
 git init -q --bare -b main ~/code/practice-origin.git
@@ -138,7 +143,7 @@ git remote -v && git log --oneline -1 origin/main
 成功时，会看到两行 `origin` 和一个提交（`init`）。
 
 - 如果提示 `origin/main` 不存在，说明刚才没推上去，运行 `git push -u origin main`。
-- 如果 `git commit` 提示 `Please tell me who you are`，先设一次名字（`git config --global user.name "Your Name"` 和 `user.email`），再重跑最后那一行。
+- 如果 `git commit` 提示过 `Please tell me who you are`（名字没设），先运行上面那两行 `git config`，再重跑建仓库那段命令的第三行，也就是以 `echo '# practice'` 开头的那一行。
 
 ## 3. 检查机器：`pai doctor`
 
@@ -149,8 +154,9 @@ pai doctor
 
 预期输出：
 
-- `ESSENTIAL` 段：pai、pai on PATH、git、tmux、ps 各一行，都是 `ok`；装了 agent 的话也会列出来。
+- `ESSENTIAL` 段：pai、pai on PATH、git、tmux、ps 各一行，都是 `ok`。
 - `OPTIONAL` 段：gh。
+- 缺 claude 或 codex 时，还有一段 `FOR YOUR FIRST RUN`。
 - 最后是：
 
 ```
@@ -159,9 +165,9 @@ doctor changed nothing. (No pai project here: `pai init` in your checkout.)
 Next: …/docs/FIRST-USE.md, section 5 "Save this checkout's defaults: pai init".
 ```
 
-`Next:` 那一行指向安装目录里的这一页；它跳过了第 4 步的演练，因为演练是可选的。`pai doctor` 什么都不改。这一页用不到 `claude` 或 `codex`，没装也没关系。
+`Next:` 那一行指向安装目录里的这一页；它跳过了第 4 步的演练，因为演练是可选的。`pai doctor` 什么都不改，以 0 退出。到第 6 节之前，缺 `claude` 或 `codex` 都没关系：doctor 把它列在 `FOR YOUR FIRST RUN` 下面，安装命令放在 `REPAIR` 里（标着 `# before pai run`），不算失败。现在先不用管。
 
-如果 `ESSENTIAL` 里有一行不是 `ok`，这一行末尾会有 `->`，后面跟着修复它的命令。运行那条命令，再跑 `pai doctor`，直到这一段全是 `ok`。常见的几种：
+如果 `ESSENTIAL` 里有一行不是 `ok`，这一行末尾会有 `->`，后面跟着修复它的命令。运行那条命令，再跑 `pai doctor`，直到 `ESSENTIAL` 这一段全是 `ok`。常见的几种：
 
 - 缺 `tmux` 或 `git`：`pai setup --install-missing`。
 - "pai on PATH" 那一行指向的是另一个 pai：按第 2 步改 PATH。
@@ -201,7 +207,7 @@ pai init
 
 | 问题 | 输入什么 |
 | --- | --- |
-| `Default agent [not set yet]` | claude 输入 `1`，codex 输入 `2` |
+| `Default agent [not set yet]` | claude 输入 `1`，codex 输入 `2`。还没装的时候菜单里会写 `not installed`，现在照样可以选 |
 | `Default model …`、`Reasoning effort …` | 回车，用 agent 自己的默认值 |
 | `Remote [origin]`、`Base branch [main]` | 回车 |
 | `Task notes folder (an Obsidian folder, or Enter for pai's own …)` | 回车。**不需要** Obsidian，笔记就是普通的 Markdown 文件 |
@@ -209,7 +215,7 @@ pai init
 | `Save to …/projects/<名字>.toml? [Y/n]` | 回车 |
 | `Enter JEV API key (optional)` | 回车。JEV 是可选的第二意见（见[术语表](GLOSSARY.zh-CN.md#jev)） |
 
-**现在就设一个检查。** 没有检查时，`pai pr` 什么都不会发布，会报 `BLOCKED no approved check is configured`。检查是在每次 `pai run` 开始时复制进去的，所以之后再加的检查，要到**下一次** `pai run` 才生效。练习仓库用 `files=test -f CONTRIBUTING.md` 就够了。
+**现在就设一个检查。** 没有检查时，`pai pr` 什么都不会发布，会报 `BLOCKED no approved check is configured`。检查是在每次 `pai run` 开始时复制进去的，所以之后再加的检查，要到**下一次** `pai run` 才生效。练习仓库用 `test=test -f CONTRIBUTING.md` 就够了（第 7 步的预期输出里，检查的名字就是 `test`）。
 
 预期的结尾：
 
@@ -221,7 +227,7 @@ Next:
   …
 ```
 
-然后再跑一次 `pai doctor`，最后几行里会多出 `ok  project  practice: …`。
+然后再跑一次 `pai doctor`，最后几行里会多出 `ok  project  practice: …`。从这时起，你选的 agent 就算 `ESSENTIAL` 了：它还没装或者没登录的话，doctor 以 1 退出，最后一行是 `Next: install and log in to claude …`。这是第 6 节之前要做的一步。
 
 如果 `pai init` 中途停下了：
 
@@ -239,6 +245,10 @@ pai init --default-agent claude --base main --check "test=make test" --no-input
 
 ## 6. 第一轮：一个 worker
 
+**先装好并登录你在第 5 步选的 agent。** `pai doctor` 的 `REPAIR` 几行写了在这台机器上怎么装（Claude Code 用 Anthropic 的安装脚本：doctor 不下载也不运行任何东西，那一行由你自己运行）。然后登录：运行一次 `claude`，在里面用 `/login`；或者 `codex login`。再跑 `pai doctor`，直到最后一行指向 `section 6 "Your first round"`。没有 agent 时，`pai run --dry-run` 会显示 `REFUSED lane a: claude is not installed or not on PATH` 并停下。
+
+**`(rc)` 是什么意思。** dry run 会显示 `lane a  claude (rc)`。Claude 的 lane 默认用 Remote Control 模式启动，这样你还能在 claude.ai 上看着它、往里打字。这需要用 claude.ai 订阅账号登录（doctor 的 `claude remote control` 那一行会告诉你是不是）。用别的方式登录的话，就让 lane 在本地跑：给 `pai run` 加上 `--mode local`。Codex 的 lane 总是在本地跑。
+
 ```sh
 pai task new "Add a contributing note" --body "Create CONTRIBUTING.md with three lines on how to run the tests." --write
 pai run --dry-run --workers 1
@@ -249,27 +259,22 @@ pai status
 每条命令会显示什么：
 
 - `task new … --write`：先显示笔记内容，然后是 `saved. Next: pai run --dry-run`。不加 `--write` 只是预览；已经存在的笔记永远不会被覆盖。
-- `run --dry-run`：显示 `lane a … worktree …/practice-pai-lanes/a (new directory: the agent will ask for folder trust)` 和 `DRY RUN: nothing was fetched, created, written or started`。它打印的 run ID 不会沿用，正式运行时会换一个新的。
+- `run --dry-run`：显示 `lane a  claude (rc)  worktree …/practice-pai-lanes/a (new directory: the agent will ask for folder trust)` 和 `DRY RUN: nothing was fetched, created, written or started`。它打印的 run ID 不会沿用，正式运行时会换一个新的。
 - `run --workers 1 --yes`：先显示 `started a …`，然后每条 lane 是下面两种情况之一：
   - `task: delivered`：worker 已经收到任务，去第 7 步。
   - `waiting for folder trust`：agent 在问要不要信任这个新的 lane 文件夹，这时 `pai run` 以 1 退出。往下看。
 - `status`：每条 lane 一段，包括 `lifecycle`、`trust`、`input`、`dispatch`、`rc`。只要每条 lane 的 agent 都在运行、也都拿到了任务，它就以 0 退出，哪怕 agent 还在干活。有 lane 需要你看一眼时，它**以 1 退出**：在等你（信任提示、任务还没送达），或者 agent 已经退出（干完活的 worker 也是这个样子）。看 `lifecycle` 那一行。
+  所以退出码 1 不是出错；两个退出码也都不说明活干完了没有，那要看结果（第 7 步）。脚本里请改读 `pai status --json`：每条 lane 的 `lifecycle.state`（`running`：还在干；`delivered`：拿到了任务、现在又空闲了；`exited` 或 `stopped`：agent 已经不在了）和 `lifecycle.attention`（需要人看一眼时为 true）。
 
-**lane 在等信任提示时：**
+**lane 在等信任提示时**，按顺序做：
 
-```sh
-pai trust
-```
+1. 运行 `pai trust`。它会在当前终端里打开那个等着的提示。读完问题，移到 **"Yes, I trust this folder"**（光标一开始停在 "No, exit"），按回车。你会回到自己的 shell，`pai trust` 自己会把等着的任务发出去，并显示 `Delivering tasks to lanes that are ready now:`。
+2. 运行 `pai status`。预期：`dispatch  delivered: task add-a-contributing-note delivered`。
+3. 只有它仍然显示 `queued` 时（比如你是在别处回答的提示：`pai attach a`、`pai web` 或 claude.ai 上的会话，而且回答时 `pai run` 已经返回了），才把任务发出去：
 
-它会在当前终端里打开那个等着的提示。读完问题，移到 **"Yes, I trust this folder"**（光标一开始停在 "No, exit"），按回车。之后 `pai trust` 会把等着的任务发出去（这是 `swarm/WORKBENCH.md` 第 4 节的说法；写这一页时实测确认的是下面 `pai resume` 那条路径）。
-
-如果你是在别处回答的（`pai attach a`、`pai web` 或 claude.ai 上的会话），而且回答时 `pai run` 已经返回了，任务会停在 `queued`。这时用下面的命令发出去：
-
-```sh
-pai resume
-```
-
-两种情况的预期结果都是：`dispatch  delivered: task add-a-contributing-note delivered`。
+   ```sh
+   pai resume
+   ```
 
 以后的轮次想避开这个提示，就把 worktree 都放在同一个已经信任过一次的文件夹下（[trusted root](GLOSSARY.zh-CN.md#trusted-root已信任的根目录)）。设置命令是 `pai init --update --worktree-root DIR`。
 
@@ -309,7 +314,7 @@ pai cleanup --apply --stop-running
 
 - **之后的每一轮**：看 [REFRESH.zh-CN.md](REFRESH.zh-CN.md)，内容包括升级 pai、从合并后的 main 开始、新建 worktree、发 prompt、续跑。
 - **术语**：[GLOSSARY.zh-CN.md](GLOSSARY.zh-CN.md)。**其他文档**：[docs/README.md](README.md)。
-- **多个 worker**：写两份任务笔记，然后 `pai run --workers 2`；`pai web` 可以在浏览器里看所有 lane。完整的两条 lane 的例子（附终端记录）见 [examples/two-lane-round/](../examples/two-lane-round/README.md)。
+- **多个 worker**：写两份任务笔记，然后 `pai run --workers 2`；`pai web` 可以在浏览器里看所有 lane。完整的两条 lane 的例子（附终端记录）见 [examples/two-lane-round/](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/examples/two-lane-round/README.md)。
 
 ## 8. 出错时怎么办
 
@@ -329,6 +334,7 @@ pai cleanup --apply --stop-running
 | pip 报 `Cannot import 'setuptools.build_meta'` | 没联网，或者没有 setuptools 却用了 `--no-build-isolation` | 让 pip 用隔离方式构建（需要联网一次），或者先在 venv 里 `pip install setuptools` |
 | `pai install` 说 "an installed Python package …, not an extracted release archive" | 你是用 uv 或 pip 装的（方式 B） | 用当初安装的方式升级（[REFRESH.zh-CN.md](REFRESH.zh-CN.md#a-升级-pai)） |
 | `pai doctor` 显示 `-> pai init` | 这个仓库还没有 pai 的默认设置 | 做第 5 步 |
+| `pai doctor PROJECT` 显示 `WARNING … instructions source MISSING: AGENTS.md (not found; optional …)` | 仓库里没有 AGENTS.md | 不用处理：它是可选的，doctor 仍然显示 `NO PROBLEMS FOUND`；有这个文件时 `pai context` 会用它 |
 | `pai init --no-input` 报 `the base branch of origin is not recorded locally. Pass --base BRANCH.` | clone 时仓库是空的，`origin/HEAD` 未知 | 加上 `--base main` |
 | `pai task new …` 报 `no pai project here … Run pai init` | 这个仓库还没保存过 `pai init`，或者你不在仓库目录里 | `cd` 进仓库，做第 5 步 |
 | lane 显示 `waiting for folder trust` | agent 在问新 lane 文件夹要不要信任 | `pai trust`（第 6 步）；pai 永远不会替你回答 |
@@ -345,7 +351,9 @@ pai cleanup --apply --stop-running
 
 ## 9. 可选：用 Obsidian 当控制台
 
-一轮里有好几条 lane 之后，PAI 可以把这一轮的状态存成 vault 里的笔记：`PAI/Home.md`、每轮一张看板、每条 lane 一篇笔记、每个决策一篇笔记。之后，Obsidian（或者任何编辑器）就是你看、批、选的地方。这个功能来自 R6 的 round 线，pai 0.4.0 里还没有（reported-by-round）。完整说明见 [OBSIDIAN.zh-CN.md](OBSIDIAN.zh-CN.md)。
+一轮里有好几条 lane 之后，PAI 可以把这一轮的状态存成 vault 里的笔记：`PAI/Home.md`、每轮一张看板、每条 lane 一篇笔记、每个决策一篇笔记。之后，Obsidian（或者任何编辑器）就是你看、批、选的地方。这个功能来自 R6 的 round 线，是 pai 0.5.0 新增的（reported-by-round）。完整说明见 [OBSIDIAN.zh-CN.md](OBSIDIAN.zh-CN.md)。
+
+下面的 `PROJECT` 是一个 PAI 项目名，用 `pai init PROJECT --repo PATH --vault PATH --memory DIR --inbox "Agent Inbox" --write` 登记一次。安装后的 `pai` 把它写进 `~/.config/pai/config.toml`；从 checkout 运行（`python3 -B bin/pai.py`）时，同一条命令写的是这个 checkout 里的 `pai.local.toml`（已被 git 忽略），所以要去 checkout 里找，而不是 home 目录。`pai doctor PROJECT` 会检查它。
 
 1. 在跑这一轮的机器上写出这些笔记：
 

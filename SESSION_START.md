@@ -5,8 +5,8 @@ project key (e.g. `flh`), `<TASK>`, `<TASK-ID>` (one ID everywhere, such as
 `PAI-R6-COR-001`), and `<ROUND>`, `<LANE>`, `<QUEUE>`, `<BASE>`, `<HEAD>`:
 
 - Installed with `uv tool install` or `pai install`: `<PAI>` is `pai`.
-- Linux, macOS: `<PAI>` is `"/path/to/pai-workbench-0.4.0/bin/pai"`.
-- Windows PowerShell: `<PAI>` is `& "C:\path\to\pai-workbench-0.4.0\bin\pai.cmd"`
+- Linux, macOS: `<PAI>` is `"/path/to/pai-workbench-0.5.0/bin/pai"`.
+- Windows PowerShell: `<PAI>` is `& "C:\path\to\pai-workbench-0.5.0\bin\pai.cmd"`
   (cmd.exe: the same path without `&`).
 
 One session, one agent: do not start loops, schedules, subagents or other

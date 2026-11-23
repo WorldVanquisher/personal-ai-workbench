@@ -86,7 +86,7 @@
 - 这里有一段过时的进度说明，每条 lane 都会被误导；
 - 一份 1000 行的文件，会让每个会话在打开第一个源文件之前，就先花掉一大块上下文。
 
-所以 PAI 把它拆成四层：简短的宪法（L0）、按领域分的契约（L1）、PAI 为每条 lane 写的指令（L2），以及等你决定的提议（L3）。见 [AGENTS-LAYERS.zh-CN.md](AGENTS-LAYERS.zh-CN.md)；一份真实的 1074 行文件怎么拆，见 [research/FLH-AGENTS-ANALYSIS.md](research/FLH-AGENTS-ANALYSIS.md)（英文）。
+所以 PAI 把它拆成四层：简短的宪法（L0）、按领域分的契约（L1）、PAI 为每条 lane 写的指令（L2），以及等你决定的提议（L3）。见 [AGENTS-LAYERS.zh-CN.md](AGENTS-LAYERS.zh-CN.md)；一份真实的 1074 行文件怎么拆，见 [research/FLH-AGENTS-ANALYSIS.md](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/research/FLH-AGENTS-ANALYSIS.md)（英文）。
 
 ## 15. 为什么叫"润滑层"？
 

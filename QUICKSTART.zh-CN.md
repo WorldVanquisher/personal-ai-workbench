@@ -7,10 +7,10 @@
 ## 1. 安装
 
 ```sh
-uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.4.0
+uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.5.0
 ```
 
-如果 uv 提示它的 bin 目录不在 PATH 里，运行 `uv tool update-shell`（或它打印的那行 `export PATH=…`），然后**打开一个新终端**。之后 `pai --version` 会显示 `pai 0.4.0`。没有 uv？[发布页](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.4.0) 上有同样的 pai，分别打包成 `.tar.gz` 和 `.zip`，各带一个 `.sha256`；[INSTALL.md](INSTALL.md) 里有校验并安装的三行命令（不需要 sudo，也不需要把脚本管道给 shell）。
+如果 uv 提示它的 bin 目录不在 PATH 里，运行 `uv tool update-shell`（或它打印的那行 `export PATH=…`），然后**打开一个新终端**。之后 `pai --version` 会显示 `pai 0.5.0`。没有 uv？[发布页](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.5.0) 上有同样的 pai，分别打包成 `.tar.gz` 和 `.zip`，各带一个 `.sha256`；[INSTALL.md](INSTALL.md) 里有校验并安装的三行命令（不需要 sudo，也不需要把脚本管道给 shell）。
 
 **先离线体验完整流程：** `pai guide` 会创建一个可随时删除的演示文件夹，里面有一个合成项目、一条任务笔记和一个假的 worker（不需要账号、凭据或网络），并用正常的 `pai` 命令依次走完计划、派发、状态和 handoff。它会打印每样东西的位置；`pai guide --cleanup DIR` 删除该文件夹。需要 git 和 tmux。
 

@@ -12,7 +12,7 @@ PAI 把一轮工作的状态存成 vault 里的 Markdown 笔记：一张看板�
 
 vault 就是一个文件夹。任何编辑器、`cat` 或 `grep` 看到的内容，都和 Obsidian 看到的一样。
 
-这一页命令的完整写法见 `docs/ROUND.md` 和 `docs/HANDOFF-V2.md`（英文）。下面的目录结构是 2026-11-22 由 `pai round status --write-vault` 实际写进 owner 的 vault 的。
+这一页命令的完整写法见 [`docs/ROUND.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/ROUND.md) 和 [`docs/HANDOFF-V2.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/HANDOFF-V2.md)（英文）。下面的目录结构是 2026-11-22 由 `pai round status --write-vault` 实际写进 owner 的 vault 的。
 
 ## 1. 目录约定
 

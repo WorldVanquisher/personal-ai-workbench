@@ -52,13 +52,13 @@ nothing. Obsidian is one way to read that folder; any editor works.
    The aim is a trustworthy final decision in minutes.
 2. **Prompts are assets that improve.** The prompts that drive the workers are versioned. They are
    checked against contracts and scored with JEV, and each improvement needs evidence and your
-   approval (reported-by-prompts: `docs/PROMPTS.md`, in the prompts lane).
+   approval (reported-by-prompts: [`docs/PROMPTS.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/PROMPTS.md), in the prompts lane).
 3. **No new engine, only lubrication.** PAI plugs into the sessions you already run (Remote Control,
    tmux). The interface is a folder of Markdown plus a small "look, approve, choose" workbench.
 
 ## How this differs from lead-agent / sub-agent frameworks
 
-Everything in this section comes from the prompts lane's survey: `docs/research/LANDSCAPE.md`
+Everything in this section comes from the prompts lane's survey: [`docs/research/LANDSCAPE.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/research/LANDSCAPE.md)
 (R6-PRM-036, 2026-11-22; re-read at its final version, sha256 c2397ae0…; §1 and §3, the parts used
 here, unchanged; reported-by-prompts). That survey quotes only official documentation pages
 it opened that day. Claims it took from a summary of a long page are marked *(summary)* below.

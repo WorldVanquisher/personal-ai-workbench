@@ -74,4 +74,4 @@ here is stronger than its source.
 | Package step and the round tests on WSL (tmux 3.6) for the 0.5.0 candidate | owner | `sudo apt-get install -y python3-pip python3-venv`, then `python3 -B tools/verify.py` |
 | First use from the archive on WSL | owner | in WSL: FIRST-USE.md steps 1–6 in a fresh `HOME=$(mktemp -d)` |
 | CI green on the release candidate | owner (needs a push) | push the branch; all `CI` jobs green |
-| Real Claude Code through `pai run` (interactive, trust prompt answered by a person) | owner | `docs/1.0/REAL-AGENT-SMOKE.md` |
+| Real Claude Code through `pai run` (interactive, trust prompt answered by a person) | owner | [`docs/1.0/REAL-AGENT-SMOKE.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/1.0/REAL-AGENT-SMOKE.md) |

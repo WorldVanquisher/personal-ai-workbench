@@ -22,8 +22,8 @@ these.
 If you have [uv](https://docs.astral.sh/uv/) and git (Linux, macOS or WSL):
 
 ```sh
-uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.4.0
-pai --version                                   # pai 0.4.0
+uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.5.0
+pai --version                                   # pai 0.5.0
 ```
 
 uv builds the package from that tag and puts `pai` in its bin folder (usually
@@ -53,14 +53,14 @@ no vault folders.
 ## Linux and macOS
 
 ```sh
-# 1. Put pai-workbench-0.4.0.tar.gz and its .sha256 into one folder; verify.
-#    Download: https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.4.0
+# 1. Put pai-workbench-0.5.0.tar.gz and its .sha256 into one folder; verify.
+#    Download: https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.5.0
 #    (or build both from a checkout: `python3 -B tools/build_bundle.py --out dist`)
-sha256sum -c pai-workbench-0.4.0.tar.gz.sha256            # macOS: shasum -a 256 -c …
-# 2. Extract, then install: a verified copy in ~/.local/share/pai-workbench/versions/0.4.0
+sha256sum -c pai-workbench-0.5.0.tar.gz.sha256            # macOS: shasum -a 256 -c …
+# 2. Extract, then install: a verified copy in ~/.local/share/pai-workbench/versions/0.5.0
 #    and the launcher ~/.local/bin/pai (--prefix DIR puts both under DIR instead).
-tar -xzf pai-workbench-0.4.0.tar.gz
-pai-workbench-0.4.0/bin/pai install
+tar -xzf pai-workbench-0.5.0.tar.gz
+pai-workbench-0.5.0/bin/pai install
 #    If it says ~/.local/bin is not on PATH, run the line it prints, e.g. for bash:
 #    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc     and open a new terminal.
 PAI=pai
@@ -82,7 +82,7 @@ mkdir -p "$HOME/.config/pai" && export PAI_CONFIG="$HOME/.config/pai/config.toml
 
 Add the `export PAI_CONFIG=…` line to your shell profile (`~/.bashrc`,
 `~/.zshrc`) as well. Without `pai install`, any extracted bundle still works
-by its full path (`…/pai-workbench-0.4.0/bin/pai`), and a symlink to `bin/pai`
+by its full path (`…/pai-workbench-0.5.0/bin/pai`), and a symlink to `bin/pai`
 works too: the launcher follows the link to its bundle.
 
 ## Windows (PowerShell)
@@ -96,14 +96,14 @@ and from the uv-installed `pai.exe`); see RELEASE_NOTES.md for the runs. A perso
 run them by hand on a Windows PC.
 
 ```powershell
-# 1. Put pai-workbench-0.4.0.zip and its .sha256 into one folder; verify.
-$want = (Get-Content .\pai-workbench-0.4.0.zip.sha256 -Raw).Split(" ")[0]
-if ((Get-FileHash -Algorithm SHA256 .\pai-workbench-0.4.0.zip).Hash -ne $want) { throw "checksum mismatch: do not use this file" }
-# 2. Extract, then install: a verified copy in %LOCALAPPDATA%\pai-workbench\versions\0.4.0
+# 1. Put pai-workbench-0.5.0.zip and its .sha256 into one folder; verify.
+$want = (Get-Content .\pai-workbench-0.5.0.zip.sha256 -Raw).Split(" ")[0]
+if ((Get-FileHash -Algorithm SHA256 .\pai-workbench-0.5.0.zip).Hash -ne $want) { throw "checksum mismatch: do not use this file" }
+# 2. Extract, then install: a verified copy in %LOCALAPPDATA%\pai-workbench\versions\0.5.0
 #    and the launcher %LOCALAPPDATA%\pai-workbench\bin\pai.cmd. If it says that folder is not
 #    on PATH, run the PowerShell line it prints and open a new terminal window.
-Expand-Archive .\pai-workbench-0.4.0.zip -DestinationPath .
-& .\pai-workbench-0.4.0\bin\pai.cmd install
+Expand-Archive .\pai-workbench-0.5.0.zip -DestinationPath .
+& .\pai-workbench-0.5.0\bin\pai.cmd install
 $pai = "$env:LOCALAPPDATA\pai-workbench\bin\pai.cmd"
 # 3. Choose where this device's configuration lives, for this and future sessions.
 New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\pai" | Out-Null
@@ -137,7 +137,7 @@ PowerShell adds quotes only around arguments that contain spaces, so
 `--task "a&b"` reaches cmd.exe unquoted and breaks. When text needs those
 characters, bypass cmd.exe with the script entry point, which receives
 arguments exactly:
-`py -3 "$env:LOCALAPPDATA\pai-workbench\versions\0.4.0\bin\pai.py" context <PROJECT> --task "a&b 100%"`.
+`py -3 "$env:LOCALAPPDATA\pai-workbench\versions\0.5.0\bin\pai.py" context <PROJECT> --task "a&b 100%"`.
 
 **Output encoding.** pai writes UTF-8 when its output is piped or redirected
 on Windows. In Windows PowerShell 5.1, capturing that output into a variable

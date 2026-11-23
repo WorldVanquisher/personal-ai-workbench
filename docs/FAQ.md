@@ -108,7 +108,7 @@ Every agent session reads it first, for every task, so its quality decides every
 PAI therefore splits it into a short constitution (L0), per-area contracts (L1), per-lane
 instructions written by PAI (L2) and proposals that wait for you (L3). See
 [AGENTS-LAYERS.md](AGENTS-LAYERS.md), and for a worked example the analysis of a real 1,074-line
-file in [research/FLH-AGENTS-ANALYSIS.md](research/FLH-AGENTS-ANALYSIS.md).
+file in [research/FLH-AGENTS-ANALYSIS.md](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/research/FLH-AGENTS-ANALYSIS.md).
 
 ## 15. Why "lubrication layer"?
 

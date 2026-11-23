@@ -22,8 +22,6 @@ platforms this has really run on: [FIRST-USE-PLATFORMS.md](FIRST-USE-PLATFORMS.m
 >    the cost it can see; it never raises a limit.
 > 5. **Answer the decision sheet.** Questions with options and a recommendation; you tick one.
 
-<!-- doc_check: pending pai round launch --allow-unbracketed -->
-
 ## 1. What you need
 
 - Linux, WSL (Ubuntu), or macOS (the workbench on macOS has not been run yet; see the
@@ -40,7 +38,7 @@ platforms this has really run on: [FIRST-USE-PLATFORMS.md](FIRST-USE-PLATFORMS.m
   **tmux below 3.8** (Ubuntu and WSL ship 3.6) works for everything on this page. Only `pai round`
   (section 9) notices: tmux before 3.8 cannot report whether the agent asked for bracketed paste,
   so `pai round launch`, `inject` and `next --send` paste only into a pane running Claude Code or
-  Codex and refuse any other program (reported-by-round, R6-RND-080; `docs/ROUND.md` § tmux version
+  Codex and refuse any other program (reported-by-round, R6-RND-080; [`docs/ROUND.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/ROUND.md) § tmux version
   and bracketed paste).
 
   If one is missing (`command not found`) or too old:
@@ -52,31 +50,34 @@ platforms this has really run on: [FIRST-USE-PLATFORMS.md](FIRST-USE-PLATFORMS.m
 
   Then run the check line again. After step 2, `pai setup --install-missing` can do the same for git
   and tmux. A Python older than 3.11 makes `pai` stop with a message that names the version it found.
-- For real work, later: Claude Code or Codex installed and logged in. **Not needed for this page**:
-  the rehearsal in step 4 uses a fake worker.
+- **From section 6 on**: Claude Code or Codex, installed and logged in. Sections 1 to 5 work
+  without either: the rehearsal in step 4 uses a fake worker, and `pai doctor` lists a missing agent
+  under `FOR YOUR FIRST RUN` without failing. Section 6 says how to install one.
 
 ## 2. Install pai
 
 Pick **one** of the two paths. Not sure which? Take path A: it needs no network after the
-download and keeps the previous version for a rollback.
+download and keeps the previous version for a rollback. If you already use uv, path B1 is the
+README's one-line install.
 
 ### Path A: the release archive (no network after the download, no Python packaging)
 
 Download `pai-workbench-<version>.tar.gz` and its `.sha256` from the
 [release page](https://github.com/WorldVanquisher/personal-ai-workbench/releases), or with these
-commands. A checkout can also build them: `python3 -B tools/build_bundle.py --out dist`.
+commands. A Git clone of the repository can also build them (`tools/` is not in the archive):
+`python3 -B tools/build_bundle.py --out dist`.
 
 ```sh
 mkdir -p ~/Downloads && cd ~/Downloads
-U=https://github.com/WorldVanquisher/personal-ai-workbench/releases/download/v0.4.0
-curl -fLO "$U/pai-workbench-0.4.0.tar.gz" && curl -fLO "$U/pai-workbench-0.4.0.tar.gz.sha256"
-sha256sum -c pai-workbench-0.4.0.tar.gz.sha256     # macOS: shasum -a 256 -c …
-tar -xzf pai-workbench-0.4.0.tar.gz
-pai-workbench-0.4.0/bin/pai install
+U=https://github.com/WorldVanquisher/personal-ai-workbench/releases/download/v0.5.0
+curl -fLO "$U/pai-workbench-0.5.0.tar.gz" && curl -fLO "$U/pai-workbench-0.5.0.tar.gz.sha256"
+sha256sum -c pai-workbench-0.5.0.tar.gz.sha256     # macOS: shasum -a 256 -c …
+tar -xzf pai-workbench-0.5.0.tar.gz
+pai-workbench-0.5.0/bin/pai install
 ```
 
-Expected: `pai-workbench-0.4.0.tar.gz: OK`, then `install` prints `N files match SHA256SUMS` (N depends on the version), the
-version folder (`~/.local/share/pai-workbench/versions/0.4.0`) and the launcher (`~/.local/bin/pai`).
+Expected: `pai-workbench-0.5.0.tar.gz: OK`, then `install` prints `N files match SHA256SUMS` (N depends on the version), the
+version folder (`~/.local/share/pai-workbench/versions/0.5.0`) and the launcher (`~/.local/bin/pai`).
 
 If it says **`~/.local/bin is not on PATH`**, run the two lines it prints:
 
@@ -100,7 +101,7 @@ whether you have uv: `uv --version`. If it prints a version, use B1; if `command
 **B1, with [uv](https://docs.astral.sh/uv/):**
 
 ```sh
-uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.4.0
+uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.5.0
 ```
 
 Success: `Installed 1 executable: pai`. If uv warns that its bin folder is not on your PATH, run
@@ -110,11 +111,11 @@ Success: `Installed 1 executable: pai`. If uv warns that its bin folder is not o
 
 ```sh
 python3 -m venv ~/.venvs/pai
-~/.venvs/pai/bin/pip install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.4.0
+~/.venvs/pai/bin/pip install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.5.0
 mkdir -p ~/.local/bin && ln -s ~/.venvs/pai/bin/pai ~/.local/bin/pai
 ```
 
-Success: pip's last line is `Successfully installed pai-workbench-0.4.0`, and `ln` prints nothing.
+Success: pip's last line is `Successfully installed pai-workbench-0.5.0`, and `ln` prints nothing.
 `~/.local/bin` must be on your PATH: use the two `PATH` lines from path A. Nothing prints them for
 this path.
 
@@ -134,7 +135,7 @@ If B2 fails:
 pai --version
 ```
 
-Expected: `pai 0.4.0`. If you get **`pai: command not found`**, open a new terminal, or run the
+Expected: `pai 0.5.0`. If you get **`pai: command not found`**, open a new terminal, or run the
 `export PATH=…` line above.
 
 ## 2a. A Git checkout with a remote
@@ -147,7 +148,16 @@ git clone https://github.com/YOU/yourproject.git ~/code/yourproject
 cd ~/code/yourproject
 ```
 
-To practise without touching a real project, make a throw-away one with a local "remote":
+To practise without touching a real project, make a throw-away one with a local "remote". On a new
+machine, first make sure git knows your name, or the first commit stops with
+`Author identity unknown`. Each line prints the value you already have, or sets one (use your own):
+
+```sh
+git config --global user.name  || git config --global user.name "Your Name"
+git config --global user.email || git config --global user.email "you@example.com"
+```
+
+Then make the repository:
 
 ```sh
 git init -q --bare -b main ~/code/practice-origin.git
@@ -165,8 +175,9 @@ git remote -v && git log --oneline -1 origin/main
 ```
 
 Success: two `origin` lines and one commit (`init`). If `origin/main` is unknown, the push did not
-happen: run `git push -u origin main`. If `git commit` says `Please tell me who you are`, set your
-name once (`git config --global user.name "Your Name"` and `user.email`), then repeat the last line.
+happen: run `git push -u origin main`. If `git commit` said `Please tell me who you are` (the name
+was not set), run the two `git config` lines above, then run the third line of the block again, the
+one that starts with `echo '# practice'`.
 
 ## 3. Check your machine: `pai doctor`
 
@@ -175,8 +186,8 @@ cd ~/code/practice        # your checkout
 pai doctor
 ```
 
-Expected: an `ESSENTIAL` block whose lines say `ok` (pai, pai on PATH, git, tmux, ps, and your
-agent if installed), an `OPTIONAL` block (gh), and at the end:
+Expected: an `ESSENTIAL` block whose lines say `ok` (pai, pai on PATH, git, tmux, ps), an
+`OPTIONAL` block (gh), a `FOR YOUR FIRST RUN` block if claude or codex is missing, and at the end:
 
 ```
 info           project                …/practice is a Git checkout without pai defaults yet   -> pai init
@@ -185,10 +196,12 @@ Next: …/docs/FIRST-USE.md, section 5 "Save this checkout's defaults: pai init"
 ```
 
 The `Next:` line names the installed copy of this page. It skips the rehearsal in step 4, which is
-optional. `pai doctor` changes nothing. A missing `claude` or `codex` is fine for this page.
+optional. `pai doctor` changes nothing and exits with 0. A missing `claude` or `codex` is fine until
+section 6: doctor lists it under `FOR YOUR FIRST RUN`, with its install command in `REPAIR`
+(marked `# before pai run`), and does not count it as a failure. Leave it for now.
 
 If a line in `ESSENTIAL` is not `ok`, it ends with `->` and the command that fixes it. Run that
-command, then `pai doctor` again, until the block is all `ok`. The usual ones:
+command, then `pai doctor` again, until the `ESSENTIAL` block is all `ok`. The usual ones:
 
 - `tmux` or `git` missing: `pai setup --install-missing`.
 - the "pai on PATH" line points to another pai: fix PATH as in step 2.
@@ -234,7 +247,7 @@ It asks a few questions. Enter keeps the value in `[brackets]`. Answer like this
 
 | Question | What to type |
 | --- | --- |
-| `Default agent [not set yet]` | `1` for claude or `2` for codex |
+| `Default agent [not set yet]` | `1` for claude or `2` for codex. The menu says `not installed` until you install one; choosing it now is fine |
 | `Default model …`, `Reasoning effort …` | Enter (the agent's own default) |
 | `Remote [origin]`, `Base branch [main]` | Enter |
 | `Task notes folder (an Obsidian folder, or Enter for pai's own …)` | Enter. Obsidian is **not** needed; notes are plain Markdown |
@@ -245,7 +258,7 @@ It asks a few questions. Enter keeps the value in `[brackets]`. Answer like this
 **Set a review check now.** `pai pr` refuses to publish anything without one
 (`BLOCKED no approved check is configured`). A run copies the checks when it starts, so a check
 added later only applies to the **next** `pai run`. For the practice repository,
-`files=test -f CONTRIBUTING.md` is enough.
+`test=test -f CONTRIBUTING.md` is enough (step 7 expects a check named `test`).
 
 Expected end:
 
@@ -257,7 +270,9 @@ Next:
   …
 ```
 
-Then run `pai doctor` again. Its last lines now include `ok  project  practice: …`.
+Then run `pai doctor` again. Its last lines now include `ok  project  practice: …`. From now on
+the agent you chose is `ESSENTIAL`: if it is not installed or not logged in yet, doctor exits with 1
+and its last line is `Next: install and log in to claude …`. That is the step before section 6.
 
 If `pai init` stops instead:
 
@@ -278,6 +293,18 @@ pai init --default-agent claude --base main --check "test=make test" --no-input
 
 ## 6. Your first round: one worker
 
+**First, install and log in to the agent you chose in step 5.** `pai doctor`'s `REPAIR` lines show
+how on this machine (for Claude Code, Anthropic's installer script: doctor downloads nothing and runs
+nothing, you run the line). Then log in: run `claude` once and use `/login`, or `codex login`. Run
+`pai doctor` again until it ends with `section 6 "Your first round"`. Without the agent,
+`pai run --dry-run` prints `REFUSED lane a: claude is not installed or not on PATH` and stops.
+
+**What `(rc)` means.** The dry run prints `lane a  claude (rc)`. By default a Claude lane starts in
+Remote Control mode, so that you can also follow it and type into it from claude.ai. That needs a
+claude.ai subscription login (doctor's `claude remote control` line says whether you have one). With
+another login, run lanes locally instead: add `--mode local` to `pai run`. Codex lanes always run
+locally.
+
 ```sh
 pai task new "Add a contributing note" --body "Create CONTRIBUTING.md with three lines on how to run the tests." --write
 pai run --dry-run --workers 1
@@ -289,8 +316,8 @@ What each one shows:
 
 - `task new … --write`: the note, then `saved. Next: pai run --dry-run`. Without `--write` it is
   only a preview. It never overwrites an existing note.
-- `run --dry-run`: `lane a … worktree …/practice-pai-lanes/a (new directory: the agent will ask
-  for folder trust)` and `DRY RUN: nothing was fetched, created, written or started`. The run ID
+- `run --dry-run`: `lane a  claude (rc)  worktree …/practice-pai-lanes/a (new directory: the agent
+  will ask for folder trust)` and `DRY RUN: nothing was fetched, created, written or started`. The run ID
   it prints is not reused; the real run gets a new one.
 - `run --workers 1 --yes`: `started a …`, then per lane one of:
   - `task: delivered`: the worker has the task. Go to step 7.
@@ -300,24 +327,24 @@ What each one shows:
   while every lane's agent runs and has its task, even while it works. It **exits with 1** when a
   lane needs a look: it waits for you (a trust prompt, a task not delivered yet), or its agent has
   exited, which is also how a finished worker looks. Read the `lifecycle` line.
+  So exit 1 is not an error, and neither code says the work is finished: you judge that from the
+  result (step 7). In a script, read `pai status --json` instead: per lane, `lifecycle.state`
+  (`running`: still working; `delivered`: it has the task and is idle again; `exited` or `stopped`:
+  the agent is gone) and `lifecycle.attention` (true when a person should look).
 
-**When a lane waits for folder trust:**
+**When a lane waits for folder trust**, do these in order:
 
-```sh
-pai trust
-```
+1. Run `pai trust`. It opens the waiting prompt in your terminal. Read it, move to
+   **"Yes, I trust this folder"** (the cursor starts on "No, exit"), and press Enter. You return to
+   your shell, and `pai trust` itself sends the waiting task: it prints
+   `Delivering tasks to lanes that are ready now:`.
+2. Run `pai status`. Expected: `dispatch  delivered: task add-a-contributing-note delivered`.
+3. Only if it still says `queued` (for example because you answered the prompt elsewhere, in
+   `pai attach a`, `pai web` or the claude.ai session, after `pai run` had returned), send it:
 
-It opens the waiting prompt in your terminal. Read it, move to **"Yes, I trust this folder"** (the
-cursor starts on "No, exit"), and press Enter. `pai trust` then sends the waiting task (as
-`swarm/WORKBENCH.md` §4 describes it; this page's test runs confirmed the `pai resume` route below). If you
-answered somewhere else instead (`pai attach a`, `pai web`, or the claude.ai session) **after**
-`pai run` had returned, the task is still `queued`. Send it with:
-
-```sh
-pai resume
-```
-
-Expected after either: `dispatch  delivered: task add-a-contributing-note delivered`.
+   ```sh
+   pai resume
+   ```
 
 To avoid this prompt in later rounds, keep worktrees under one folder that you have trusted once
 (a [trusted root](GLOSSARY.md#trusted-root)). `pai init --update --worktree-root DIR` sets it.
@@ -364,7 +391,7 @@ You have finished a round. What next:
 - **Words**: [GLOSSARY.md](GLOSSARY.md). **Everything else**: [docs/README.md](README.md).
 - **Several workers**: `pai run --workers 2` with two task notes; `pai web` shows all lanes in
   your browser. A whole two-lane round to copy from, with its terminal transcript:
-  [examples/two-lane-round/](../examples/two-lane-round/README.md).
+  [examples/two-lane-round/](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/examples/two-lane-round/README.md).
 
 ## 8. When something goes wrong
 
@@ -381,6 +408,7 @@ not, keep the full output and `pai doctor`'s output, and report both.
 | pip: `Cannot import 'setuptools.build_meta'` | building without network or without setuptools (`--no-build-isolation`) | let pip build in isolation (needs network once), or `pip install setuptools` in the venv first |
 | `pai install`: "an installed Python package …, not an extracted release archive" | you installed with uv or pip (path B) | upgrade the same way you installed ([REFRESH.md](REFRESH.md#a-upgrade-pai)) |
 | `pai doctor`: `-> pai init` | this checkout has no pai defaults yet | step 5 |
+| `pai doctor PROJECT`: `WARNING … instructions source MISSING: AGENTS.md (not found; optional …)` | the repository has no AGENTS.md | nothing to do: it is optional, and doctor still says `NO PROBLEMS FOUND`; `pai context` uses it when it exists |
 | `pai init --no-input`: `the base branch of origin is not recorded locally. Pass --base BRANCH.` | the clone was empty when made, so `origin/HEAD` is unknown | add `--base main` |
 | `pai task new …`: `no pai project here … Run pai init` | `pai init` has not been saved for this checkout, or you are in another folder | `cd` into the checkout; step 5 |
 | lane shows `waiting for folder trust` | the agent is asking about the new lane folder | `pai trust` (step 6); pai never answers it for you |
@@ -400,7 +428,13 @@ not, keep the full output and `pai doctor`'s output, and report both.
 Once you run rounds with several lanes, PAI can keep the round's state as notes in your vault:
 `PAI/Home.md`, one board per round, one note per lane and one per decision. Obsidian (or any
 editor) then becomes the place where you look, approve and choose. This comes with the round lane
-of R6 and is not in pai 0.4.0 (reported-by-round). The full guide is [OBSIDIAN.md](OBSIDIAN.md).
+of R6 and is new in pai 0.5.0 (reported-by-round). The full guide is [OBSIDIAN.md](OBSIDIAN.md).
+
+`PROJECT` below is a PAI project key, registered once with
+`pai init PROJECT --repo PATH --vault PATH --memory DIR --inbox "Agent Inbox" --write`.
+An installed `pai` writes it to `~/.config/pai/config.toml`. Run from a checkout (`python3 -B bin/pai.py`),
+the same command writes `pai.local.toml` in that checkout (git-ignored) instead, so look there, not in
+your home folder. `pai doctor PROJECT` checks it.
 
 1. On the machine that runs the round, write the notes:
 

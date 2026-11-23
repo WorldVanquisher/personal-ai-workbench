@@ -3,7 +3,7 @@
 <!-- doc_check: fields -->
 [English](GLOSSARY.md) | 简体中文
 
-PAI 手册里用到的词，按第一次遇到的顺序排列。用 `代码` 写的命令在 pai 0.4.0 里已经存在；标了*（计划中）*的还没有。
+PAI 手册里用到的词，按第一次遇到的顺序排列。用 `代码` 写的命令在 pai 0.5.0 里已经存在；标了*（计划中）*的还没有。
 
 ## round（轮次）
 
@@ -12,7 +12,7 @@ PAI 手册里用到的词，按第一次遇到的顺序排列。用 `代码` 写
 - 几条 lane，每条 lane 一份 prompt、一个交接目录；
 - 一张决策单。
 
-现在用 [REFRESH.zh-CN.md](REFRESH.zh-CN.md#b-每一轮的刷新) 里的脚本（`r6-prepare.sh`、`r6-worktrees.sh`）准备一轮。`pai round` *（计划中，round 线）*。
+`pai round` 负责准备、运行和收尾一轮（[REFRESH.zh-CN.md](REFRESH.zh-CN.md#b-每一轮的刷新) 的 (b) 部分）。用几份任务笔记跑一次 `pai run`，本身也算一个小的轮次。
 
 ## lane（线）
 
@@ -95,7 +95,7 @@ agent 已经视为可信的文件夹，它下面的子文件夹也被视为可�
 
 R6 当天（2026-11-22，Claude Code 2.1.330），owner 观察到：建在已经信任过的文件夹下面的 worktree 不会再问。所以：
 
-- 所有轮次都放在同一个根目录下，例如 `~/workspace/pai-workers/<轮次>/<线名>`；
+- 所有轮次都放在同一个根目录下，例如 `~/pai-lanes/<轮次>/<线名>`；
 - 信任一次，以后一直用它。
 
 这只是在一个 Claude Code 版本上观察到的现象，不是官方保证。如果还是出现了提示，就回答它（`pai trust`）。
