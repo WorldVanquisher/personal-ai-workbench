@@ -137,6 +137,14 @@ def _looks_like_vault(path, inbox="Agent Inbox"):
     return os.path.isdir(path) and os.path.isdir(os.path.join(path, inbox))
 
 
+def container_hint(path):
+    """The hint for a vault path copied from inside a container (/vaults/MainVault). Judged on the path as
+    given: on Windows such a path is not absolute, and resolving it puts a drive in front of it."""
+    if isinstance(path, str) and path.replace(os.sep, "/").startswith("/vaults/"):
+        return " (a container path such as /vaults/... is not the host path; on the NAS host the vault is under /srv)"
+    return ""
+
+
 def resolve(argument=None, config_vault=None, script=None, env=None, inbox="Agent Inbox"):
     """(vault, source, notes): the one vault path every command uses. Sources, in this order:
     the configuration, the command-line argument, the folder above the running script (a script kept
@@ -148,12 +156,12 @@ def resolve(argument=None, config_vault=None, script=None, env=None, inbox="Agen
     cands = [("configuration", config_vault), ("argument", argument),
              ("script location", os.path.dirname(os.path.dirname(os.path.abspath(script))) if script else None),
              ("VAULT", env.get("VAULT"))]
-    given = [(src, os.path.realpath(os.path.expanduser(p))) for src, p in cands if p]
+    given = [(src, os.path.realpath(os.path.expanduser(p)), p) for src, p in cands if p]
     if not given:
         raise VaultError("no vault given: set `vault` in the pai configuration, pass --vault PATH, or set VAULT")
-    src, path = given[0]
+    src, path, as_given = given[0]
     notes = []
-    for other, p in given[1:]:
+    for other, p, _ in given[1:]:
         if p == path:
             continue
         if src == "configuration" and other == "argument":
@@ -163,8 +171,7 @@ def resolve(argument=None, config_vault=None, script=None, env=None, inbox="Agen
             continue  # a script outside any vault says nothing about where the vault is
         notes.append(f"{other} names another folder ({p}); using the {src}'s")
     if not os.path.isdir(path):
-        hint = " (a container path such as /vaults/... is not the host path; on the NAS host the vault is under /srv)" \
-            if path.startswith("/vaults/") else ""
+        hint = container_hint(as_given) or container_hint(path)
         raise VaultError(f"vault does not exist on this machine: {path} (from the {src}){hint}")
     if not _looks_like_vault(path, inbox):
         notes.append(f"{path} has no {inbox!r} folder; is it the vault?")

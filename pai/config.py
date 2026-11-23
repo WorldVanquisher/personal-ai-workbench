@@ -179,9 +179,10 @@ def from_dict(project_key, p):
     if not isinstance(p, dict):
         raise ConfigError(f"[projects.{project_key}] must be a table")
     repo = _real_dir(p.get("repo"), "repo")
-    if not is_absolute(p.get("vault")):
-        raise ConfigError(f"vault must be an absolute path (got {p.get('vault')!r})")
     from pai import vault as vaultmod  # one resolver for every command (R6-COR-043)
+    if not is_absolute(p.get("vault")):
+        raise ConfigError(f"vault must be an absolute path (got {p.get('vault')!r})"
+                          + vaultmod.container_hint(p.get("vault")))
     try:
         vault = vaultmod.resolve(config_vault=p.get("vault"), env={}, inbox=p.get("inbox") or "Agent Inbox")[0]
     except vaultmod.VaultError as e:
