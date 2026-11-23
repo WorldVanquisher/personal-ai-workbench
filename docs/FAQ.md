@@ -60,8 +60,9 @@ A cleared conversation or a reboot loses nothing. See [REFRESH.md](REFRESH.md#e-
 
 ## 8. Why does `pai status` exit with 1?
 
-Because a lane is still working or waiting for you (a trust prompt, an answer). Scripts can rely
-on it: 0 means every lane is settled. Read the `lifecycle` line of each lane.
+Because a lane needs a look: it waits for you (a trust prompt, a task not delivered yet), or its
+agent has exited, which is also how a finished worker looks. 0 means every lane's agent is running
+and has its task, even while it is still working. Read the `lifecycle` line of each lane.
 
 ## 9. I answered the trust prompt, but the task still says `queued`
 

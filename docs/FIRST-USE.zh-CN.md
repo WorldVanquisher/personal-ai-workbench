@@ -16,6 +16,8 @@
 > 4. **定预算。** 开几个 worker、用哪个模型、每轮花多少钱。pai 显示它能看到的花费，但从不替你提高上限。
 > 5. **回答决策单。** 每个问题都附了选项和推荐，由你勾选。
 
+<!-- doc_check: pending pai round launch --allow-unbracketed -->
+
 ## 1. 需要准备什么
 
 - Linux、WSL（Ubuntu）或 macOS。workbench 在 macOS 上还没实际跑过，见平台页。原生 Windows 上请把 pai 装进 WSL。
@@ -26,6 +28,8 @@
   ```
 
   预期：三行输出，例如 `Python 3.12.3`、`git version 2.43.0`、`tmux 3.4`。要求是 Python 3.11 或更高、任意 git 2.x、任意 tmux 3.x。
+
+  **tmux 低于 3.8**（Ubuntu 和 WSL 自带的是 3.6）时，这一页的所有步骤照常可用。只有 `pai round`（第 9 节）受影响：3.8 以前的 tmux 无法报告 agent 有没有开启 bracketed paste，所以 `pai round launch`、`inject` 和 `next --send` 只往运行着 Claude Code 或 Codex 的 pane 里粘贴，其他程序一律拒绝（reported-by-round，R6-RND-080；见 `docs/ROUND.md` 的 tmux version and bracketed paste 一节）。
 
   如果缺了某一个（`command not found`），或者版本太旧：
 
@@ -57,7 +61,7 @@ pai-workbench-0.4.0/bin/pai install
 预期：
 
 - 先看到 `pai-workbench-0.4.0.tar.gz: OK`；
-- 然后 `install` 打印 `76 files match SHA256SUMS`、版本目录（`~/.local/share/pai-workbench/versions/0.4.0`）和启动器（`~/.local/bin/pai`）。
+- 然后 `install` 打印 `N files match SHA256SUMS`（N 随版本不同）、版本目录（`~/.local/share/pai-workbench/versions/0.4.0`）和启动器（`~/.local/bin/pai`）。
 
 如果它说 **`~/.local/bin is not on PATH`**，就运行它打印的这两行：
 
@@ -152,9 +156,10 @@ pai doctor
 ```
 info           project                …/practice is a Git checkout without pai defaults yet   -> pai init
 doctor changed nothing. (No pai project here: `pai init` in your checkout.)
+Next: …/docs/FIRST-USE.md, section 5 "Save this checkout's defaults: pai init".
 ```
 
-`pai doctor` 什么都不改。这一页用不到 `claude` 或 `codex`，没装也没关系。
+`Next:` 那一行指向安装目录里的这一页；它跳过了第 4 步的演练，因为演练是可选的。`pai doctor` 什么都不改。这一页用不到 `claude` 或 `codex`，没装也没关系。
 
 如果 `ESSENTIAL` 里有一行不是 `ok`，这一行末尾会有 `->`，后面跟着修复它的命令。运行那条命令，再跑 `pai doctor`，直到这一段全是 `ok`。常见的几种：
 
@@ -174,6 +179,7 @@ pai guide
 
 ```
 Done: the guided run went plan -> dispatch -> delivered -> completed, with a fake worker.
+Next, with your own project: …/docs/FIRST-USE.md, section 5 "Save this checkout's defaults: pai init", then section 6 …
 Remove this demo: pai guide --cleanup /tmp/pai-guided-demo-XXXX
 ```
 
@@ -247,7 +253,7 @@ pai status
 - `run --workers 1 --yes`：先显示 `started a …`，然后每条 lane 是下面两种情况之一：
   - `task: delivered`：worker 已经收到任务，去第 7 步。
   - `waiting for folder trust`：agent 在问要不要信任这个新的 lane 文件夹，这时 `pai run` 以 1 退出。往下看。
-- `status`：每条 lane 一段，包括 `lifecycle`、`trust`、`input`、`dispatch`、`rc`。只要还有 lane 在干活或在等你，它就**以 1 退出**，这是正常的。
+- `status`：每条 lane 一段，包括 `lifecycle`、`trust`、`input`、`dispatch`、`rc`。只要每条 lane 的 agent 都在运行、也都拿到了任务，它就以 0 退出，哪怕 agent 还在干活。有 lane 需要你看一眼时，它**以 1 退出**：在等你（信任提示、任务还没送达），或者 agent 已经退出（干完活的 worker 也是这个样子）。看 `lifecycle` 那一行。
 
 **lane 在等信任提示时：**
 
@@ -319,6 +325,7 @@ pai cleanup --apply --stop-running
 | --- | --- | --- |
 | 刚装完就 `pai: command not found` | 当前终端的 PATH 里没有 `~/.local/bin` | `export PATH="$HOME/.local/bin:$PATH"`，并写进 `~/.bashrc`（第 2 步） |
 | `sha256sum: WARNING: 1 computed checksum did NOT match` | 下载不完整或损坏 | 两个文件都重新下载；校验不过的归档永远不要安装 |
+| `pai round launch` 拒绝发送：`this tmux cannot tell whether … asked for bracketed paste` | tmux 低于 3.8，而且 pane 里运行的既不是 Claude Code 也不是 Codex | 先在这个 pane 里启动 agent；如果确实要往别的程序里粘贴，用 `pai round launch LANE --allow-unbracketed`（reported-by-round） |
 | pip 报 `Cannot import 'setuptools.build_meta'` | 没联网，或者没有 setuptools 却用了 `--no-build-isolation` | 让 pip 用隔离方式构建（需要联网一次），或者先在 venv 里 `pip install setuptools` |
 | `pai install` 说 "an installed Python package …, not an extracted release archive" | 你是用 uv 或 pip 装的（方式 B） | 用当初安装的方式升级（[REFRESH.zh-CN.md](REFRESH.zh-CN.md#a-升级-pai)） |
 | `pai doctor` 显示 `-> pai init` | 这个仓库还没有 pai 的默认设置 | 做第 5 步 |
@@ -326,7 +333,7 @@ pai cleanup --apply --stop-running
 | `pai task new …` 报 `no pai project here … Run pai init` | 这个仓库还没保存过 `pai init`，或者你不在仓库目录里 | `cd` 进仓库，做第 5 步 |
 | lane 显示 `waiting for folder trust` | agent 在问新 lane 文件夹要不要信任 | `pai trust`（第 6 步）；pai 永远不会替你回答 |
 | lane 显示 `queued: … the next pai resume … sends it` | 信任提示是在 `pai run` 返回之后才回答的 | `pai resume` |
-| `pai status` 以 1 退出 | 还有 lane 在干活，或者在等你 | 正常现象，看 `lifecycle` 那一行 |
+| `pai status` 以 1 退出 | 有 lane 在等你、任务还没送达，或者 agent 已经退出（干完了或被停了） | 看 `lifecycle` 那一行；worker 干完了是正常的，去第 7 步 |
 | `pai pr plan` 报 `BLOCKED no approved check is configured` | 没有设检查，或者检查是这次 run 开始之后才加的 | `pai init --update --check "test=make test"`，下一次 `pai run` 就会用上 |
 | `pai pr plan` 报 `BLOCKED … the remote is not a GitHub repository` | `origin` 是本地或非 GitHub 的远端 | 练习时是预期的；真实工作请从 GitHub clone |
 | `pai next` 报 `error: the following arguments are required: lane` | `pai next` 是给某一条 lane 派下一份任务笔记 | `pai next a`（先加 `--dry-run` 看看会派哪一份） |
@@ -337,8 +344,6 @@ pai cleanup --apply --stop-running
 
 
 ## 9. 可选：用 Obsidian 当控制台
-
-<!-- doc_check: pending pai round, pai decide, pai handoff approve -->
 
 一轮里有好几条 lane 之后，PAI 可以把这一轮的状态存成 vault 里的笔记：`PAI/Home.md`、每轮一张看板、每条 lane 一篇笔记、每个决策一篇笔记。之后，Obsidian（或者任何编辑器）就是你看、批、选的地方。这个功能来自 R6 的 round 线，pai 0.4.0 里还没有（reported-by-round）。完整说明见 [OBSIDIAN.zh-CN.md](OBSIDIAN.zh-CN.md)。
 

@@ -3,8 +3,6 @@
 English | [简体中文](OBSIDIAN.zh-CN.md)
 
 <!-- doc_check: fields -->
-<!-- doc_check: pending pai round, pai decide, pai handoff seal, pai handoff approve, pai handoff reject -->
-
 PAI keeps a round's state as Markdown notes in your vault: the board, one note per lane, one note
 per decision. Obsidian is where you **look, approve and choose**. The rules (owner decision D9,
 2026-11-22):
@@ -17,8 +15,7 @@ per decision. Obsidian is where you **look, approve and choose**. The rules (own
 
 The vault is just a folder. Any editor, `cat` or `grep` sees the same thing Obsidian does.
 
-The commands on this page come from the round and core lanes of R6 and are not merged yet
-(reported-by-round: `docs/ROUND.md`; reported-by-core: `docs/HANDOFF-V2.md`). The layout below was
+The commands on this page are specified in `docs/ROUND.md` and `docs/HANDOFF-V2.md`. The layout below was
 written into the owner's real vault by `pai round status --write-vault` on 2026-11-22.
 
 ## 1. The folders

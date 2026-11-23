@@ -59,9 +59,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MANUALS = (
     "README.md", "README.zh-CN.md", "QUICKSTART.md", "QUICKSTART.zh-CN.md",
     "docs/README.md", "docs/FIRST-USE.md", "docs/FIRST-USE.zh-CN.md", "docs/FIRST-USE-PLATFORMS.md",
-    "docs/REFRESH.md", "docs/REFRESH.zh-CN.md", "docs/REFRESH-b-round.md", "docs/REFRESH-b-round.zh-CN.md", "docs/GLOSSARY.md", "docs/GLOSSARY.zh-CN.md",
+    "docs/REFRESH.md", "docs/REFRESH.zh-CN.md", "docs/GLOSSARY.md", "docs/GLOSSARY.zh-CN.md",
     "docs/WHY-PAI.md", "docs/WHY-PAI.zh-CN.md", "docs/FAQ.md", "docs/FAQ.zh-CN.md",
     "docs/OBSIDIAN.md", "docs/OBSIDIAN.zh-CN.md", "docs/AGENTS-LAYERS.md", "docs/AGENTS-LAYERS.zh-CN.md", "docs/research/FLH-AGENTS-ANALYSIS.md", "examples/two-lane-round/README.md",
+    "docs/0.5.0/RELEASE-NOTES-DRAFT.md", "docs/0.5.0/RELEASE-NOTES-DRAFT.zh-CN.md",
 )
 ALWAYS_OK = {"--help", "--version"}
 FENCE = re.compile(r"^(```|~~~)")
@@ -216,24 +217,33 @@ def check_file(path, root, pai):
             notes.append("WARNING %s:%d: `%s` is declared pending but exists now; remove it from the marker"
                          % (rel, no, pend))
         for f in flags:
-            if f in ALWAYS_OK or has_flag(out, f):
+            if f in ALWAYS_OK:
                 continue
             pf = next((c for c, fl in pending_flags if fl == f and ("pai " + " ".join(words) + " ").startswith(c + " ")),
                       None)
+            exists = has_flag(out, f)
+            if not exists:
+                # some flags change routing (`pai doctor --agents` is PAI's own doctor): ask with the flag present
+                rc, out2 = pai.help(list(prefix) + [f])
+                if not (rc == 0 and has_flag(out2, f)) and len(prefix) == 1:
+                    # a positional also changes routing (`pai init PROJECT --vault …` is PAI's own init)
+                    rc, out2 = pai.help(list(prefix) + ["PROJECT", f])
+                    # argparse may stop with a usage error here (the flag took "--help" as its value); the
+                    # usage it prints still lists the real options, and the error part is ignored
+                    if rc == 2 and has_flag(out2.split("error:", 1)[0], f):
+                        rc = 0
+                exists = rc == 0 and has_flag(out2, f)
             if pf:
-                if not any(n.endswith("(declared pending: %s %s)" % (pf, f)) for n in notes):
-                    notes.append("PENDING %s:%d: `%s` (declared pending: %s %s)" % (rel, no, cmd, pf, f))
+                tail = "%s %s" % (pf, f)
+                if exists:
+                    kind, msg = "WARNING", ("WARNING %s:%d: `%s` is declared pending but exists now; remove it from "
+                                            "the marker" % (rel, no, tail))
+                else:
+                    kind, msg = "PENDING", "PENDING %s:%d: `%s` (declared pending: %s)" % (rel, no, cmd, tail)
+                if not any(n.startswith(kind) and tail in n for n in notes):
+                    notes.append(msg)
                 continue
-            # some flags change routing (`pai doctor --agents` is PAI's own doctor): ask with the flag present
-            rc, out2 = pai.help(list(prefix) + [f])
-            if not (rc == 0 and has_flag(out2, f)) and len(prefix) == 1:
-                # a positional also changes routing (`pai init PROJECT --vault …` is PAI's own init)
-                rc, out2 = pai.help(list(prefix) + ["PROJECT", f])
-                # argparse may stop with a usage error here (the flag took "--help" as its value); the
-                # usage it prints still lists the real options, and the error part is ignored
-                if rc == 2 and has_flag(out2.split("error:", 1)[0], f):
-                    rc = 0
-            if not (rc == 0 and has_flag(out2, f)):
+            if not exists:
                 problems.append("%s:%d: `pai %s` has no option %s (in `%s`)" % (rel, no, " ".join(prefix), f, cmd))
 
     in_code = False

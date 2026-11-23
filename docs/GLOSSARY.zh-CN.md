@@ -1,8 +1,6 @@
 # 术语表
 
 <!-- doc_check: fields -->
-<!-- doc_check: pending pai round, pai prompt, pai decide, pai worktree init --target -->
-
 [English](GLOSSARY.md) | 简体中文
 
 PAI 手册里用到的词，按第一次遇到的顺序排列。用 `代码` 写的命令在 pai 0.4.0 里已经存在；标了*（计划中）*的还没有。

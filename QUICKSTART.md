@@ -45,7 +45,7 @@ pai run --workers 1 --yes   # one worktree, branch and agent window for this tas
 pai status
 ```
 
-`pai status` exits with 1 while a lane is still at work or waiting for you; that is normal.
+`pai status` exits with 1 when a lane waits for you, has no task yet, or its agent has exited (a finished worker looks like that too); 0 while every agent runs with its task.
 If it says **waiting for folder trust**, the agent is asking whether to trust its folder: read
 the question and answer it yourself (`pai trust` opens it in this terminal, or type it in
 `pai web` below); pai then sends the task. When the agent is done, `pai pr plan a` shows what

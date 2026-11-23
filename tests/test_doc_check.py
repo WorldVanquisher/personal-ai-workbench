@@ -90,6 +90,13 @@ class CheckFile(unittest.TestCase):
         self.assertIn("--other", problems[0])
         self.assertTrue(any("pai queue status --frobnicate" in n for n in notes), notes)
 
+    def test_a_pending_flag_that_exists_now_is_a_warning(self):
+        problems, notes = self.run_on("<!-- doc_check: pending pai queue add --write -->\n\n"
+                                      "`pai queue add q --from x --write`\n\n`pai queue add q2 --from y --write`\n")
+        self.assertEqual(problems, [])
+        self.assertEqual(len(notes), 1, notes)
+        self.assertTrue(notes[0].startswith("WARNING") and "pai queue add --write" in notes[0], notes)
+
     def test_links_and_anchors(self):
         problems, _ = self.run_on(
             "[ok](other.md#second-part) [self](#top) [web](https://example.invalid/x) "

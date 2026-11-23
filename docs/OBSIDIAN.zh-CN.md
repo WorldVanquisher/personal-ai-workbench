@@ -3,8 +3,6 @@
 [English](OBSIDIAN.md) | 简体中文
 
 <!-- doc_check: fields -->
-<!-- doc_check: pending pai round, pai decide, pai handoff seal, pai handoff approve, pai handoff reject -->
-
 PAI 把一轮工作的状态存成 vault 里的 Markdown 笔记：一张看板，每条 lane 一篇笔记，每个决策一篇笔记。你在 Obsidian 里**看、批、选**。规则如下（owner 决策 D9，2026-11-22）：
 
 - **状态一律是 Markdown 加 front matter。** agent 和脚本直接读写。
@@ -14,7 +12,7 @@ PAI 把一轮工作的状态存成 vault 里的 Markdown 笔记：一张看板�
 
 vault 就是一个文件夹。任何编辑器、`cat` 或 `grep` 看到的内容，都和 Obsidian 看到的一样。
 
-这一页的命令来自 R6 的 round 线和 core 线，还没合并（reported-by-round：`docs/ROUND.md`；reported-by-core：`docs/HANDOFF-V2.md`）。下面的目录结构是 2026-11-22 由 `pai round status --write-vault` 实际写进 owner 的 vault 的。
+这一页命令的完整写法见 `docs/ROUND.md` 和 `docs/HANDOFF-V2.md`（英文）。下面的目录结构是 2026-11-22 由 `pai round status --write-vault` 实际写进 owner 的 vault 的。
 
 ## 1. 目录约定
 

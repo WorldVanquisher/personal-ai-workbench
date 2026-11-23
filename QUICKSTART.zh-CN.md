@@ -33,7 +33,7 @@ pai run --workers 1 --yes   # 为这个任务开一个 worktree、一个分支�
 pai status
 ```
 
-当某条 lane 还在工作或在等你时，`pai status` 以 1 退出；这是正常的。如果它显示 **waiting for folder trust**，说明 agent 在问是否信任它的文件夹：阅读问题后由你自己回答（`pai trust` 会在这个终端里打开它，也可以在下面的 `pai web` 里直接输入）；之后 pai 才会发送任务。agent 完成后，`pai pr plan a` 显示将要发布的内容和还缺什么（它需要一个审阅检查，`pai init` 会问你）；只有你运行 `pai pr open a` 时才会 push。
+有 lane 在等你、还没拿到任务，或者 agent 已经退出（干完活的 worker 也是这样）时，`pai status` 以 1 退出；每个 agent 都在运行、都拿到了任务时以 0 退出。如果它显示 **waiting for folder trust**，说明 agent 在问是否信任它的文件夹：阅读问题后由你自己回答（`pai trust` 会在这个终端里打开它，也可以在下面的 `pai web` 里直接输入）；之后 pai 才会发送任务。agent 完成后，`pai pr plan a` 显示将要发布的内容和还缺什么（它需要一个审阅检查，`pai init` 会问你）；只有你运行 `pai pr open a` 时才会 push。
 
 ## 4. 在浏览器里查看 agent 并和它们交互
 

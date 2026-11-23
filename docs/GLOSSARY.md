@@ -1,8 +1,6 @@
 # Glossary
 
 <!-- doc_check: fields -->
-<!-- doc_check: pending pai round, pai prompt, pai decide, pai worktree init --target -->
-
 English | [简体中文](GLOSSARY.zh-CN.md)
 
 The words PAI's manuals use, in the order you meet them. Commands in `code` exist in pai 0.4.0

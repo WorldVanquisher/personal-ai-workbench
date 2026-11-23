@@ -2,8 +2,6 @@
 
 English | [简体中文](AGENTS-LAYERS.zh-CN.md)
 
-<!-- doc_check: pending pai worktree init --target, pai context --worktree, pai round, pai prompt -->
-
 Every agent session starts by reading the repository's instruction file: `AGENTS.md` (Codex, and
 Claude Code when there is no `CLAUDE.md`) or `CLAUDE.md`. Everything in it is loaded into every
 session's context, for every task. That makes it the **heart** of a multi-agent project:
@@ -45,13 +43,27 @@ re-verified 2026-11-22):
   `@AGENTS.md` makes both agents read the same L0. Claude Code does not read `.agents/`,
   `AGENTS.local.md` or `AGENTS.override.md`.
 
+**What Claude Code really loads** (mastermind 2026-11-22 real run, Claude Code 2.1.330, haiku). In
+the strict retest every file tool was disabled, so the model could only answer from the instruction
+files it had loaded. Each case ran twice: 10 of 10 runs matched, each answered in one turn.
+
+| # | Files in the folder | What Claude Code reads |
+| --- | --- | --- |
+| 1 | a git-ignored `CLAUDE.local.md` in a linked worktree | `CLAUDE.local.md` is read, so L2 can live there |
+| 2 | `CLAUDE.md` and `AGENTS.md` | only `CLAUDE.md`; `AGENTS.md` is **not** read |
+| 3 | `CLAUDE.md` holding `@AGENTS.md`, and `AGENTS.md` | both: the import pulls `AGENTS.md` in |
+| 4 | only `AGENTS.md`, no `CLAUDE.md` | `AGENTS.md` is read |
+
+Rule 2 is the one to remember: adding any `CLAUDE.md` to a folder silently stops Claude Code from
+reading its `AGENTS.md`, unless that `CLAUDE.md` imports it.
+
 What does **not** belong here: status reports ("round 4 delivered …"), one subsystem's details, and
 anything dated. For a worked example of splitting a real 1,074-line file, see
 [research/FLH-AGENTS-ANALYSIS.md](research/FLH-AGENTS-ANALYSIS.md).
 
 **Windows note.** A `CLAUDE.md` that is a symbolic link to `AGENTS.md` becomes a 9-byte text file on
-a Windows checkout without symlink support, and Claude Code then reads no rules. Use a plain
-`CLAUDE.md` holding the one line `@AGENTS.md` instead. The steps are in
+a Windows checkout without symlink support, and Claude Code then reads no rules. Replace it with a
+plain `CLAUDE.md` holding the one line `@AGENTS.md`, or delete it (rule 4). The two choices are in
 [AGENTS-LAYERS.md § Migrating a CLAUDE.md symlink](#migrating-a-claudemd-symlink-to-an-import).
 
 ## L1: contracts
@@ -79,9 +91,9 @@ markers, so it never overwrites your text:
 <!-- pai:managed:end -->
 ```
 
-| Agent | Where L2 goes | Command (core lane; not merged; reported-by-core) | Status |
+| Agent | Where L2 goes | Command (core lane, reported-by-core) | Status |
 | --- | --- | --- | --- |
-| Claude Code | `CLAUDE.local.md` in the lane's worktree. Claude Code reads it next to `CLAUDE.md`; PAI adds it to the repository's `info/exclude`, so git never sees it and the worktree stays clean | `pai worktree init PATH --target claude-local --write` | the file handling is tested with fakes; that a real Claude Code session follows it is **to be verified** |
+| Claude Code | `CLAUDE.local.md` in the lane's worktree. Claude Code reads it next to `CLAUDE.md`; PAI adds it to the repository's `info/exclude`, so git never sees it and the worktree stays clean | `pai worktree init PATH --target claude-local --write` | file handling tested with fakes; a real Claude Code session reads it (rule 1 above, mastermind 2026-11-22 real run, Claude Code 2.1.330, haiku) |
 | Codex | a managed section in the worktree's `AGENTS.md` (Codex does not read `CLAUDE.local.md`) | `pai worktree init PATH --write` (the default target) | **to be verified** on a real Codex run; the section makes the worktree dirty, which the continuation flow has to tolerate |
 
 `pai context --worktree PATH` (core lane) reads a lane's instructions as the agent would:
@@ -117,6 +129,20 @@ Every "—" is a gap today. The R7 round is planned around closing them, startin
 These are documentation-only steps, shown on FLH. Run them in your own checkout and commit them
 yourself.
 
+FLH links `CLAUDE.md` to `AGENTS.md` only so that Claude Code reads the rules. Two replacements do
+that without a link (rules 3 and 4 in [L0](#l0-the-constitution)):
+
+| | A: `CLAUDE.md` holding `@AGENTS.md` (recommended) | B: delete `CLAUDE.md` |
+| --- | --- | --- |
+| Claude Code reads `AGENTS.md` | yes, through the import (rule 3) | yes, because no `CLAUDE.md` exists (rule 4) |
+| Files to keep | two; `CLAUDE.md` is one line | one |
+| Claude-only lines | can go into `CLAUDE.md` below the import | have no shared place; per-worktree lines go into `CLAUDE.local.md` |
+| If someone adds a `CLAUDE.md` later | nothing changes | Claude Code silently stops reading `AGENTS.md` (rule 2) |
+| Evidence | rule 3 | rule 4, verified on Claude Code 2.1.330 only; an older Claude Code, or another tool that reads only `CLAUDE.md`, gets no rules |
+| Windows | a plain file, no link problem | nothing to break |
+
+Choose A unless you want one file and accept the last three rows. Steps for A:
+
 1. Check that it is a link: `git -C ~/workspace/french-learning-app ls-files -s CLAUDE.md`. Mode
    `120000` means a symbolic link.
 2. Replace it with a one-line file:
@@ -134,3 +160,6 @@ yourself.
 4. On Windows, after the next pull, open `CLAUDE.md`. It must hold `@AGENTS.md`, not the text
    `AGENTS.md` left by a broken link.
 5. Codex keeps reading `AGENTS.md` directly; nothing changes for Codex lanes.
+
+For B, replace step 2 with `git rm CLAUDE.md` and, in step 3, check that `/memory` lists `AGENTS.md`
+itself. Steps 4 and 5 stay the same.

@@ -3,8 +3,6 @@
 Which document answers which question. Chinese versions sit beside the English ones
 (`*.zh-CN.md`) where they exist.
 
-<!-- doc_check: pending pai round, pai prompt -->
-
 ## Start here
 
 | When | Read |
@@ -39,11 +37,13 @@ Which document answers which question. Chinese versions sit beside the English o
 | What changed, and what was tested | [RELEASE_NOTES.md](../RELEASE_NOTES.md) |
 | The prompt for an agent session | [SESSION_START.md](../SESSION_START.md) |
 
-Arriving with the R6 lanes (not merged yet; each lane's own page):
+Formats and commands added in 0.5.0 (each written by the lane that built it; in a checkout, and in
+the archive once they ship):
 
 - `docs/ROUND.md` (round lane): `pai round` and ROUND.json.
 - `docs/PROMPTS.md` (prompts lane): the prompt library and `pai prompt`.
 - `docs/HANDOFF-V2.md` (core lane): the handoff format `pai-handoff/2` and NEXT-PR.md.
+- `docs/FRONTMATTER.md` (core lane): the front matter of PAI's notes, and `docs/frontmatter.schema.json`.
 
 ## For maintainers
 
@@ -59,7 +59,7 @@ Arriving with the R6 lanes (not merged yet; each lane's own page):
 Run these on the release candidate commit, in order. Each one says what passing looks like.
 
 1. **Commands, flags, links, translations.** Run `python3 -B tools/doc_check.py`. It must end with
-   `OK`. CI runs the same check on Linux (reported-by-core, R6-COR-008). A `PENDING` line means a manual still declares a command from an unmerged lane; a
+   `OK`. CI runs the same check on Linux (reported-by-core, R6-COR-008). A `PENDING` line means a manual still declares a command that is not in this build yet; a
    `WARNING` means that command exists now, so remove it from the `<!-- doc_check: pending … -->`
    marker.
 2. **Version numbers.** Bump every install line in README*.md and docs/FIRST-USE*.md to the new
@@ -72,7 +72,9 @@ Run these on the release candidate commit, in order. Each one says what passing 
    runtime modules and absolute developer paths (a home folder, a server's data folder), so quote no machine's
    real paths in a manual.
 4. **The bundle.** Run `python3 -B tools/bundle_smoke.py dist/pai-workbench-X.Y.Z.tar.gz dist/pai-workbench-X.Y.Z.zip --work /tmp/smoke-X`.
-   Success: `SMOKE PASSED` with 0 failed. Its manual checks need the 7 manuals present, matching
+   Success: `SMOKE PASSED` with 0 failed. `python3 -B tools/verify.py` runs this and the package
+   check; on Ubuntu or WSL the package step needs `sudo apt-get install -y python3-pip python3-venv`,
+   or it is skipped rather than passed. Its manual checks need the 7 manuals present, matching
    versions, and, when the prompt library ships, every prompt file's marker matching
    `pai prompt list` and `pai prompt lint` passing.
 5. **Platform claims.** Update [FIRST-USE-PLATFORMS.md](FIRST-USE-PLATFORMS.md) from this release's
@@ -84,6 +86,8 @@ Run these on the release candidate commit, in order. Each one says what passing 
 7. **The fresh-reader score (optional, JEV).** Score each FIRST-USE and REFRESH section with the
    question "can a reader follow only this section without asking anyone?". Investigate any section
    that dropped since the last release.
+8. **Both languages.** Every change to an English manual has its `.zh-CN.md` twin in the same commit.
+   Step 1's translation check catches missing sections, code blocks and tables, but not wording.
 9. **Language policy (owner decision PRM-D1 = A, 2026-11-22).**
    - The user manuals are English, each with a `.zh-CN.md` twin (step 8).
    - The prompt library (`pai/prompts/*.md`) stays **Chinese**, with no English copy.
@@ -96,5 +100,8 @@ Run these on the release candidate commit, in order. Each one says what passing 
      Every file must print a share above 0.05. A file near 0 has become English: translate it back,
      or ask the owner.
    - `docs/PROMPTS.md` must say that the library is Chinese.
-8. **Both languages.** Every change to an English manual has its `.zh-CN.md` twin in the same commit.
-   Step 1's translation check catches missing sections, code blocks and tables, but not wording.
+10. **A PR only for a release (owner, 2026-11-22).** Lanes and rounds do not open GitHub PRs of their
+    own. Their work is merged locally (for 0.5.0 the local branch `integ/0.5.0`) until it adds up to
+    a release worth publishing; then **one** release PR is opened, with the version bump and the
+    release notes ([0.5.0 draft](0.5.0/RELEASE-NOTES-DRAFT.md)), and the owner approves, merges and
+    publishes it. Success: the PR's commits are exactly the release candidate this checklist ran on.

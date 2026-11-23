@@ -1,7 +1,5 @@
 # Refresh: upgrading pai and starting every new round
 
-<!-- doc_check: pending pai round, pai prompt, pai vault -->
-
 English | [简体中文](REFRESH.zh-CN.md)
 
 [FIRST-USE.md](FIRST-USE.md) gets you to one finished round. This page is for every round after
@@ -103,88 +101,65 @@ Parts you edited by hand are outside the managed markers and are kept.
 
 ## (b) Every round
 
-The `pai round` version of this part is ready in [REFRESH-b-round.md](REFRESH-b-round.md); it replaces the block below after integration.
-
 <!-- refresh-b:begin -->
-A round starts from the **merged** main, in **new** worktrees, with freshly filled prompts. Steps
-1–5 below are what was really used on R6 day: the scripts `r6-prepare.sh` and `r6-worktrees.sh`
-from the vault's `99 Templates/`.
+A round starts from the **merged** main, in **new** worktrees under one trusted root, with freshly
+filled prompts. `pai round` does the steps the R6 scripts did, and keeps the round in
+`<vault>/Agent Inbox/<ROUND>/ROUND.json`.
 
-Set `VAULT` once, to the vault folder **on this machine** (the host path, not a container path;
-see (c)). Check it: `ls "$VAULT/Agent Inbox"` must list the inbox.
-
-```sh
-VAULT=/path/to/your/vault
-```
-
-**1. Wait for the merge, then read the new base.** Merging on GitHub does not change your
-machine. `r6-prepare.sh` reads main's SHA straight from GitHub, so it needs no local clone:
+**0. Once per machine: name the project's GitHub repository.** `pai round new` finds the main
+clone by its GitHub remote. Without this file it stops with `which GitHub repository? give --github
+OWNER/NAME or set [project.pai] github`:
 
 ```sh
-git ls-remote https://github.com/WorldVanquisher/personal-ai-workbench.git refs/heads/main
+mkdir -p ~/.config/pai && printf '[project.pai]\ngithub = "OWNER/NAME"\n' >> ~/.config/pai/round.toml
 ```
 
-Success: one line, a 40-character SHA, then `refs/heads/main`. It must be the merge commit
-you expect. Check it against the PR page.
+Other keys (vault, trusted root, tmux session) are optional: `docs/ROUND.md` § Configuration. The
+search for the clone covers `~` and `/srv`, five levels down.
 
-**2. Fill and split the prompts.**
+**1. Preview the round, then create it.**
 
 ```sh
-bash "$VAULT/99 Templates/r6-prepare.sh" pai
+pai round new pai R7-YYYYMMDD --prompt "99 Templates/PAI Worker Prompt R7.md" --vault "$VAULT"           # preview; exit 1 if something is in the way
+pai round new pai R7-YYYYMMDD --prompt "99 Templates/PAI Worker Prompt R7.md" --vault "$VAULT" --write   # does it
 ```
 
-It fills `{{RUN_ID}}`-style placeholders, refuses if any is left, and writes one paste-ready file
-per lane. Expected output:
+What it does:
 
-- `RUN=R6-YYYYMMDD`, `BASE=<sha>`, `VAULT=…`;
-- `输出目录：~/r6-prompts/pai-<RUN>`;
-- one line per lane file, for example `docs.txt  130 行`.
+- reads main's SHA with `git ls-remote` (or takes `--base SHA`);
+- finds the one main clone (refuses and lists them when there are several: add `--repo PATH`);
+- fills and splits the prompt per lane, and refuses if a placeholder is left;
+- creates `worker/<ROUND>/<lane>` worktrees under the trusted root.
 
-If it stops:
+Re-running is safe. A lane shown as `CONFLICT` (a folder in the way, a branch checked out
+elsewhere) stops the write until you fix it.
 
-| Message | Fix |
-| --- | --- |
-| `在 … 下面找不到 Agent Inbox` | the vault path is wrong; pass it: `VAULT=/path/to/vault bash …/r6-prepare.sh pai` |
-| `找不到 prompt 文件` | pass the prompt note as the second argument |
-| `拿不到 … 的 main SHA` | no network or no GitHub access |
-| `上面这些占位还没填` | add the value to the script's `sed` list, or remove the placeholder from the note |
-| `part2 的第一行不是「线名：xxx。」` | each lane part must start with that line |
-
-**3. Preview, then make the worktrees** (and clean up old ones safely):
+**2. Start each lane** in tmux, with Remote Control, and paste its prompt:
 
 ```sh
-bash "$VAULT/99 Templates/r6-worktrees.sh"          # plan: shows what would happen, changes nothing
-bash "$VAULT/99 Templates/r6-worktrees.sh" apply    # does it
+pai round launch docs --paste-prompt --write
+pai round status                                  # one line per lane: running / idle / blocked-on-dialog / exited …
 ```
 
-What `apply` does:
+If a lane shows `blocked-on-dialog` with dialog `trust`, answer the folder-trust question in that window yourself.
+`launch` sent nothing then, so run the same `pai round launch docs --paste-prompt --write` line again:
+it starts nothing new and pastes the prompt (`sent (… bracketed paste True, then Enter)`). Then check
+the first reply: it must list the files the worker read and its first item IDs.
 
-- It removes an old worktree only when it is clean (no uncommitted or untracked files) **and**
-  idle (no process has its working directory inside it).
-- It never uses `--force`, never deletes a branch, and never removes an `R6-*` worktree.
-- It then creates `~/workspace/pai-workers/<RUN>/<lane>` on branch `worker/<RUN>/<lane>` from BASE.
+**3. Every day:** `pai round status` (add `--write-vault` to refresh `PAI/Home.md`), and
+`pai round next LANE --send` when a lane has stopped at a checkpoint. It reads the lane's
+`RESTART.md` (newest `cp-*` folder, or the lane's work folder) and refuses while there is none.
 
-Running it again is safe. If it says `找到多个 PAI 仓库`, choose one clone:
-`PAI_REPO=~/code/personal-ai-workbench bash …/r6-worktrees.sh`.
-
-**4. Start one worker per lane** in tmux, in its worktree, with Remote Control. Start each one
-under the [trusted root](GLOSSARY.md#trusted-root) so that no new folder-trust prompt appears:
+**4. Close the round** when every PR is merged:
 
 ```sh
-tmux new-session -d -s r6 -n docs -c ~/workspace/pai-workers/<RUN>/docs
-tmux send-keys -t r6:docs 'claude --remote-control --name "PAI <RUN> docs"' Enter
+pai round close              # the acceptance checklist, and which worktrees would be reclaimed
+pai round close --write      # reclaims only clean, idle worktrees; branches are kept
 ```
 
-If a trust prompt appears anyway, answer it yourself in that window (`tmux attach -t r6`).
-
-**5. Send each lane its prompt.** Paste the lane file (`~/r6-prompts/pai-<RUN>/<lane>.txt`) into
-its session, from claude.ai's Remote Control view or the tmux window. The first reply must list
-the files it read and its first item IDs. Check that before you let it run.
-
-**Coming with `pai round` (round lane; in its lane tree, not merged; reported-by-round).**
-`pai round new PROJECT ROUND --lane L … --prompt FILE --write` does steps 1–3 and writes ROUND.json.
-`pai round status` shows one line per lane (session, trust prompt, worktree clean or not, last
-checkpoint, queue totals). See `docs/ROUND.md` once merged. Until then, use the scripts above.
+A worktree whose Claude session still runs, even idle, is kept (`keep … in use by …`). End that
+session first (`/exit` in its window), then run `pai round close --write` again; ROUND.json is
+archived as closed once no lane worktree remains.
 <!-- refresh-b:end -->
 
 ## (c) Common pitfalls
@@ -194,7 +169,7 @@ Each of these was really hit on R6 day.
 | Pitfall | What happens | Do this |
 | --- | --- | --- |
 | **Container path vs host path** | Syncthing runs in Docker; its UI shows the vault as `/vaults/MainVault`. That path does not exist on the host; there it is the folder Syncthing's volume maps to (on the R6 NAS, under `/srv/…/obsidian/MainVault`). A prompt filled with the container path sends workers to a folder that is not there. | Always use the host path. `r6-prepare.sh` works it out from its own location, or takes `VAULT=<host path>`. Check with `ls "$VAULT/Agent Inbox"` on the host. |
-| **Sync delay** | Syncthing copies a note between devices seconds to minutes later. On 2026-11-22 the copy from Windows to the NAS was slow twice (reported by the owner), so a worker on the NAS could have read the old version of a note just edited on Windows. | Before telling a worker to read a note, compare checksums on both machines: `sha256sum "$VAULT/PAI/decisions/R6-20261122-D9.md"` on each, and wait until they match. Put the sha in the message to the worker ("read X, sha256 abc123…"), so it can check too. With the core lane's `pai vault wait FILE --sha SHA --timeout 120` (not merged yet), the round machine waits until that version has arrived. |
+| **Sync delay** | Syncthing copies a note between devices seconds to minutes later. On 2026-11-22 the copy from Windows to the NAS was slow twice (reported by the owner), so a worker on the NAS could have read the old version of a note just edited on Windows. | Before telling a worker to read a note, compare checksums on both machines: `sha256sum "$VAULT/PAI/decisions/R6-20261122-D9.md"` on each, and wait until they match. Put the sha in the message to the worker ("read X, sha256 abc123…"), so it can check too. With the core lane's `pai vault wait FILE --sha SHA --timeout 120` the round machine waits until that version has arrived. |
 | **What does not sync: `.stglobalignore`** | Per-device files (Obsidian's `workspace.json`) cause conflicts on every click, while worker output such as `__pycache__` should never sync. | Keep shared ignore rules in `$VAULT/.stglobalignore`, which syncs. On each device, put one line in its own `.stignore`: `#include .stglobalignore`. Ignore `.obsidian/workspace.json`, `.obsidian/workspace-mobile.json`, `.obsidian/**/*.sync-conflict-*` and `(?d)__pycache__`. Do not ignore notes: their conflict copies must sync, so that you see them. |
 | **Sync-conflict files** | Two devices change one note before syncing. Syncthing keeps both: `NAME.sync-conflict-<date>-<time>-<device>.md` next to `NAME.md`. PAI never reads a conflict copy as state, and does not rewrite a note that has one beside it (reported-by-round). | Find them with `find "$VAULT" -name '*.sync-conflict-*'`. For each one, `diff` it with the note, keep what you want in `NAME.md`, and delete the copy. PAI's next `--write-vault` then updates the note again. |
 | **Several clones on one machine** | Two checkouts of the same repository: worktrees, fetches and `pai` defaults can end up on the wrong one. | Name the clone explicitly: `PAI_REPO=PATH` (or `FLH_REPO=`) for the scripts; `pai init --repo PATH`; `git -C PATH …`. |

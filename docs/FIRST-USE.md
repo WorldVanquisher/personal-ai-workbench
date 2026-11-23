@@ -22,6 +22,8 @@ platforms this has really run on: [FIRST-USE-PLATFORMS.md](FIRST-USE-PLATFORMS.m
 >    the cost it can see; it never raises a limit.
 > 5. **Answer the decision sheet.** Questions with options and a recommendation; you tick one.
 
+<!-- doc_check: pending pai round launch --allow-unbracketed -->
+
 ## 1. What you need
 
 - Linux, WSL (Ubuntu), or macOS (the workbench on macOS has not been run yet; see the
@@ -34,6 +36,12 @@ platforms this has really run on: [FIRST-USE-PLATFORMS.md](FIRST-USE-PLATFORMS.m
 
   Expected: three lines, such as `Python 3.12.3`, `git version 2.43.0`, `tmux 3.4`. You need Python
   3.11 or higher, any git 2.x and any tmux 3.x.
+
+  **tmux below 3.8** (Ubuntu and WSL ship 3.6) works for everything on this page. Only `pai round`
+  (section 9) notices: tmux before 3.8 cannot report whether the agent asked for bracketed paste,
+  so `pai round launch`, `inject` and `next --send` paste only into a pane running Claude Code or
+  Codex and refuse any other program (reported-by-round, R6-RND-080; `docs/ROUND.md` § tmux version
+  and bracketed paste).
 
   If one is missing (`command not found`) or too old:
 
@@ -67,7 +75,7 @@ tar -xzf pai-workbench-0.4.0.tar.gz
 pai-workbench-0.4.0/bin/pai install
 ```
 
-Expected: `pai-workbench-0.4.0.tar.gz: OK`, then `install` prints `76 files match SHA256SUMS`, the
+Expected: `pai-workbench-0.4.0.tar.gz: OK`, then `install` prints `N files match SHA256SUMS` (N depends on the version), the
 version folder (`~/.local/share/pai-workbench/versions/0.4.0`) and the launcher (`~/.local/bin/pai`).
 
 If it says **`~/.local/bin is not on PATH`**, run the two lines it prints:
@@ -173,9 +181,11 @@ agent if installed), an `OPTIONAL` block (gh), and at the end:
 ```
 info           project                …/practice is a Git checkout without pai defaults yet   -> pai init
 doctor changed nothing. (No pai project here: `pai init` in your checkout.)
+Next: …/docs/FIRST-USE.md, section 5 "Save this checkout's defaults: pai init".
 ```
 
-`pai doctor` changes nothing. A missing `claude` or `codex` is fine for this page.
+The `Next:` line names the installed copy of this page. It skips the rehearsal in step 4, which is
+optional. `pai doctor` changes nothing. A missing `claude` or `codex` is fine for this page.
 
 If a line in `ESSENTIAL` is not `ok`, it ends with `->` and the command that fixes it. Run that
 command, then `pai doctor` again, until the block is all `ok`. The usual ones:
@@ -197,6 +207,7 @@ the worker's handoff, and cleanup with the normal commands. Expected last lines:
 
 ```
 Done: the guided run went plan -> dispatch -> delivered -> completed, with a fake worker.
+Next, with your own project: …/docs/FIRST-USE.md, section 5 "Save this checkout's defaults: pai init", then section 6 …
 Remove this demo: pai guide --cleanup /tmp/pai-guided-demo-XXXX
 ```
 
@@ -285,8 +296,10 @@ What each one shows:
   - `task: delivered`: the worker has the task. Go to step 7.
   - `waiting for folder trust`: the agent asks whether to trust the new lane folder, and
     `pai run` exits with 1. Continue below.
-- `status`: one block per lane: `lifecycle`, `trust`, `input`, `dispatch`, `rc`. It **exits with 1**
-  while a lane is still working or waiting for you. That is normal.
+- `status`: one block per lane: `lifecycle`, `trust`, `input`, `dispatch`, `rc`. It exits with 0
+  while every lane's agent runs and has its task, even while it works. It **exits with 1** when a
+  lane needs a look: it waits for you (a trust prompt, a task not delivered yet), or its agent has
+  exited, which is also how a finished worker looks. Read the `lifecycle` line.
 
 **When a lane waits for folder trust:**
 
@@ -364,6 +377,7 @@ not, keep the full output and `pai doctor`'s output, and report both.
 | --- | --- | --- |
 | `pai: command not found` right after install | `~/.local/bin` is not on PATH in this terminal | `export PATH="$HOME/.local/bin:$PATH"`, and add it to `~/.bashrc` (step 2) |
 | `sha256sum: WARNING: 1 computed checksum did NOT match` | incomplete or damaged download | download both files again; never install an archive that fails this |
+| `pai round launch` refuses: `this tmux cannot tell whether … asked for bracketed paste` | tmux below 3.8, and the pane runs neither Claude Code nor Codex | start the agent in that pane first; to paste into another program anyway, `pai round launch LANE --allow-unbracketed` (reported-by-round) |
 | pip: `Cannot import 'setuptools.build_meta'` | building without network or without setuptools (`--no-build-isolation`) | let pip build in isolation (needs network once), or `pip install setuptools` in the venv first |
 | `pai install`: "an installed Python package …, not an extracted release archive" | you installed with uv or pip (path B) | upgrade the same way you installed ([REFRESH.md](REFRESH.md#a-upgrade-pai)) |
 | `pai doctor`: `-> pai init` | this checkout has no pai defaults yet | step 5 |
@@ -371,7 +385,7 @@ not, keep the full output and `pai doctor`'s output, and report both.
 | `pai task new …`: `no pai project here … Run pai init` | `pai init` has not been saved for this checkout, or you are in another folder | `cd` into the checkout; step 5 |
 | lane shows `waiting for folder trust` | the agent is asking about the new lane folder | `pai trust` (step 6); pai never answers it for you |
 | lane shows `queued: … the next pai resume … sends it` | the trust prompt was answered after `pai run` returned | `pai resume` |
-| `pai status` exits 1 | a lane is still working or waiting for you | normal; read the `lifecycle` line |
+| `pai status` exits 1 | a lane waits for you, its task is not delivered yet, or its agent has exited (finished or stopped) | read the `lifecycle` line; a finished worker is normal: go to step 7 |
 | `pai pr plan`: `BLOCKED no approved check is configured` | no review check, or it was added after this run started | `pai init --update --check "test=make test"`, then the next `pai run` uses it |
 | `pai pr plan`: `BLOCKED … the remote is not a GitHub repository` | `origin` is a local or non-GitHub remote | expected for practice; for real work clone from GitHub |
 | `pai next` → `error: the following arguments are required: lane` | `pai next` gives one lane its next task note | `pai next a` (add `--dry-run` to see which note first) |
@@ -382,8 +396,6 @@ not, keep the full output and `pai doctor`'s output, and report both.
 
 
 ## 9. Optional: Obsidian as the console
-
-<!-- doc_check: pending pai round, pai decide, pai handoff approve -->
 
 Once you run rounds with several lanes, PAI can keep the round's state as notes in your vault:
 `PAI/Home.md`, one board per round, one note per lane and one per decision. Obsidian (or any

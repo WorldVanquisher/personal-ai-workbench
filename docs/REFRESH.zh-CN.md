@@ -1,7 +1,5 @@
 # 刷新手册：升级 pai，开始每一轮新的工作
 
-<!-- doc_check: pending pai round, pai prompt, pai vault -->
-
 [English](REFRESH.md) | 简体中文
 
 [FIRST-USE.zh-CN.md](FIRST-USE.zh-CN.md) 带你跑完第一轮。这一页管之后的每一轮，分五部分：
@@ -94,79 +92,52 @@ pai prompt init --dest <vault>/PAI/prompts --write
 
 ## (b) 每一轮的刷新
 
-这一部分的 `pai round` 版本已经写好，见 [REFRESH-b-round.zh-CN.md](REFRESH-b-round.zh-CN.md)；集成之后，用它替换下面这一块。
-
 <!-- refresh-b:begin -->
-每一轮都从**合并后**的 main 开始，用**新的** worktree，发新填好的 prompt。下面的 1–5 步是 R6 当天实际用过的做法，用的是 vault 里 `99 Templates/` 下的脚本 `r6-prepare.sh` 和 `r6-worktrees.sh`。
+每一轮都从**合并后**的 main 开始，在同一个 trusted root 下用**新的** worktree，发新填好的 prompt。以前 R6 脚本做的那几步，现在由 `pai round` 来做，整轮的信息保存在 `<vault>/Agent Inbox/<ROUND>/ROUND.json`。
 
-先设好 `VAULT`，指向**这台机器上**的 vault 文件夹（主机路径，不是容器路径，见 (c)）。核对一下：`ls "$VAULT/Agent Inbox"` 必须能列出收件箱。
-
-```sh
-VAULT=/path/to/your/vault
-```
-
-**1. 等合并完成，再读新的 base。** 在 GitHub 上合并不会改动你的机器。`r6-prepare.sh` 直接从 GitHub 读 main 的 SHA，所以不需要本地 clone：
+**0. 每台机器做一次：写明项目的 GitHub 仓库。** `pai round new` 靠 GitHub 远端来找主 clone。没有这个文件时，它会停下并提示 `which GitHub repository? give --github OWNER/NAME or set [project.pai] github`：
 
 ```sh
-git ls-remote https://github.com/WorldVanquisher/personal-ai-workbench.git refs/heads/main
+mkdir -p ~/.config/pai && printf '[project.pai]\ngithub = "OWNER/NAME"\n' >> ~/.config/pai/round.toml
 ```
 
-成功时只有一行：40 位的 SHA，后面跟着 `refs/heads/main`。它必须是你预期的那个合并提交，可以到 PR 页面核对。
+其他设置（vault、trusted root、tmux 会话）都是可选的，见 `docs/ROUND.md` 的 Configuration 一节。查找 clone 的范围是 `~` 和 `/srv`，往下五层。
 
-**2. 填好 prompt 并按 lane 拆开。**
+**1. 先预览这一轮，再创建。**
 
 ```sh
-bash "$VAULT/99 Templates/r6-prepare.sh" pai
+pai round new pai R7-YYYYMMDD --prompt "99 Templates/PAI Worker Prompt R7.md" --vault "$VAULT"           # 预览；有东西挡路时以 1 退出
+pai round new pai R7-YYYYMMDD --prompt "99 Templates/PAI Worker Prompt R7.md" --vault "$VAULT" --write   # 真正执行
 ```
 
-它会填好 `{{RUN_ID}}` 这类占位符，有遗漏就拒绝继续，然后给每条 lane 写一个可以直接粘贴的文件。预期输出：
+它会做这些事：
 
-- `RUN=R6-YYYYMMDD`、`BASE=<sha>`、`VAULT=…`；
-- `输出目录：~/r6-prompts/pai-<RUN>`；
-- 每个 lane 文件一行，例如 `docs.txt  130 行`。
+- 用 `git ls-remote` 读 main 的 SHA（或者用 `--base SHA` 指定）；
+- 找到唯一的主 clone（找到多个时会拒绝并列出来，这时加 `--repo 路径`）；
+- 按 lane 填好并拆开 prompt，有占位符没填就拒绝；
+- 在 trusted root 下建好 `worker/<ROUND>/<lane>` 的 worktree。
 
-如果它停下了：
+重复运行是安全的。如果某条 lane 显示 `CONFLICT`（有文件夹挡路，或者分支已经在别处签出），在你解决之前不会写入任何东西。
 
-| 信息 | 解决办法 |
-| --- | --- |
-| `在 … 下面找不到 Agent Inbox` | vault 路径不对，手动指定：`VAULT=/path/to/vault bash …/r6-prepare.sh pai` |
-| `找不到 prompt 文件` | 把 prompt 笔记的路径作为第二个参数传进去 |
-| `拿不到 … 的 main SHA` | 没有网络，或者没有 GitHub 访问权限 |
-| `上面这些占位还没填` | 把这个值加进脚本的 `sed` 列表，或者从笔记里删掉这个占位符 |
-| `part2 的第一行不是「线名：xxx。」` | 每个 lane 的 Part 都必须以这一行开头 |
-
-**3. 先预览，再建 worktree**（同时安全地清理旧的）：
+**2. 启动每条 lane**：在 tmux 里、带 Remote Control 启动，并贴上它的 prompt：
 
 ```sh
-bash "$VAULT/99 Templates/r6-worktrees.sh"          # plan：只显示会做什么，什么都不改
-bash "$VAULT/99 Templates/r6-worktrees.sh" apply    # 真正执行
+pai round launch docs --paste-prompt --write
+pai round status                                  # 每条 lane 一行：running / idle / blocked-on-dialog / exited 等
 ```
 
-`apply` 会做这些事：
+如果某条 lane 显示 `blocked-on-dialog`，而且 dialog 是 `trust`，到那个窗口里自己回答文件夹信任提示。这时 `launch` 什么都没发，所以再运行一次同一行 `pai round launch docs --paste-prompt --write`：它不会再启动新会话，只把 prompt 贴进去（`sent (… bracketed paste True, then Enter)`）。然后核对第一条回复：里面必须列出 worker 读过的文件和最先要做的条目 ID。
 
-- 只删除既干净（没有未提交或未跟踪的文件）**又**空闲（没有任何进程的工作目录在里面）的旧 worktree；
-- 从不用 `--force`，从不删分支，也从不删 `R6-*` 的 worktree；
-- 然后从 BASE 新建 `~/workspace/pai-workers/<RUN>/<线名>`，分支是 `worker/<RUN>/<线名>`。
+**3. 日常：** 运行 `pai round status`（加 `--write-vault` 会同时刷新 `PAI/Home.md`）；某条 lane 停在 checkpoint 时，运行 `pai round next LANE --send`。它读这条 lane 的 `RESTART.md`（最新的 `cp-*` 文件夹，或者 lane 的工作目录），没有就拒绝。
 
-重复运行是安全的。如果它说 `找到多个 PAI 仓库`，就指定用哪一份 clone：`PAI_REPO=~/code/personal-ai-workbench bash …/r6-worktrees.sh`。
-
-**4. 每条 lane 启动一个 worker。** 在 tmux 里、它自己的 worktree 下启动，带 Remote Control。worktree 要放在 [trusted root](GLOSSARY.zh-CN.md#trusted-root已信任的根目录) 下面，这样就不会出现新的信任提示：
+**4. 所有 PR 都合并之后，收尾这一轮：**
 
 ```sh
-tmux new-session -d -s r6 -n docs -c ~/workspace/pai-workers/<RUN>/docs
-tmux send-keys -t r6:docs 'claude --remote-control --name "PAI <RUN> docs"' Enter
+pai round close              # 验收清单，以及会回收哪些 worktree
+pai round close --write      # 只回收干净又空闲的 worktree；分支保留
 ```
 
-如果还是出现了信任提示，到那个窗口里自己回答（`tmux attach -t r6`）。
-
-**5. 给每条 lane 发 prompt。** 把 lane 文件（`~/r6-prompts/pai-<RUN>/<线名>.txt`）粘贴进对应的会话，可以在 claude.ai 的 Remote Control 页面里贴，也可以在 tmux 窗口里贴。worker 的第一条回复必须列出它读过的文件和最先要做的条目 ID。先核对这一条，再让它继续干活。
-
-**即将由 `pai round` 接手（round 线；在它的 lane tree 里，还没合并；reported-by-round）。**
-
-- `pai round new PROJECT ROUND --lane L … --prompt FILE --write`：做完上面的第 1–3 步，并写出 ROUND.json。
-- `pai round status`：每条 lane 一行，列出会话、信任提示、worktree 是否干净、最近一次 checkpoint 和 queue 的 Totals。
-
-合并之后见 `docs/ROUND.md`。在那之前，继续用上面的脚本。
+只要 worktree 里的 Claude 会话还在运行，哪怕是空闲的，这个 worktree 也会保留（`keep … in use by …`）。先结束那个会话（在它的窗口里输入 `/exit`），再运行一次 `pai round close --write`；所有 lane 的 worktree 都回收之后，ROUND.json 会归档为 closed。
 <!-- refresh-b:end -->
 
 ## (c) 常见的坑
@@ -176,7 +147,7 @@ tmux send-keys -t r6:docs 'claude --remote-control --name "PAI <RUN> docs"' Ente
 | 坑 | 会发生什么 | 怎么做 |
 | --- | --- | --- |
 | **容器路径和主机路径不是一回事** | Syncthing 跑在 Docker 里，它的界面把 vault 显示为 `/vaults/MainVault`。这个路径在主机上不存在，主机上是 Syncthing 的卷所映射的那个文件夹（R6 的 NAS 上在 `/srv/…/obsidian/MainVault`）。用容器路径填 prompt，worker 就会去找一个不存在的文件夹。 | 永远用主机路径。`r6-prepare.sh` 会根据自己所在的位置推算出来，也可以用 `VAULT=<主机路径>` 指定。在主机上用 `ls "$VAULT/Agent Inbox"` 核对。 |
-| **同步有延迟** | Syncthing 在设备之间复制笔记，要几秒到几分钟。2026-11-22 从 Windows 到 NAS 的同步慢过两次（owner 报告），所以 NAS 上的 worker 可能读到的是刚在 Windows 上改过的笔记的旧版本。 | 让 worker 读某篇笔记之前，先在两台机器上核对校验和：两边各运行 `sha256sum "$VAULT/PAI/decisions/R6-20261122-D9.md"`，一致了再继续。把 sha 写进给 worker 的消息里（"读 X，sha256 abc123…"），它也能自己核对。用 core 线的 `pai vault wait FILE --sha SHA --timeout 120`（还没合并），跑这一轮的机器会一直等到这个版本同步过来。 |
+| **同步有延迟** | Syncthing 在设备之间复制笔记，要几秒到几分钟。2026-11-22 从 Windows 到 NAS 的同步慢过两次（owner 报告），所以 NAS 上的 worker 可能读到的是刚在 Windows 上改过的笔记的旧版本。 | 让 worker 读某篇笔记之前，先在两台机器上核对校验和：两边各运行 `sha256sum "$VAULT/PAI/decisions/R6-20261122-D9.md"`，一致了再继续。把 sha 写进给 worker 的消息里（"读 X，sha256 abc123…"），它也能自己核对。用 core 线的 `pai vault wait FILE --sha SHA --timeout 120`，跑这一轮的机器会一直等到这个版本同步过来。 |
 | **哪些不同步：`.stglobalignore`** | 每台设备自己的文件（Obsidian 的 `workspace.json`）每点一下就会冲突；worker 产生的东西，比如 `__pycache__`，也不该同步。 | 共享的忽略规则写在 `$VAULT/.stglobalignore` 里，它本身会同步。每台设备自己的 `.stignore` 里只写一行：`#include .stglobalignore`。要忽略的有 `.obsidian/workspace.json`、`.obsidian/workspace-mobile.json`、`.obsidian/**/*.sync-conflict-*` 和 `(?d)__pycache__`。不要忽略笔记：笔记的冲突副本必须同步过来，你才看得到。 |
 | **同步冲突文件** | 两台设备在同步之前都改了同一篇笔记。Syncthing 两份都留：`NAME.md` 旁边多出 `NAME.sync-conflict-<日期>-<时间>-<设备>.md`。PAI 永远不把冲突副本当成状态来读，旁边有冲突副本的笔记也不会去重写（reported-by-round）。 | 用 `find "$VAULT" -name '*.sync-conflict-*'` 找出来。逐个和原笔记 `diff`，把要保留的内容留在 `NAME.md` 里，然后删掉副本。之后 PAI 下一次 `--write-vault` 会照常更新这篇笔记。 |
 | **一台机器上有多份 clone** | 同一个仓库有两个 checkout，worktree、fetch 和 `pai` 的默认设置可能落在错的那一份上。 | 明确指定用哪一份：脚本用 `PAI_REPO=路径`（或 `FLH_REPO=`），pai 用 `pai init --repo 路径`，git 用 `git -C 路径 …`。 |
