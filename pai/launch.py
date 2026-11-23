@@ -103,6 +103,23 @@ def _core():
 
 
 def main(argv=None):
+    """Every `pai` command. A reader that stops early (`pai status | head`, quitting `less`) closes
+    the pipe: that ends the command quietly with exit 141 like other Unix tools, not a traceback."""
+    try:
+        try:
+            return _route(argv)
+        finally:
+            sys.stdout.flush()  # inside the try: buffered output (help, argparse exits) fails here, not at exit
+    except BrokenPipeError:
+        try:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())  # the interpreter's final flush must not fail again
+        except (OSError, ValueError):
+            pass
+        return 141
+
+
+def _route(argv=None):
     if argv is not None:
         sys.argv[1:] = list(argv)
     args = sys.argv[1:]
