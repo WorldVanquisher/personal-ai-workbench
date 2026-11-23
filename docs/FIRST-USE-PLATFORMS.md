@@ -12,7 +12,7 @@ here is stronger than its source.
 
 | | Install (archive / package) | Core: `pai context`, `pai handoff`, `pai queue`, `pai edit` | Workbench with fake agents: `pai guide`, `pai run`, `status`, `trust`, `resume`, `pr check`, `cleanup` | Workbench with a real Claude Code |
 | --- | --- | --- | --- | --- |
-| **Linux** (Arch, x86_64) | **ran** 2026-11-22 (docs lane): archive and pip-into-venv, fresh HOME | **ran** (lane tests); CI (ubuntu-latest) | **ran** 2026-11-22 (docs lane): first use end to end, a trust prompt answered, `pr check` passed | not run on Arch |
+| **Linux** (Arch, x86_64) | **ran** 2026-11-22: archive and pip-into-venv, fresh HOME; 2026-11-23: the 0.5.0 archive, new users | **ran** (lane tests); CI (ubuntu-latest) | **ran** 2026-11-22: first use end to end, a trust prompt answered, `pr check` passed | not run on Arch |
 | **Linux** (Debian, Ubuntu, Fedora, Alpine) | CI (`userspace / …` containers: tests, build, bundle smoke) | CI | not in CI (CI runs `tests/` only, not `swarm/tests`) | not run |
 | **WSL** (Ubuntu 24.04; Ubuntu with tmux 3.6 for the 0.5.0 candidate) | **ran** 2026-11-22 (owner): `tools/verify.py`; package step skipped on the 0.5.0 candidate (no `python3-pip`, `python3-venv`) | **ran** (owner): core 125 OK | **ran** (owner): workbench suite 316 tests, 1 failure and 1 error, both from the test setup, not pai (see below) | **ran** 2026-11-22 (owner): headless `claude -p` smoke, haiku, 8 s, $0.0038 |
 | **macOS** | CI (macos-latest: archives, bundle smoke, `uv tool install`) | CI | **inferred only**: needs tmux from Homebrew; the `/proc`-based process checks are Linux-only | not run |
@@ -20,34 +20,35 @@ here is stronger than its source.
 
 ## The evidence behind each "ran"
 
-- **Linux, docs lane, 2026-11-22.** real run; Arch Linux (kernel 7.2.14), Python 3.14.9, git 2.56.0,
+- **Linux, documentation walk, 2026-11-22.** real run; Arch Linux (kernel 7.2.14), Python 3.14.9, git 2.56.0,
   tmux 3.8, not WSL; fake agents from `swarm/tests`; an isolated tmux server.
-  - R6-DOC-001 (archive): `bin/pai install` → `pai doctor` → `pai init` → `pai guide` (5.4 s) → `pai task new`
+  - Walk 1 (archive): `bin/pai install` → `pai doctor` → `pai init` → `pai guide` (5.4 s) → `pai task new`
     → `pai run --workers 1` → `pai status` → `pai pr plan` → `pai cleanup`.
-  - R6-DOC-002 (pip into a venv; uv not installed): the same path plus a folder-trust prompt, `pai resume`
+  - Walk 2 (pip into a venv; uv not installed): the same path plus a folder-trust prompt, `pai resume`
     and `pai pr check` (check PASSED).
-  - Both were run on the lane tree, so they need a rerun on merged main.
+  - Both were run before the 0.5.0 branches were merged.
+  - 2026-11-23: two new users with no background followed FIRST-USE.zh-CN sections 1 to 5 from the
+    0.5.0 archive in an empty home folder, without Claude Code or Codex; every step worked as written.
 - **WSL, owner, 2026-11-22.** real run; WSL Ubuntu 24.04 at `c8bc51e`.
   - `tools/verify.py`: 7 passed, 2 failed, 4 skipped. Both failures come from the test setup:
     - the onboarding "plain bash" test picks up Ubuntu's command-not-found hook;
     - `test_wtpr` does not isolate the git identity. With `GIT_AUTHOR_*` and `GIT_COMMITTER_*` set it is 21/21.
   - The skips are for missing uv, zsh, fish and pwsh.
   - A real `claude -p` headless smoke passed (Claude Code 2.1.330).
-  - Source: the owner's notes for this round (not rerun by the docs lane).
+  - Source: the owner's notes (not rerun for this page).
 - **WSL, mastermind, 2026-11-22, 0.5.0 candidate.** real run; WSL Ubuntu, Python 3.14.4, tmux 3.6,
   git 2.53.0; the four lanes merged (core, docs, round, prompts); test git identity, no keys in the
   environment.
   - `tools/verify.py`: core PASS; workbench (482 tests) FAIL only in `test_round_launch` (1) and
-    `test_round_inject` (2), because those tests assumed tmux 3.8 (the round lane fixed this in
-    R6-RND-080: below 3.8 it infers bracketed paste from Claude Code or Codex in the pane, and its
-    tests now run once more as tmux 3.6; reported-by-round, not yet rerun on WSL).
+    `test_round_inject` (2), because those tests assumed tmux 3.8. Fixed since: below 3.8 `pai round`
+    infers bracketed paste from Claude Code or Codex in the pane. The later run of the merged
+    candidate on the same WSL gave `tools/verify.py` 9 passed, 0 failed, 5 skipped.
   - doc-check, archives, bundle, headless, onboarding, console, path-bash: PASS. quickstart,
     path-zsh/fish/pwsh and package: skipped (no uv, zsh, fish, pwsh, pip or venv).
   - Real runs: `pai jev check --yes` ok; the CLAUDE.local.md loading check passed 10 of 10
     ([AGENTS-LAYERS.md](AGENTS-LAYERS.md#l0-the-constitution)); a real-agent smoke passed 7 of 7 with
     the `acceptEdits` permission mode.
-  - Source: mastermind's integration acceptance note for R6 (reported-by-mastermind, not rerun by the
-    docs lane).
+  - Source: the maintainers' integration acceptance notes (not rerun for this page).
 - **CI.** The workflow covers Ubuntu, macOS and Windows with Python 3.11 and 3.13, and Debian, Ubuntu,
   Fedora and Alpine containers. The last run cited in RELEASE_NOTES.md with a link is for 0.3.0
   (run 44233348494, all 10 jobs passed). RELEASE_NOTES.md says CI had not run yet for 0.4.0

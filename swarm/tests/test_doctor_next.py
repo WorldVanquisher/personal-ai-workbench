@@ -14,6 +14,12 @@ class DoctorNext(unittest.TestCase):
     def test_each_state_names_its_section(self):
         self.assertIn('section 8 "When something goes wrong"', workbench.doctor_next({"name": "p"}, True))
         self.assertIn("section 5", workbench.doctor_next(None, False))
+        # R6-FIN-030 (newbie2 F3): every Next line has a Chinese twin naming the Chinese page
+        for line in (workbench.doctor_next(None, False), workbench.doctor_next({"name": "p"}, False),
+                     workbench.doctor_next({"name": "p"}, True)):
+            en, zh = line.split("\n")
+            self.assertTrue(en.startswith("Next: ") and zh.startswith("中文："), line)
+            self.assertIn("FIRST-USE.zh-CN.md 第", zh)
         line = workbench.doctor_next({"name": "p"}, False)
         self.assertIn('section 6 "Your first round"', line)
         self.assertIn("REFRESH.md, part (b)", line)
@@ -23,6 +29,10 @@ class DoctorNext(unittest.TestCase):
             text = f.read()
         for h in ("## 5. Save this checkout's defaults: `pai init`", "## 6. Your first round", "## 8. When something goes wrong"):
             self.assertIn(h, text)
+        with open(workbench.manual("FIRST-USE.zh-CN.md"), encoding="utf-8") as f:
+            zh = f.read()
+        for h in ("## 5. 保存这个仓库的默认设置", "## 6. 第一轮：一个 worker", "## 8. 出错时怎么办"):
+            self.assertIn(h, zh)
 
     def test_an_installed_package_gets_the_github_file_for_its_version(self):
         from pai import __version__

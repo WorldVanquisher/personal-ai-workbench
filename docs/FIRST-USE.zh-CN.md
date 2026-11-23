@@ -4,7 +4,7 @@
 
 这一页带你从一台什么都没装的机器开始，跑完一轮只有一个 worker 的工作。每一步都写了三样东西：命令、应该看到什么、看到别的怎么办。
 
-写这一页之前，我在全新的 home 目录里实际走了两遍：一遍用发布归档，一遍用 Python 包。走的过程中所有卡住的地方，这一页都有答案（2026-11-22，pai 0.4.0，Linux，假 agent）。
+没有任何背景的新用户在空的 home 目录里，用 pai 0.5.0 的发布归档照这一页走过第 1 到 5 节（2026-11-23，Linux，没有装 Claude Code 或 Codex）：每一步都和写的一样。他们觉得困惑的地方，这一页已经补充了说明。
 
 *lane*、*worker*、*handoff*、*trusted root* 这些词见[术语表](GLOSSARY.zh-CN.md)。这些步骤真正在哪些平台上跑过，见 [FIRST-USE-PLATFORMS.md](FIRST-USE-PLATFORMS.md)（英文）。
 
@@ -27,7 +27,7 @@
 
   预期：三行输出，例如 `Python 3.12.3`、`git version 2.43.0`、`tmux 3.4`。要求是 Python 3.11 或更高、任意 git 2.x、任意 tmux 3.x。
 
-  **tmux 低于 3.8**（Ubuntu 和 WSL 自带的是 3.6）时，这一页的所有步骤照常可用。只有 `pai round`（第 9 节）受影响：3.8 以前的 tmux 无法报告 agent 有没有开启 bracketed paste，所以 `pai round launch`、`inject` 和 `next --send` 只往运行着 Claude Code 或 Codex 的 pane 里粘贴，其他程序一律拒绝（reported-by-round，R6-RND-080；见 [`docs/ROUND.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/ROUND.md) 的 tmux version and bracketed paste 一节）。
+  **tmux 低于 3.8**（Ubuntu 和 WSL 自带的是 3.6）时，这一页的所有步骤照常可用。只有 `pai round`（第 9 节）受影响：3.8 以前的 tmux 无法报告 agent 有没有开启 bracketed paste，所以 `pai round launch`、`inject` 和 `next --send` 只往运行着 Claude Code 或 Codex 的 pane 里粘贴，其他程序一律拒绝（见 [`docs/ROUND.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/ROUND.md) 的 tmux version and bracketed paste 一节）。
 
   如果缺了某一个（`command not found`），或者版本太旧：
 
@@ -163,9 +163,10 @@ pai doctor
 info           project                …/practice is a Git checkout without pai defaults yet   -> pai init
 doctor changed nothing. (No pai project here: `pai init` in your checkout.)
 Next: …/docs/FIRST-USE.md, section 5 "Save this checkout's defaults: pai init".
+中文：…/docs/FIRST-USE.zh-CN.md 第 5 节「保存这个仓库的默认设置」。
 ```
 
-`Next:` 那一行指向安装目录里的这一页；它跳过了第 4 步的演练，因为演练是可选的。`pai doctor` 什么都不改，以 0 退出。到第 6 节之前，缺 `claude` 或 `codex` 都没关系：doctor 把它列在 `FOR YOUR FIRST RUN` 下面，安装命令放在 `REPAIR` 里（标着 `# before pai run`），不算失败。现在先不用管。
+`Next:` 那一行指向安装目录里的英文页，下面 `中文：` 那一行指向这一页（中文页）；它跳过了第 4 步的演练，因为演练是可选的。`pai doctor` 什么都不改，以 0 退出。到第 6 节之前，缺 `claude` 或 `codex` 都没关系：doctor 把它列在 `FOR YOUR FIRST RUN` 下面，安装命令放在 `REPAIR` 里（标着 `# before pai run`），不算失败。现在先不用管。`OPTIONAL` 下面如果有一行 `NOT LOGGED IN  gh login`，也没关系：只有 `pai pr open` 需要它（第 7 步）。
 
 如果 `ESSENTIAL` 里有一行不是 `ok`，这一行末尾会有 `->`，后面跟着修复它的命令。运行那条命令，再跑 `pai doctor`，直到 `ESSENTIAL` 这一段全是 `ok`。常见的几种：
 
@@ -186,6 +187,7 @@ pai guide
 ```
 Done: the guided run went plan -> dispatch -> delivered -> completed, with a fake worker.
 Next, with your own project: …/docs/FIRST-USE.md, section 5 "Save this checkout's defaults: pai init", then section 6 …
+中文：…/docs/FIRST-USE.zh-CN.md 第 5 节「保存这个仓库的默认设置」，然后第 6 节「第一轮：一个 worker」。…
 Remove this demo: pai guide --cleanup /tmp/pai-guided-demo-XXXX
 ```
 
@@ -211,11 +213,11 @@ pai init
 | `Default model …`、`Reasoning effort …` | 回车，用 agent 自己的默认值 |
 | `Remote [origin]`、`Base branch [main]` | 回车 |
 | `Task notes folder (an Obsidian folder, or Enter for pai's own …)` | 回车。**不需要** Obsidian，笔记就是普通的 Markdown 文件 |
-| `Review checks, NAME=COMMAND …  [-]` | **填一个真实的检查**，例如 `test=make test`，原因见表下 |
+| `Review checks, NAME=COMMAND …  [-]` | 练习仓库：`test=test -f CONTRIBUTING.md`；你自己的项目：跑测试的那条命令，例如 `test=make test`（原因见表下） |
 | `Save to …/projects/<名字>.toml? [Y/n]` | 回车 |
 | `Enter JEV API key (optional)` | 回车。JEV 是可选的第二意见（见[术语表](GLOSSARY.zh-CN.md#jev)） |
 
-**现在就设一个检查。** 没有检查时，`pai pr` 什么都不会发布，会报 `BLOCKED no approved check is configured`。检查是在每次 `pai run` 开始时复制进去的，所以之后再加的检查，要到**下一次** `pai run` 才生效。练习仓库用 `test=test -f CONTRIBUTING.md` 就够了（第 7 步的预期输出里，检查的名字就是 `test`）。
+**现在就设一个检查。** 没有检查时，`pai pr` 什么都不会发布，会报 `BLOCKED no approved check is configured`。检查是在每次 `pai run` 开始时复制进去的，所以之后再加的检查，要到**下一次** `pai run` 才生效。检查的名字用 `test`（第 7 步的预期输出用的就是这个名字）。练习仓库里没有测试，所以 `test=test -f CONTRIBUTING.md` 只检查 worker 有没有建出第 6 步要的那个文件；你自己的项目里，填跑测试的那条命令（`make test`、`npm test`、`pytest` 等）。
 
 预期的结尾：
 
@@ -227,7 +229,9 @@ Next:
   …
 ```
 
-然后再跑一次 `pai doctor`，最后几行里会多出 `ok  project  practice: …`。从这时起，你选的 agent 就算 `ESSENTIAL` 了：它还没装或者没登录的话，doctor 以 1 退出，最后一行是 `Next: install and log in to claude …`。这是第 6 节之前要做的一步。
+`pai init` 不问要开几个 worker：它把 `workers = 2` 存为这个项目的默认值。`pai run --workers N` 只对这一次运行改掉它（第 6 步用 1），`pai config edit` 可以改默认值。
+
+然后再跑一次 `pai doctor`，现在还会多出 `ok  remote access` 和 `ok  project  practice: …` 两行。从这时起，你选的 agent 就算 `ESSENTIAL` 了：它还没装或者没登录的话，doctor 以 1 退出，最后一行是 `Next: install and log in to claude …`。这是第 6 节之前要做的一步。
 
 如果 `pai init` 中途停下了：
 
@@ -235,7 +239,7 @@ Next:
 - `… is not inside a Git repository. Run it in your checkout, or pass --repo PATH.`：`cd` 进你的仓库（第 2a 步），再运行一次。
 - 以后想改某个回答：用 `pai init --update`，只传要改的值，例如 `pai init --update --check "test=make test"`。`pai config edit` 会打开整个配置文件。
 
-在脚本里、没有终端可以交互时，用：
+在脚本里、没有终端可以交互时，用下面这行（这里是给你自己的项目的；练习仓库的话，把 `--check` 换成上面那个 `test -f` 检查）：
 
 ```sh
 pai init --default-agent claude --base main --check "test=make test" --no-input
@@ -260,7 +264,7 @@ pai status
 
 - `task new … --write`：先显示笔记内容，然后是 `saved. Next: pai run --dry-run`。不加 `--write` 只是预览；已经存在的笔记永远不会被覆盖。
 - `run --dry-run`：显示 `lane a  claude (rc)  worktree …/practice-pai-lanes/a (new directory: the agent will ask for folder trust)` 和 `DRY RUN: nothing was fetched, created, written or started`。它打印的 run ID 不会沿用，正式运行时会换一个新的。
-- `run --workers 1 --yes`：先显示 `started a …`，然后每条 lane 是下面两种情况之一：
+- `run --workers 1 --yes`：`--yes` 表示直接接受 dry run 显示的那个计划，不再问你确认；它永远不会替你回答 agent 的文件夹信任提示。先显示 `started a …`，然后每条 lane 是下面两种情况之一：
   - `task: delivered`：worker 已经收到任务，去第 7 步。
   - `waiting for folder trust`：agent 在问要不要信任这个新的 lane 文件夹，这时 `pai run` 以 1 退出。往下看。
 - `status`：每条 lane 一段，包括 `lifecycle`、`trust`、`input`、`dispatch`、`rc`。只要每条 lane 的 agent 都在运行、也都拿到了任务，它就以 0 退出，哪怕 agent 还在干活。有 lane 需要你看一眼时，它**以 1 退出**：在等你（信任提示、任务还没送达），或者 agent 已经退出（干完活的 worker 也是这个样子）。看 `lifecycle` 那一行。
@@ -291,7 +295,7 @@ pai pr plan a                                           # 会发布什么，还�
 
 ```sh
 pai pr check a      # 跑检查；预期：check test PASSED … review checks passed at <sha>
-pai pr open a       # 推送分支并开 PR（只支持 GitHub 远端）；合并由你在 GitHub 上做
+pai pr open a       # 推送分支并开 PR（只支持 GitHub 远端；先做一次 `gh auth login`）；合并由你在 GitHub 上做
 ```
 
 练习仓库的远端是本地目录，所以 `pr plan` 会说 `BLOCKED cannot ask GitHub about existing PRs: the remote is not a GitHub repository`。这是预期的，做到 `pai pr check a` 就可以停了。
@@ -330,7 +334,7 @@ pai cleanup --apply --stop-running
 | --- | --- | --- |
 | 刚装完就 `pai: command not found` | 当前终端的 PATH 里没有 `~/.local/bin` | `export PATH="$HOME/.local/bin:$PATH"`，并写进 `~/.bashrc`（第 2 步） |
 | `sha256sum: WARNING: 1 computed checksum did NOT match` | 下载不完整或损坏 | 两个文件都重新下载；校验不过的归档永远不要安装 |
-| `pai round launch` 拒绝发送：`this tmux cannot tell whether … asked for bracketed paste` | tmux 低于 3.8，而且 pane 里运行的既不是 Claude Code 也不是 Codex | 先在这个 pane 里启动 agent；如果确实要往别的程序里粘贴，用 `pai round launch LANE --allow-unbracketed`（reported-by-round） |
+| `pai round launch` 拒绝发送：`this tmux cannot tell whether … asked for bracketed paste` | tmux 低于 3.8，而且 pane 里运行的既不是 Claude Code 也不是 Codex | 先在这个 pane 里启动 agent；如果确实要往别的程序里粘贴，用 `pai round launch LANE --allow-unbracketed` |
 | pip 报 `Cannot import 'setuptools.build_meta'` | 没联网，或者没有 setuptools 却用了 `--no-build-isolation` | 让 pip 用隔离方式构建（需要联网一次），或者先在 venv 里 `pip install setuptools` |
 | `pai install` 说 "an installed Python package …, not an extracted release archive" | 你是用 uv 或 pip 装的（方式 B） | 用当初安装的方式升级（[REFRESH.zh-CN.md](REFRESH.zh-CN.md#a-升级-pai)） |
 | `pai doctor` 显示 `-> pai init` | 这个仓库还没有 pai 的默认设置 | 做第 5 步 |
@@ -344,16 +348,15 @@ pai cleanup --apply --stop-running
 | `pai pr plan` 报 `BLOCKED … the remote is not a GitHub repository` | `origin` 是本地或非 GitHub 的远端 | 练习时是预期的；真实工作请从 GitHub clone |
 | `pai next` 报 `error: the following arguments are required: lane` | `pai next` 是给某一条 lane 派下一份任务笔记 | `pai next a`（先加 `--dry-run` 看看会派哪一份） |
 | `pai guide --cleanup …` 报 `unrecognized arguments` | 一次给了多个文件夹，比如用了 `*` 通配 | 每个文件夹单独运行一次 `pai guide --cleanup DIR` |
-| `pai status \| head` 之后出现 Python 的 `BrokenPipeError` 报错 | 已知 bug：status 的输出接给了提前关闭的程序 | 无害；想翻页看的话，先 `pai status > status.txt` 再打开文件（修复已提给 core 线） |
 | 收尾时提到 `rc up MANIFEST --resume` | 这是内部命令名 | 用 `pai resume` |
 | `pai doctor` 显示 `linux (arch ), …` | 发行版没有版本号（Arch 是滚动更新的） | 无害 |
 
 
 ## 9. 可选：用 Obsidian 当控制台
 
-一轮里有好几条 lane 之后，PAI 可以把这一轮的状态存成 vault 里的笔记：`PAI/Home.md`、每轮一张看板、每条 lane 一篇笔记、每个决策一篇笔记。之后，Obsidian（或者任何编辑器）就是你看、批、选的地方。这个功能来自 R6 的 round 线，是 pai 0.5.0 新增的（reported-by-round）。完整说明见 [OBSIDIAN.zh-CN.md](OBSIDIAN.zh-CN.md)。
+一轮里有好几条 lane 之后，PAI 可以把这一轮的状态存成 vault 里的笔记：`PAI/Home.md`、每轮一张看板、每条 lane 一篇笔记、每个决策一篇笔记。之后，Obsidian（或者任何编辑器）就是你看、批、选的地方。这是 pai 0.5.0 新增的功能，属于 `pai round`（REFRESH 的 (b) 部分）。完整说明见 [OBSIDIAN.zh-CN.md](OBSIDIAN.zh-CN.md)。
 
-下面的 `PROJECT` 是一个 PAI 项目名，用 `pai init PROJECT --repo PATH --vault PATH --memory DIR --inbox "Agent Inbox" --write` 登记一次。安装后的 `pai` 把它写进 `~/.config/pai/config.toml`；从 checkout 运行（`python3 -B bin/pai.py`）时，同一条命令写的是这个 checkout 里的 `pai.local.toml`（已被 git 忽略），所以要去 checkout 里找，而不是 home 目录。`pai doctor PROJECT` 会检查它。
+下面的 `PROJECT` 是一个 PAI 项目名，用 `pai init PROJECT --repo PATH --vault PATH --memory DIR --inbox "Agent Inbox" --write` 登记一次。安装后的 `pai` 把它写进 `~/.config/pai/config.toml`；从 checkout 运行（`python3 -B bin/pai.py`）时，同一条命令写的是这个 checkout 里的 `pai.local.toml`（已被 git 忽略），所以要去 checkout 里找，而不是 home 目录。`pai doctor PROJECT` 会检查它。`--vault` 是你的笔记文件夹；`--memory DIR` 和 `--inbox` 是它里面的文件夹（比如 `PAI/memory` 和 `Agent Inbox`），inbox 必须已经存在。下面命令里的 `ROUND.json`，是 `pai round new --write` 为一轮建的文件，在 `<vault>/Agent Inbox/<轮次>/` 里（[REFRESH.zh-CN.md](REFRESH.zh-CN.md#b-每一轮的刷新) 的 (b) 部分）。
 
 1. 在跑这一轮的机器上写出这些笔记：
 
@@ -364,6 +367,6 @@ pai cleanup --apply --stop-running
    成功的话，vault 里会出现 `PAI/Home.md`，它的 `updated:` 字段就是这次运行的时间。
 2. 打开 `PAI/Home.md`。里面有四个区块：进行中的轮次、需要你处理的 lane（附原因）、还没回答的决策、还没批准的交接。不装插件时看到的是纯文本表格；装了 Dataview 会看到实时表格。
 3. **回答决策。** 在 `PAI/decisions/<轮次>-<ID>.md` 的 front matter 里，把 `choice:` 设成 `options` 中的一项，然后运行 `pai decide answer --from-note "PAI/decisions/<轮次>-<ID>.md" --write`。成功的话，笔记会显示 `status: answered`。
-4. **批准交接。** 读 `Agent Inbox/<轮次>/<线名>/cp-X/HANDOFF.md`，在它的 front matter 里设好 `approved: true`，然后运行 `pai handoff approve PROJECT "Agent Inbox/<轮次>/<线名>/cp-X" --from-vault`。成功的话，会显示 `approval: approved`，旁边多出一个 `DECISION.json`。封存后正文被改过的交接会被拒绝，并标上 `approval: stale`（core 线，reported-by-core）。
+4. **批准交接。** 读 `Agent Inbox/<轮次>/<线名>/cp-X/HANDOFF.md`，在它的 front matter 里设好 `approved: true`，然后运行 `pai handoff approve PROJECT "Agent Inbox/<轮次>/<线名>/cp-X" --from-vault`。成功的话，会显示 `approval: approved`，旁边多出一个 `DECISION.json`。封存后正文被改过的交接会被拒绝，并标上 `approval: stale`。
 
 命令拒绝执行时，什么都不会写。提示里会写明原因：笔记被改过、choice 不在选项里，或者决策的文字变了。每种情况怎么处理，见 [OBSIDIAN.zh-CN.md](OBSIDIAN.zh-CN.md) 第 5 节。

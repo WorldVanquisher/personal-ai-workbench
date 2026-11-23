@@ -46,8 +46,8 @@ the next one. `pai queue checkpoint FILE ID --handoff PATH` records its sha256 i
 
 The worker's report to whoever comes next: you, the mastermind, or a fresh session. Today PAI
 has several formats under this name (the draft from `pai handoff new`, a branch's `HANDOFF.md`,
-the queue checkpoint table). HANDOFF v2 (`pai-handoff/2`) is being defined by the core lane to
-replace them. A v2 handoff has:
+the queue checkpoint table). HANDOFF v2 (`pai-handoff/2`, new in 0.5.0) replaces them. A v2
+handoff has:
 
 - a State table (implementation, validation, commit, merge, deployment), where each row says
   where it comes from;
@@ -123,7 +123,7 @@ The layers of what agents read before they work; see [AGENTS-LAYERS.md](AGENTS-L
 
 ## Vault notes (Obsidian as the console)
 
-These come with the round lane of R6 (reported-by-round). The guide is [OBSIDIAN.md](OBSIDIAN.md).
+These are new in 0.5.0 and written by `pai round`. The guide is [OBSIDIAN.md](OBSIDIAN.md).
 
 - **Home**: `PAI/Home.md`, the console. It has four blocks: open rounds, lanes that need you, open
   decisions, unapproved handoffs. Each block is a Dataview query plus a plain table.
@@ -154,7 +154,7 @@ These come with the round lane of R6 (reported-by-round). The guide is [OBSIDIAN
 | `choice`, `choice_note` | decision | **yours**: your answer, which `pai decide answer --from-note` applies |
 | `answer`, `source`, `source_sha` | decision | the recorded answer; the sheet it came from and the checksum of its text |
 
-On a sealed handoff (`HANDOFF.md`, format `pai-handoff/2`, reported-by-core) the front matter is:
+On a sealed handoff (`HANDOFF.md`, format `pai-handoff/2`) the front matter is:
 
 - `format`, `status`, `approved`, `project`, `round`, `lane`, `checkpoint`, `task`;
 - `base_sha`, `head_sha`, `queue`, `queue_sha256`, `created`, `generator`.

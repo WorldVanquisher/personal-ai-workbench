@@ -37,13 +37,12 @@ Which document answers which question. Chinese versions sit beside the English o
 | What changed, and what was tested | [RELEASE_NOTES.md](../RELEASE_NOTES.md) |
 | The prompt for an agent session | [SESSION_START.md](../SESSION_START.md) |
 
-Formats and commands added in 0.5.0 (each written by the lane that built it; in a Git clone, and
-on GitHub; not in the archive):
+Formats and commands added in 0.5.0 (in a Git clone and on GitHub; not in the archive):
 
-- [`docs/ROUND.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/ROUND.md) (round lane): `pai round` and ROUND.json.
-- [`docs/PROMPTS.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/PROMPTS.md) (prompts lane): the prompt library and `pai prompt`.
-- [`docs/HANDOFF-V2.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/HANDOFF-V2.md) (core lane): the handoff format `pai-handoff/2` and NEXT-PR.md.
-- [`docs/FRONTMATTER.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/FRONTMATTER.md) (core lane): the front matter of PAI's notes, and [`docs/frontmatter.schema.json`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/frontmatter.schema.json).
+- [`docs/ROUND.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/ROUND.md): `pai round` and ROUND.json.
+- [`docs/PROMPTS.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/PROMPTS.md): the prompt library and `pai prompt`.
+- [`docs/HANDOFF-V2.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/HANDOFF-V2.md): the handoff format `pai-handoff/2` and NEXT-PR.md.
+- [`docs/FRONTMATTER.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/FRONTMATTER.md): the front matter of PAI's notes, and [`docs/frontmatter.schema.json`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/frontmatter.schema.json).
 
 ## For maintainers
 
@@ -60,7 +59,7 @@ on GitHub; not in the archive):
 Run these on the release candidate commit, in order. Each one says what passing looks like.
 
 1. **Commands, flags, links, translations.** Run `python3 -B tools/doc_check.py`. It must end with
-   `OK`. CI runs the same check on Linux (reported-by-core, R6-COR-008). A `PENDING` line means a manual still declares a command that is not in this build yet; a
+   `OK`. CI runs the same check on Linux. A `PENDING` line means a manual still declares a command that is not in this build yet; a
    `WARNING` means that command exists now, so remove it from the `<!-- doc_check: pending … -->`
    marker.
 2. **Version numbers.** Bump every install line in README*.md and docs/FIRST-USE*.md to the new
@@ -92,7 +91,7 @@ Run these on the release candidate commit, in order. Each one says what passing 
 9. **Language policy (owner decision PRM-D1 = A, 2026-11-22).**
    - The user manuals are English, each with a `.zh-CN.md` twin (step 8).
    - The prompt library (`pai/prompts/*.md`) stays **Chinese**, with no English copy.
-   - The docs lane checks this at release. Run:
+   - Check this at release. Run:
 
      ```sh
      python3 -B -c "import glob,re;[print(f, round(len(re.findall(r'[一-鿿]',t:=open(f,encoding='utf-8').read()))/max(1,len(t)),2)) for f in sorted(glob.glob('pai/prompts/*.md'))]"

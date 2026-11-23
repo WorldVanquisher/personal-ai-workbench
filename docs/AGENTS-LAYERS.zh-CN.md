@@ -29,7 +29,7 @@ PAI 把平常堆在这一个文件里的东西拆成四层。每一层的负责�
 - 范围纪律；
 - 契约放在哪里。
 
-两种 agent 官方文档里的两条限制（reported-by-prompts，[`docs/research/LANDSCAPE.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/research/LANDSCAPE.md)，2026-11-22 重新核实）：
+两种 agent 官方文档里的两条限制（[`docs/research/LANDSCAPE.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/research/LANDSCAPE.md)，2026-11-22 重新核实）：
 - Codex 读指令文件，最多读 32 KiB，L0 和所有嵌套文件合起来算。真实的例子：FLH（owner 的另一个项目，这一页拿它当实例）的 AGENTS.md 有 63 KiB，第 519 行之后的规则 Codex 全都读不到（[分析 §6](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/research/FLH-AGENTS-ANALYSIS.md#6-context-budget-r6-doc-060)）。
 - 有 `CLAUDE.md` 时，Claude Code 不读 `AGENTS.md`，除非每个用户自己改一个设置，而这个设置写在仓库的设置文件里是无效的。用一个只写 `@AGENTS.md` 的 `CLAUDE.md`，两种 agent 就会读同一份 L0。Claude Code 不读 `.agents/`、`AGENTS.local.md` 和 `AGENTS.override.md`。
 
@@ -52,7 +52,7 @@ PAI 把平常堆在这一个文件里的东西拆成四层。每一层的负责�
 
 每个领域一份文件，只有会话碰到那个领域时才装载。
 
-**PAI 还没有实现。** 目前没有任何 `pai` 命令会创建、列出或装载契约文件。现在的做法是在 L0 里写上链接（"改 tools/extraction 之前，先读 docs/contracts/extraction.md"）。两种 agent 也都有按位置装载文件的原生方式（reported-by-prompts：[`docs/research/LANDSCAPE.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/research/LANDSCAPE.md)）：
+**PAI 还没有实现。** 目前没有任何 `pai` 命令会创建、列出或装载契约文件。现在的做法是在 L0 里写上链接（"改 tools/extraction 之前，先读 docs/contracts/extraction.md"）。两种 agent 也都有按位置装载文件的原生方式（[`docs/research/LANDSCAPE.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/research/LANDSCAPE.md)）：
 
 - Claude Code：带 `paths:` front matter 的 `.claude/rules/*.md`；
 - Codex：每个目录各自的嵌套 `AGENTS.md`。
@@ -69,12 +69,12 @@ PAI 把平常堆在这一个文件里的东西拆成四层。每一层的负责�
 <!-- pai:managed:end -->
 ```
 
-| agent | L2 放在哪里 | 命令（core 线，reported-by-core） | 状态 |
+| agent | L2 放在哪里 | 命令 | 状态 |
 | --- | --- | --- | --- |
 | Claude Code | lane worktree 里的 `CLAUDE.local.md`。Claude Code 会和 `CLAUDE.md` 一起读它；PAI 把它加进仓库的 `info/exclude`，所以 git 看不到它，worktree 保持干净 | `pai worktree init PATH --target claude-local --write` | 文件处理用 fake 测过；真实的 Claude Code 会话会读它（上面第 1 条，mastermind 2026-11-22 real run，Claude Code 2.1.330，haiku） |
 | Codex | worktree 里 `AGENTS.md` 的托管段（Codex 不读 `CLAUDE.local.md`） | `pai worktree init PATH --write`（默认目标） | 真实的 Codex 运行**待核实**；托管段会让 worktree 变成 dirty，续做流程要能容忍这一点 |
 
-`pai context --worktree PATH`（core 线）按 agent 的方式读一条 lane 的指令：先读 `CLAUDE.local.md`，再读 `AGENTS.md`。
+`pai context --worktree PATH` 按 agent 的方式读一条 lane 的指令：先读 `CLAUDE.local.md`，再读 `AGENTS.md`。
 
 ## L3：提议
 
@@ -82,7 +82,7 @@ PAI 把平常堆在这一个文件里的东西拆成四层。每一层的负责�
 
 - `pai worktree init --jev` 用 JEV 给一个小规则库排序，列出提议；只有 `--accept RULE` 才会把某一条写进这条 lane 的 L2 托管段。
 - worker 把规则问题写进交接的 "Decisions for the owner" 和 NEXT-PR.md，mastermind 再把它们整理成决策单。例子：`Agent Inbox/R6-20261122/docs/FLH-RULE-CONFLICTS.md` 里 FLH 规则和做法冲突的 5 处。
-- `pai prompt optimize`（prompts 线，离线原型）提出 prompt 的改动，用契约和 JEV 打分，每一条都要你批准。
+- `pai prompt optimize`（离线原型）提出 prompt 的改动，用契约和 JEV 打分，每一条都要你批准。
 
 ## PAI 在哪里处理每一层
 
@@ -90,7 +90,7 @@ PAI 把平常堆在这一个文件里的东西拆成四层。每一层的负责�
 | --- | --- | --- | --- | --- |
 | `pai init` | 读它（`--instructions`，也就是 `pai context` 会传下去的文件） | — | — | — |
 | `pai worktree init` | 在 lane 托管段里引用它的规则，附 `file:line` | — | **写它**（AGENTS.md 的托管段；加 `--target claude-local` 时写 CLAUDE.local.md） | `--jev` 提议，`--accept` 采纳 |
-| `pai round new`（round 线） | prompt 的共享部分会重复这一轮的规则 | — | 为每条 lane 渲染 prompt；**还不会**写 CLAUDE.local.md（未实现） | 决策写进 `DECISIONS.md` 和决策笔记 |
+| `pai round new` | prompt 的共享部分会重复这一轮的规则 | — | 为每条 lane 渲染 prompt；**还不会**写 CLAUDE.local.md（未实现） | 决策写进 `DECISIONS.md` 和决策笔记 |
 | `pai context` | 传给 agent | — | `--worktree PATH` 先读这条 lane 的 L2 | — |
 | 网页工作台（`pai worktree web`、`pai round web`） | 显示 worktree 的 AGENTS.md | — | 显示托管段 | 显示还没回答的决策 |
 | doc_check / lint | — | — | — | —（还没有分层检查） |
@@ -123,7 +123,7 @@ FLH 把 `CLAUDE.md` 链接到 `AGENTS.md`，只是为了让 Claude Code 读到�
    git ls-files -s CLAUDE.md          # stage 之前仍然显示 120000；运行 `git add CLAUDE.md` 之后是 100644
    ```
 
-3. 核对：在这个文件夹里启动 Claude Code，让它列出装载的指令文件（`/memory`）。`AGENTS.md` 必须显示为从 `CLAUDE.md` 导入。Claude Code 按导入文件的相对路径解析 `@path`，最多嵌套四层（reported-by-prompts，来自 Claude Code 的 memory 文档）。
+3. 核对：在这个文件夹里启动 Claude Code，让它列出装载的指令文件（`/memory`）。`AGENTS.md` 必须显示为从 `CLAUDE.md` 导入。Claude Code 按导入文件的相对路径解析 `@path`，最多嵌套四层（来自 Claude Code 的 memory 文档）。
 4. 在 Windows 上，下一次 pull 之后打开 `CLAUDE.md`：里面必须是 `@AGENTS.md`，而不是坏掉的链接留下的文本 `AGENTS.md`。
 5. Codex 继续直接读 `AGENTS.md`，Codex 的 lane 不受影响。
 

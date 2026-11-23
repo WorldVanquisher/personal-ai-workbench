@@ -608,6 +608,9 @@ class Cleanup(WB):
         rows, _ = self.status()
         p = self.pai("cleanup", "--apply")
         self.assertEqual(p.returncode, 1, p.stdout)  # live and mismatched lanes were kept
+        # R6-FIN-032 (newbie2 F7): the user's command, never rc's internal `rc up MANIFEST --resume`
+        self.assertIn("To start the closed workers again on the same branches: `pai resume`.", p.stdout)
+        self.assertNotIn("rc up", p.stdout)
         after = self.windows_now()
         self.assertNotIn("a", after)
         self.assertEqual({k: after[k] for k in ("b", "c", "d", "notes")}, {k: wins[k] for k in ("b", "c", "d", "notes")})

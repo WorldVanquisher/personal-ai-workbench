@@ -235,8 +235,11 @@ def manual(name):
 
 def next_step(problems):
     """The last line of doctor: which manual section to read next."""
-    if problems:
+    if problems:  # each line has a Chinese twin (R6-FIN-030)
         return ("Next: fix each PROBLEM above (the → line says how), then run this doctor again. "
-                f"Stuck? {manual('FIRST-USE.md')}, section 8 \"When something goes wrong\".")
+                f"Stuck? {manual('FIRST-USE.md')}, section 8 \"When something goes wrong\".\n"
+                f"中文：按 → 那一行修好每个 PROBLEM，再跑一次。卡住了？{manual('FIRST-USE.zh-CN.md')} 第 8 节「出错时怎么办」。")
     return (f"Next: {manual('FIRST-USE.md')}, section 6 \"Your first round\"; "
-            f"for a later round, {manual('REFRESH.md')}, part (b) \"Every round\".")
+            f"for a later round, {manual('REFRESH.md')}, part (b) \"Every round\".\n"
+            f"中文：{manual('FIRST-USE.zh-CN.md')} 第 6 节「第一轮：一个 worker」；之后的轮次见 "
+            f"{manual('REFRESH.zh-CN.md')} 的 (b) 部分「每一轮的刷新」。")

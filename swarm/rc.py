@@ -1440,7 +1440,7 @@ def cmd_cleanup(m, a):
             "records are never touched. Add --apply to do what the lines above say.")
     else:
         log("\nWorktrees, branches, uncommitted edits, task notes and review records were left as they are. "
-            "To start the closed workers again on the same branches: `rc up MANIFEST --resume` (or `pai resume`).")
+            "To start the closed workers again on the same branches: `pai resume`.")  # not rc's internal name (R6-FIN-032)
     return code
 
 

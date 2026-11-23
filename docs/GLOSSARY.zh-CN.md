@@ -47,7 +47,7 @@ PAI 手册里用到的词，按第一次遇到的顺序排列。用 `代码` 写
 
 ## handoff（交接）
 
-worker 留给下一位的报告，下一位可能是你、mastermind，或者一个新会话。PAI 现在有好几种都叫这个名字的格式：`pai handoff new` 的草稿、分支上的 `HANDOFF.md`、queue 的 checkpoint 表。core 线正在定义 HANDOFF v2（`pai-handoff/2`）来统一它们。v2 交接包含：
+worker 留给下一位的报告，下一位可能是你、mastermind，或者一个新会话。PAI 现在有好几种都叫这个名字的格式：`pai handoff new` 的草稿、分支上的 `HANDOFF.md`、queue 的 checkpoint 表。0.5.0 新增的 HANDOFF v2（`pai-handoff/2`）把它们统一了起来。v2 交接包含：
 
 - State 表：implementation / validation / commit / merge / deployment，每行写明来源；
 - Items 表，末尾有 `Totals:` 行；
@@ -111,7 +111,7 @@ agent 开工前要读的东西分成四层，见 [AGENTS-LAYERS.zh-CN.md](AGENTS
 
 ## vault 笔记（用 Obsidian 当控制台）
 
-这些来自 R6 的 round 线（reported-by-round）。使用说明见 [OBSIDIAN.zh-CN.md](OBSIDIAN.zh-CN.md)。
+这些是 0.5.0 新增的，由 `pai round` 写出。使用说明见 [OBSIDIAN.zh-CN.md](OBSIDIAN.zh-CN.md)。
 
 - **Home**：`PAI/Home.md`，控制台。四个区块：进行中的轮次、需要你处理的 lane、还没回答的决策、还没批准的交接。每个区块都是一段 Dataview 查询加一张纯文本表格。
 - **看板（board）**：`PAI/rounds/<轮次>/ROUND.md`，一轮里每条 lane 一行。（`pai round status --board` 写出的纯文本 `BOARD.md` 也叫看板。）
@@ -137,7 +137,7 @@ agent 开工前要读的东西分成四层，见 [AGENTS-LAYERS.zh-CN.md](AGENTS
 | `choice`、`choice_note` | 决策 | **你的**：你的回答，由 `pai decide answer --from-note` 应用 |
 | `answer`、`source`、`source_sha` | 决策 | 记录下来的回答；它来自哪份决策单，以及那段文字的校验和 |
 
-封存的交接（`HANDOFF.md`，格式 `pai-handoff/2`，reported-by-core）的 front matter 包括：
+封存的交接（`HANDOFF.md`，格式 `pai-handoff/2`）的 front matter 包括：
 
 - `format`、`status`、`approved`、`project`、`round`、`lane`、`checkpoint`、`task`；
 - `base_sha`、`head_sha`、`queue`、`queue_sha256`、`created`、`generator`。

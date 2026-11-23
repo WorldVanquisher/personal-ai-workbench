@@ -3,10 +3,10 @@
 English | [简体中文](FIRST-USE.zh-CN.md)
 
 This page takes you from an empty machine to one finished round with one worker. Every step gives
-the command, what you should see, and what to do if you see something else. It was written by
-walking the steps in a brand-new home folder twice, once from the release archive and once from
-the Python package, and every place where that walk got stuck is answered here (2026-11-22, pai
-0.4.0, Linux, fake agents).
+the command, what you should see, and what to do if you see something else. New users with no
+background walked sections 1 to 5 from the pai 0.5.0 archive in an empty home folder, on Linux
+without Claude Code or Codex installed (2026-11-23): every step worked as written. Where they were
+confused, this page now says more.
 
 Words like *lane*, *worker*, *handoff* and *trusted root* are in the [glossary](GLOSSARY.md). Which
 platforms this has really run on: [FIRST-USE-PLATFORMS.md](FIRST-USE-PLATFORMS.md).
@@ -38,8 +38,8 @@ platforms this has really run on: [FIRST-USE-PLATFORMS.md](FIRST-USE-PLATFORMS.m
   **tmux below 3.8** (Ubuntu and WSL ship 3.6) works for everything on this page. Only `pai round`
   (section 9) notices: tmux before 3.8 cannot report whether the agent asked for bracketed paste,
   so `pai round launch`, `inject` and `next --send` paste only into a pane running Claude Code or
-  Codex and refuse any other program (reported-by-round, R6-RND-080; [`docs/ROUND.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/ROUND.md) § tmux version
-  and bracketed paste).
+  Codex and refuse any other program ([`docs/ROUND.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/ROUND.md) § tmux version and bracketed
+  paste).
 
   If one is missing (`command not found`) or too old:
 
@@ -193,12 +193,15 @@ Expected: an `ESSENTIAL` block whose lines say `ok` (pai, pai on PATH, git, tmux
 info           project                …/practice is a Git checkout without pai defaults yet   -> pai init
 doctor changed nothing. (No pai project here: `pai init` in your checkout.)
 Next: …/docs/FIRST-USE.md, section 5 "Save this checkout's defaults: pai init".
+中文：…/docs/FIRST-USE.zh-CN.md 第 5 节「保存这个仓库的默认设置」。
 ```
 
-The `Next:` line names the installed copy of this page. It skips the rehearsal in step 4, which is
+The `Next:` line names the installed copy of this page, and the `中文：` line below it the Chinese
+one. It skips the rehearsal in step 4, which is
 optional. `pai doctor` changes nothing and exits with 0. A missing `claude` or `codex` is fine until
 section 6: doctor lists it under `FOR YOUR FIRST RUN`, with its install command in `REPAIR`
-(marked `# before pai run`), and does not count it as a failure. Leave it for now.
+(marked `# before pai run`), and does not count it as a failure. Leave it for now. A
+`NOT LOGGED IN  gh login` line under `OPTIONAL` is fine too: only `pai pr open` needs it (step 7).
 
 If a line in `ESSENTIAL` is not `ok`, it ends with `->` and the command that fixes it. Run that
 command, then `pai doctor` again, until the `ESSENTIAL` block is all `ok`. The usual ones:
@@ -221,6 +224,7 @@ the worker's handoff, and cleanup with the normal commands. Expected last lines:
 ```
 Done: the guided run went plan -> dispatch -> delivered -> completed, with a fake worker.
 Next, with your own project: …/docs/FIRST-USE.md, section 5 "Save this checkout's defaults: pai init", then section 6 …
+中文：…/docs/FIRST-USE.zh-CN.md 第 5 节「保存这个仓库的默认设置」，然后第 6 节「第一轮：一个 worker」。…
 Remove this demo: pai guide --cleanup /tmp/pai-guided-demo-XXXX
 ```
 
@@ -251,14 +255,16 @@ It asks a few questions. Enter keeps the value in `[brackets]`. Answer like this
 | `Default model …`, `Reasoning effort …` | Enter (the agent's own default) |
 | `Remote [origin]`, `Base branch [main]` | Enter |
 | `Task notes folder (an Obsidian folder, or Enter for pai's own …)` | Enter. Obsidian is **not** needed; notes are plain Markdown |
-| `Review checks, NAME=COMMAND …  [-]` | **a real check**, for example `test=make test` (see below) |
+| `Review checks, NAME=COMMAND …  [-]` | the practice repository: `test=test -f CONTRIBUTING.md`; your own project: the command that runs its tests, for example `test=make test` (see below) |
 | `Save to …/projects/<name>.toml? [Y/n]` | Enter |
 | `Enter JEV API key (optional)` | Enter. JEV is an optional second opinion ([glossary](GLOSSARY.md#jev)) |
 
 **Set a review check now.** `pai pr` refuses to publish anything without one
 (`BLOCKED no approved check is configured`). A run copies the checks when it starts, so a check
-added later only applies to the **next** `pai run`. For the practice repository,
-`test=test -f CONTRIBUTING.md` is enough (step 7 expects a check named `test`).
+added later only applies to the **next** `pai run`. Name it `test` (step 7 expects that name).
+The practice repository has no tests, so `test=test -f CONTRIBUTING.md` checks only that the
+worker created the file step 6 asks for. In your own project, use the command that runs its tests
+(`make test`, `npm test`, `pytest`, …).
 
 Expected end:
 
@@ -270,7 +276,10 @@ Next:
   …
 ```
 
-Then run `pai doctor` again. Its last lines now include `ok  project  practice: …`. From now on
+`pai init` does not ask how many workers to run: it saves `workers = 2` as this project's default.
+`pai run --workers N` overrides it for one run (step 6 uses 1), and `pai config edit` changes it.
+
+Then run `pai doctor` again. It now also shows `ok  remote access` and `ok  project  practice: …`. From now on
 the agent you chose is `ESSENTIAL`: if it is not installed or not logged in yet, doctor exits with 1
 and its last line is `Next: install and log in to claude …`. That is the step before section 6.
 
@@ -282,7 +291,8 @@ If `pai init` stops instead:
 - To change an answer later: `pai init --update` with only the values you want to change, for
   example `pai init --update --check "test=make test"`. `pai config edit` opens the whole file.
 
-Without a terminal (scripts), use:
+Without a terminal (scripts), use (here for your own project; for the practice repository, put
+the `test -f` check in `--check`):
 
 ```sh
 pai init --default-agent claude --base main --check "test=make test" --no-input
@@ -319,7 +329,8 @@ What each one shows:
 - `run --dry-run`: `lane a  claude (rc)  worktree …/practice-pai-lanes/a (new directory: the agent
   will ask for folder trust)` and `DRY RUN: nothing was fetched, created, written or started`. The run ID
   it prints is not reused; the real run gets a new one.
-- `run --workers 1 --yes`: `started a …`, then per lane one of:
+- `run --workers 1 --yes`: `--yes` accepts the plan the dry run showed, instead of asking you to
+  confirm it; it never answers an agent's folder-trust prompt. Prints `started a …`, then per lane one of:
   - `task: delivered`: the worker has the task. Go to step 7.
   - `waiting for folder trust`: the agent asks whether to trust the new lane folder, and
     `pai run` exits with 1. Continue below.
@@ -364,7 +375,7 @@ any `BLOCKED` line with its reason. It exits with 1 while anything is blocked. T
 
 ```sh
 pai pr check a      # runs the review checks; expected: check test PASSED … review checks passed at <sha>
-pai pr open a       # pushes the branch and opens the PR (GitHub remotes only); you merge it on GitHub
+pai pr open a       # pushes the branch and opens the PR (GitHub remotes only; needs `gh auth login` once); you merge it on GitHub
 ```
 
 With the practice repository's local remote, `pr plan` says
@@ -404,7 +415,7 @@ not, keep the full output and `pai doctor`'s output, and report both.
 | --- | --- | --- |
 | `pai: command not found` right after install | `~/.local/bin` is not on PATH in this terminal | `export PATH="$HOME/.local/bin:$PATH"`, and add it to `~/.bashrc` (step 2) |
 | `sha256sum: WARNING: 1 computed checksum did NOT match` | incomplete or damaged download | download both files again; never install an archive that fails this |
-| `pai round launch` refuses: `this tmux cannot tell whether … asked for bracketed paste` | tmux below 3.8, and the pane runs neither Claude Code nor Codex | start the agent in that pane first; to paste into another program anyway, `pai round launch LANE --allow-unbracketed` (reported-by-round) |
+| `pai round launch` refuses: `this tmux cannot tell whether … asked for bracketed paste` | tmux below 3.8, and the pane runs neither Claude Code nor Codex | start the agent in that pane first; to paste into another program anyway, `pai round launch LANE --allow-unbracketed` |
 | pip: `Cannot import 'setuptools.build_meta'` | building without network or without setuptools (`--no-build-isolation`) | let pip build in isolation (needs network once), or `pip install setuptools` in the venv first |
 | `pai install`: "an installed Python package …, not an extracted release archive" | you installed with uv or pip (path B) | upgrade the same way you installed ([REFRESH.md](REFRESH.md#a-upgrade-pai)) |
 | `pai doctor`: `-> pai init` | this checkout has no pai defaults yet | step 5 |
@@ -418,7 +429,6 @@ not, keep the full output and `pai doctor`'s output, and report both.
 | `pai pr plan`: `BLOCKED … the remote is not a GitHub repository` | `origin` is a local or non-GitHub remote | expected for practice; for real work clone from GitHub |
 | `pai next` → `error: the following arguments are required: lane` | `pai next` gives one lane its next task note | `pai next a` (add `--dry-run` to see which note first) |
 | `pai guide --cleanup …`: `unrecognized arguments` | more than one folder given (for example a `*` glob) | one `pai guide --cleanup DIR` per folder |
-| a Python `BrokenPipeError` traceback after `pai status \| head` | a known bug: status output piped into a reader that closes early | harmless; to page through it, `pai status > status.txt` and open the file (fix proposed to the core lane) |
 | cleanup mentions `rc up MANIFEST --resume` | an internal command name | use `pai resume` |
 | `pai doctor` shows `linux (arch ), …` | the distribution has no version number (Arch is rolling) | harmless |
 
@@ -427,14 +437,17 @@ not, keep the full output and `pai doctor`'s output, and report both.
 
 Once you run rounds with several lanes, PAI can keep the round's state as notes in your vault:
 `PAI/Home.md`, one board per round, one note per lane and one per decision. Obsidian (or any
-editor) then becomes the place where you look, approve and choose. This comes with the round lane
-of R6 and is new in pai 0.5.0 (reported-by-round). The full guide is [OBSIDIAN.md](OBSIDIAN.md).
+editor) then becomes the place where you look, approve and choose. This is new in pai 0.5.0 and
+belongs to `pai round` (REFRESH part (b)). The full guide is [OBSIDIAN.md](OBSIDIAN.md).
 
 `PROJECT` below is a PAI project key, registered once with
 `pai init PROJECT --repo PATH --vault PATH --memory DIR --inbox "Agent Inbox" --write`.
 An installed `pai` writes it to `~/.config/pai/config.toml`. Run from a checkout (`python3 -B bin/pai.py`),
 the same command writes `pai.local.toml` in that checkout (git-ignored) instead, so look there, not in
-your home folder. `pai doctor PROJECT` checks it.
+your home folder. `pai doctor PROJECT` checks it. `--vault` is your notes folder; `--memory DIR`
+and `--inbox` are folders inside it (for example `PAI/memory` and `Agent Inbox`), and the inbox
+must exist. `ROUND.json` in the commands below is the file `pai round new --write` creates for a
+round, in `<vault>/Agent Inbox/<round>/` ([REFRESH.md](REFRESH.md#b-every-round), part (b)).
 
 1. On the machine that runs the round, write the notes:
 
@@ -451,7 +464,7 @@ your home folder. `pai doctor PROJECT` checks it.
 4. **Approve a handoff.** Read `Agent Inbox/<round>/<lane>/cp-X/HANDOFF.md`, set `approved: true` in its
    front matter, then run `pai handoff approve PROJECT "Agent Inbox/<round>/<lane>/cp-X" --from-vault`.
    Success: `approval: approved` and a `DECISION.json` beside it. A body edited after sealing is refused,
-   and the note is marked `approval: stale` (core lane, reported-by-core).
+   and the note is marked `approval: stale`.
 
 If a command refuses, nothing was written. The message names the reason: an edited note, a
 choice that is not an option, or a decision text that changed. [OBSIDIAN.md](OBSIDIAN.md) section 5

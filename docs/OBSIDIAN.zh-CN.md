@@ -61,7 +61,7 @@ Home.md 的每个区块都有两种形式：一段 `dataview` 查询，以及一
 | --- | --- |
 | 什么插件都没装（或者用别的编辑器） | 纯文本表格。`dataview` 代码块会显示成普通代码，忽略即可 |
 | **Dataview**（社区插件） | 纯文本表格，以及每张表上方一张**实时**表格：lane 或决策笔记一变，它就跟着更新 |
-| **Bases**（核心插件：设置 → 核心插件 → Bases；owner 的 vault 已启用，见 `.obsidian/core-plugins.json`） | 暂时没有额外内容。PAI 还不生成 `.base` 文件，因为这个格式还没对照 Obsidian 的文档核实过（reported-by-round） |
+| **Bases**（核心插件：设置 → 核心插件 → Bases；owner 的 vault 已启用，见 `.obsidian/core-plugins.json`） | 暂时没有额外内容。PAI 还不生成 `.base` 文件，因为这个格式还没对照 Obsidian 的文档核实过 |
 
 打开实时表格的步骤：
 
@@ -103,7 +103,7 @@ pai decide answer --from-note "PAI/decisions/R6-20261122-D9.md" --write   # 在�
 
 遇到拒绝时，先读提示，然后改正 `choice`，或者请人重新生成这篇笔记。
 
-**批准交接。** 读 `Agent Inbox/<轮次>/<线名>/cp-X/HANDOFF.md` 和它的 `NEXT-PR.md`。批准有两种方式，都会核对交接正文是否和封存时逐字节一致，依据是 `sealed_sha256` 和 `SEAL.json` 里的 sha256（reported-by-core：`pai/handoff.py`、`tests/test_handoff_v2.py`）。
+**批准交接。** 读 `Agent Inbox/<轮次>/<线名>/cp-X/HANDOFF.md` 和它的 `NEXT-PR.md`。批准有两种方式，都会核对交接正文是否和封存时逐字节一致，依据是 `sealed_sha256` 和 `SEAL.json` 里的 sha256。
 
 *在 Obsidian 里：*
 

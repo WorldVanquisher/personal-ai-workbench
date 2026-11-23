@@ -17,6 +17,9 @@ class NextStep(unittest.TestCase):
         self.assertIn("FIRST-USE.md", line)
         self.assertIn('section 6 "Your first round"', line)
         self.assertIn('REFRESH.md, part (b) "Every round"', line)
+        zh = line.split("\n")[1]  # R6-FIN-030: the Chinese twin
+        self.assertIn("FIRST-USE.zh-CN.md 第 6 节「第一轮：一个 worker」", zh)
+        self.assertIn("REFRESH.zh-CN.md 的 (b) 部分「每一轮的刷新」", zh)
 
     def test_problems_point_to_the_troubleshooting_section(self):
         line = doctor.next_step(2)

@@ -132,8 +132,9 @@ mkdir -p ~/.config/pai && printf '[project.PROJECT]\ngithub = "OWNER/NAME"\n' >>
 ```
 
 Replace `PROJECT` and `OWNER/NAME` in that line first. Other keys (vault, trusted root, tmux
-session) are optional (ROUND.md § Configuration). The search for the clone covers `~` and `/srv`,
-five levels down.
+session) are optional (ROUND.md § Configuration). The `>>` appends: if round.toml already has a
+`[project.PROJECT]` section, add the `github =` line to it by hand instead. The search for the clone
+covers `~` and `/srv`, five levels down; add `--repo PATH` to `pai round new` to name it yourself.
 
 **1. Preview the round, then create it.**
 
@@ -194,7 +195,9 @@ archived as closed once no lane worktree remains.
 
 ## (d) Daily operations cheat sheet
 
-`QUEUE` below is a worker's queue file, kept with `pai queue` (the worker's prompt says where).
+`QUEUE` below is a worker's queue file, kept with `pai queue` (the worker's prompt says where). A
+queue is optional and `pai run` does not need one: it is a numbered item list that a worker keeps
+(`pai queue init`, then `pai queue mark`) so that a fresh session can continue where it stopped.
 
 | I want to … | Command |
 | --- | --- |

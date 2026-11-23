@@ -343,10 +343,14 @@ def next_lines(kind=None):
     """The end of the guide: the next step of the first-use manual, with your own project."""
     if kind:  # the handoff guides: continuing a lane in a fresh session
         return ["Next, for your own lanes: %s, part (e) \"Recovery\" (resuming after a stop, a full "
-                "context or a reboot)." % manual("REFRESH.md")]
+                "context or a reboot)." % manual("REFRESH.md"),
+                "中文：%s 的 (e) 部分「恢复」。" % manual("REFRESH.zh-CN.md")]
+    # the Chinese twin names the Chinese manual (R6-FIN-030, newbie2 F3)
     return ["Next, with your own project: %s, section 5 \"Save this checkout's defaults: pai init\", then "
             "section 6 \"Your first round\". (Not done yet? Section 2a makes a practice repository; "
-            "section 3 is `pai doctor`.)" % manual("FIRST-USE.md")]
+            "section 3 is `pai doctor`.)" % manual("FIRST-USE.md"),
+            "中文：%s 第 5 节「保存这个仓库的默认设置」，然后第 6 节「第一轮：一个 worker」。（还没做？第 2a 节建一个"
+            "练习仓库，第 3 节是 `pai doctor`。）" % manual("FIRST-USE.zh-CN.md")]
 
 
 HANDOFF_NOTE = "guided-handoff"

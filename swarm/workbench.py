@@ -1457,14 +1457,20 @@ def doctor_next(proj, failing, agent_names=()):
             any(r["tool"] == a or r["tool"].startswith(a + " ") for a in agent_names) for r in failing):
         # only the chosen agent is missing or logged out: that is the step before section 6, not a breakdown
         return ('Next: install and log in to %s (the REPAIR lines above), then `pai doctor` again; %s, section 6 '
-                '"Your first round" needs it.' % (" or ".join(agent_names), manual("FIRST-USE.md")))
+                '"Your first round" needs it.\n中文：先装好并登录 %s，再跑 `pai doctor`；%s 第 6 节「第一轮：一个 worker」'
+                '需要它。' % (" or ".join(agent_names), manual("FIRST-USE.md"), " 或 ".join(agent_names),
+                             manual("FIRST-USE.zh-CN.md")))
+    # every Next line has a Chinese twin that names the Chinese manual (R6-FIN-030, newbie2 F3)
     if failing:
-        return 'Next: fix each line marked for pai run above, then `pai doctor` again. Stuck? %s, section 8 ' \
-               '"When something goes wrong".' % manual("FIRST-USE.md")
+        return ('Next: fix each line marked for pai run above, then `pai doctor` again. Stuck? %s, section 8 '
+                '"When something goes wrong".\n中文：修好上面标给 pai run 的每一行，再跑 `pai doctor`。卡住了？%s '
+                '第 8 节「出错时怎么办」。' % (manual("FIRST-USE.md"), manual("FIRST-USE.zh-CN.md")))
     if not proj:
-        return 'Next: %s, section 5 "Save this checkout\'s defaults: pai init".' % manual("FIRST-USE.md")
-    return 'Next: %s, section 6 "Your first round" (or `pai guide` first); for a later round, %s, part (b).' % (
-        manual("FIRST-USE.md"), manual("REFRESH.md"))
+        return ('Next: %s, section 5 "Save this checkout\'s defaults: pai init".\n中文：%s 第 5 节「保存这个仓库的'
+                '默认设置」。' % (manual("FIRST-USE.md"), manual("FIRST-USE.zh-CN.md")))
+    return ('Next: %s, section 6 "Your first round" (or `pai guide` first); for a later round, %s, part (b).\n'
+            '中文：%s 第 6 节「第一轮：一个 worker」（也可以先跑 `pai guide`）；之后的轮次见 %s 的 (b) 部分。' % (
+                manual("FIRST-USE.md"), manual("REFRESH.md"), manual("FIRST-USE.zh-CN.md"), manual("REFRESH.zh-CN.md")))
 
 
 def cmd_setup(a):

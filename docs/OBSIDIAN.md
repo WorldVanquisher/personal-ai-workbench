@@ -77,7 +77,7 @@ from when PAI wrote the note. Which one you see depends on your plugins:
 | --- | --- |
 | no plugins (or any other editor) | the plain tables. The `dataview` blocks show as code; ignore them |
 | **Dataview** (a community plugin) | the plain tables, and above each one a **live** table that updates as soon as a lane or decision note changes |
-| **Bases** (a core plugin: Settings → Core plugins → Bases; enabled in the owner's vault, `.obsidian/core-plugins.json`) | nothing extra yet. PAI writes no `.base` file, because the format was not checked against Obsidian's documentation (reported-by-round) |
+| **Bases** (a core plugin: Settings → Core plugins → Bases; enabled in the owner's vault, `.obsidian/core-plugins.json`) | nothing extra yet. PAI writes no `.base` file, because the format was not checked against Obsidian's documentation |
 
 To turn on the live tables:
 
@@ -132,7 +132,7 @@ In each case, read the message, then fix the `choice` or ask for a fresh note.
 
 **A handoff.** Read `Agent Inbox/<round>/<lane>/cp-X/HANDOFF.md` and its `NEXT-PR.md`. There are two
 ways to approve. Both check that the handoff's body is byte for byte what was sealed: the sha256 in
-`sealed_sha256` and `SEAL.json` (reported-by-core: `pai/handoff.py`, `tests/test_handoff_v2.py`).
+`sealed_sha256` and `SEAL.json`.
 
 *From Obsidian:*
 

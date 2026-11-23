@@ -112,7 +112,7 @@ pai prompt init --dest <vault>/PAI/prompts --write
 mkdir -p ~/.config/pai && printf '[project.PROJECT]\ngithub = "OWNER/NAME"\n' >> ~/.config/pai/round.toml
 ```
 
-先把这一行里的 `PROJECT` 和 `OWNER/NAME` 换掉。其他设置（vault、trusted root、tmux 会话）都是可选的（ROUND.md 的 Configuration 一节）。查找 clone 的范围是 `~` 和 `/srv`，往下五层。
+先把这一行里的 `PROJECT` 和 `OWNER/NAME` 换掉。其他设置（vault、trusted root、tmux 会话）都是可选的（ROUND.md 的 Configuration 一节）。`>>` 是追加：如果 round.toml 里已经有 `[project.PROJECT]` 这一节，就手工把 `github =` 那一行加进去。查找 clone 的范围是 `~` 和 `/srv`，往下五层；给 `pai round new` 加上 `--repo 路径` 就可以自己指定。
 
 **1. 先预览这一轮，再创建。**
 
@@ -165,7 +165,7 @@ pai round close --write      # 只回收干净又空闲的 worktree；分支保�
 
 ## (d) 日常操作速查
 
-下面的 `QUEUE` 是 worker 用 `pai queue` 维护的 queue 文件（worker 的 prompt 里写了它在哪）。
+下面的 `QUEUE` 是 worker 用 `pai queue` 维护的 queue 文件（worker 的 prompt 里写了它在哪）。queue 是可选的，`pai run` 用不到它：它是 worker 自己维护的一份带编号的条目清单（先 `pai queue init`，再 `pai queue mark`），好让新会话能接着停下的地方继续。
 
 | 我想…… | 命令 |
 | --- | --- |

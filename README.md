@@ -7,7 +7,7 @@ each round, connects the agents' work, and collects it back for you. You keep ev
 decision. It does not replace or wrap Claude Code or Codex; it works beside them.
 
 How it differs from lead-agent frameworks such as LangGraph, CrewAI, AutoGen or the OpenAI Agents
-SDK, as their own documentation describes them (reported-by-prompts, [docs/WHY-PAI.md](docs/WHY-PAI.md)):
+SDK, as their own documentation describes them ([docs/WHY-PAI.md](docs/WHY-PAI.md)):
 
 1. **The person decides, not a lead agent.** Agents propose; open questions reach you as a decision
    sheet with options and a recommendation.

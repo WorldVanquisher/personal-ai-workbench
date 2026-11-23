@@ -4,7 +4,7 @@
 
 **PAI 是多个编码 agent 并行工作的润滑层。** 每一轮工作所需的东西，由它准备好、串起来、收回来交给你。所有最终决定都由你来做。它不替换、也不包装 Claude Code 或 Codex，而是在它们旁边工作。
 
-和 LangGraph、CrewAI、AutoGen、OpenAI Agents SDK 这类"主 agent 统领子 agent"的框架相比（依据它们自己的文档；reported-by-prompts，见 [docs/WHY-PAI.md](docs/WHY-PAI.md)），区别有三点：
+和 LangGraph、CrewAI、AutoGen、OpenAI Agents SDK 这类"主 agent 统领子 agent"的框架相比（依据它们自己的文档，见 [docs/WHY-PAI.md](docs/WHY-PAI.md)），区别有三点：
 
 1. **由人决定，不由主 agent 决定。** agent 只提建议；悬而未决的问题会做成决策单交给你，附上选项和推荐。
 2. **状态是文件，不在运行时里。** 交接、queue 和决策都是文件夹里的 Markdown。清空对话或者重启机器都不会丢，任何编辑器都能读。

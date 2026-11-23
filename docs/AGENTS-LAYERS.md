@@ -33,7 +33,7 @@ Short, stable and true for every task. Typical sections:
 - the scope discipline;
 - where the contracts are.
 
-Two limits from the agents' own documentation (reported-by-prompts, [`docs/research/LANDSCAPE.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/research/LANDSCAPE.md),
+Two limits from the agents' own documentation ([`docs/research/LANDSCAPE.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/research/LANDSCAPE.md),
 re-verified 2026-11-22):
 - Codex stops reading instruction files at 32 KiB, counting L0 and every nested file together. A
   real example: FLH's (the owner's other project, used as the worked example on this page) 63 KiB AGENTS.md puts every rule past line 519 out of Codex's reach
@@ -72,8 +72,7 @@ One file per area, loaded only when a session works in that area.
 
 **Not implemented in PAI.** No `pai` command creates, lists or loads contract files yet. Today,
 you link them from L0 ("before touching tools/extraction, read docs/contracts/extraction.md"). Both
-agents also have a native way to load files by location (reported-by-prompts:
-[`docs/research/LANDSCAPE.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/research/LANDSCAPE.md)):
+agents also have a native way to load files by location ([`docs/research/LANDSCAPE.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/research/LANDSCAPE.md)):
 
 - Claude Code: `.claude/rules/*.md` with a `paths:` front matter;
 - Codex: nested `AGENTS.md` files per directory.
@@ -91,12 +90,12 @@ markers, so it never overwrites your text:
 <!-- pai:managed:end -->
 ```
 
-| Agent | Where L2 goes | Command (core lane, reported-by-core) | Status |
+| Agent | Where L2 goes | Command | Status |
 | --- | --- | --- | --- |
 | Claude Code | `CLAUDE.local.md` in the lane's worktree. Claude Code reads it next to `CLAUDE.md`; PAI adds it to the repository's `info/exclude`, so git never sees it and the worktree stays clean | `pai worktree init PATH --target claude-local --write` | file handling tested with fakes; a real Claude Code session reads it (rule 1 above, mastermind 2026-11-22 real run, Claude Code 2.1.330, haiku) |
 | Codex | a managed section in the worktree's `AGENTS.md` (Codex does not read `CLAUDE.local.md`) | `pai worktree init PATH --write` (the default target) | **to be verified** on a real Codex run; the section makes the worktree dirty, which the continuation flow has to tolerate |
 
-`pai context --worktree PATH` (core lane) reads a lane's instructions as the agent would:
+`pai context --worktree PATH` reads a lane's instructions as the agent would:
 `CLAUDE.local.md` first, then `AGENTS.md`.
 
 ## L3: proposals
@@ -108,7 +107,7 @@ Proposals never change a file by themselves.
 - Workers write rule problems into their handoff's "Decisions for the owner" and into NEXT-PR.md.
   The mastermind turns them into a decision sheet. An example is the five FLH rule-vs-practice
   conflicts in `Agent Inbox/R6-20261122/docs/FLH-RULE-CONFLICTS.md`.
-- `pai prompt optimize` (prompts lane, offline prototype) proposes prompt changes, scored against
+- `pai prompt optimize` (offline prototype) proposes prompt changes, scored against
   contracts and JEV. Each one needs your approval.
 
 ## Where PAI handles each layer
@@ -117,7 +116,7 @@ Proposals never change a file by themselves.
 | --- | --- | --- | --- | --- |
 | `pai init` | reads it (`--instructions`, the files `pai context` passes on) | — | — | — |
 | `pai worktree init` | quotes its rules with `file:line` in the lane section | — | **writes it** (AGENTS.md section, or CLAUDE.local.md with `--target claude-local`) | `--jev` proposes, `--accept` adopts |
-| `pai round new` (round lane) | the prompt's shared part repeats the round's rules | — | renders each lane's prompt; does **not** write CLAUDE.local.md yet (not implemented) | decisions go to `DECISIONS.md` and the decision notes |
+| `pai round new` | the prompt's shared part repeats the round's rules | — | renders each lane's prompt; does **not** write CLAUDE.local.md yet (not implemented) | decisions go to `DECISIONS.md` and the decision notes |
 | `pai context` | passes it on | — | `--worktree PATH` reads the lane's L2 first | — |
 | browser workbench (`pai worktree web`, `pai round web`) | shows the worktree's AGENTS.md | — | shows the managed section | shows open decisions |
 | doc_check / lint | — | — | — | — (no layer checks yet) |
@@ -155,7 +154,7 @@ Choose A unless you want one file and accept the last three rows. Steps for A:
 
 3. Check it: start Claude Code in the folder and ask it to list its instruction files (`/memory`).
    `AGENTS.md` must appear as imported from `CLAUDE.md`. Claude Code follows `@path` imports relative
-   to the importing file, up to four levels deep (reported-by-prompts, from Claude Code's memory
+   to the importing file, up to four levels deep (from Claude Code's memory
    documentation).
 4. On Windows, after the next pull, open `CLAUDE.md`. It must hold `@AGENTS.md`, not the text
    `AGENTS.md` left by a broken link.
