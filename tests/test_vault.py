@@ -171,7 +171,8 @@ class Wait(Base):
             vault.wait(str(target), "abc", 1)
 
     def test_cli(self):
-        target = self.write("Agent Inbox/n.md", "x\n")
+        target = self.v / "Agent Inbox" / "n.md"
+        target.write_bytes(b"x\n")  # the bytes hashed below (no \r\n on Windows)
         sha = hashlib.sha256(b"x\n").hexdigest()
         rc, out, _ = run_cli("vault", "wait", str(target), "--sha", sha[:12], "--timeout", "0")
         self.assertEqual(rc, 0, out)

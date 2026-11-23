@@ -27,7 +27,7 @@ class JevVerify(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.d = Path(self.tmp.name)
-        (self.d / "log.txt").write_text("Ran 3 tests\nOK\n", encoding="utf-8")
+        (self.d / "log.txt").write_bytes(b"Ran 3 tests\nOK\n")  # the bytes hashed below (no \r\n on Windows)
         self.sha = hashlib.sha256(b"Ran 3 tests\nOK\n").hexdigest()
 
     def text(self, line):

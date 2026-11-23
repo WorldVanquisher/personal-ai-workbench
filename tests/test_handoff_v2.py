@@ -306,7 +306,7 @@ class V2(unittest.TestCase):
         d = self.work / "cp-A"
         d.mkdir(exist_ok=True)
         (d / "logs").mkdir(exist_ok=True)
-        (d / "logs" / "tests.txt").write_text("Ran 3 tests\nOK\n", encoding="utf-8")
+        (d / "logs" / "tests.txt").write_bytes(b"Ran 3 tests\nOK\n")  # the bytes hashed below (no \r\n on Windows)
         sha = __import__("hashlib").sha256(b"Ran 3 tests\nOK\n").hexdigest()
         text = self.new().read_text(encoding="utf-8").replace(
             "## Evidence\n\n- None supplied.", "## Evidence\n\n- logs/tests.txt  %s  python3 -m unittest" % sha)
