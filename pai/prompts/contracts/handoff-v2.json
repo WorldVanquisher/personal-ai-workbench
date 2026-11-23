@@ -1,0 +1,180 @@
+{
+ "format": "pai-contract/1",
+ "name": "handoff-v2",
+ "version": 6,
+ "desc": "HANDOFF.md as checkpoint.md (pai-handoff/2) asks for.",
+ "source_prompt": "checkpoint",
+ "checks": [
+  {
+   "id": "frontmatter",
+   "type": "frontmatter",
+   "keys": [
+    "format",
+    "status",
+    "approved",
+    "project",
+    "round",
+    "lane",
+    "checkpoint",
+    "base_sha",
+    "head_sha",
+    "queue",
+    "queue_sha256"
+   ]
+  },
+  {
+   "id": "summary",
+   "type": "section",
+   "pattern": "^#+\\s*Summary"
+  },
+  {
+   "id": "state",
+   "type": "table_rows",
+   "section": "^#+\\s*State",
+   "rows": [
+    "Implementation",
+    "Validation",
+    "Commit",
+    "Merge",
+    "Deployment"
+   ],
+   "desc": "State table with the five rows"
+  },
+  {
+   "id": "state-columns",
+   "type": "regex",
+   "section": "^#+\\s*State",
+   "pattern": "^\\|\\s*State\\s*\\|\\s*Value\\s*\\|\\s*Source\\s*\\|\\s*$",
+   "desc": "D5: the State table has exactly the columns State | Value | Source"
+  },
+  {
+   "id": "state-labels",
+   "type": "labels",
+   "section": "^#+\\s*State",
+   "labels": [
+    "real run",
+    "synthetic",
+    "fake agent",
+    "fake",
+    "mock",
+    "JEV",
+    "reported-by",
+    "self-report"
+   ],
+   "desc": "every State row carries a source label"
+  },
+  {
+   "id": "not-done-not-unknown",
+   "type": "absent",
+   "section": "^#+\\s*State",
+   "pattern": "^\\|\\s*(?:Commit|Merge|Deployment)\\s*\\|\\s*UNKNOWN",
+   "desc": "D6: not done is none / not merged (owner-only), never UNKNOWN"
+  },
+  {
+   "id": "items-totals",
+   "type": "totals",
+   "desc": "Items table and Totals line agree"
+  },
+  {
+   "id": "totals-five",
+   "type": "regex",
+   "pattern": "^Totals:(?=.*\\bdone\\b)(?=.*\\bprototype\\b)(?=.*\\bblocked\\b)(?=.*\\bowner-only\\b)(?=.*\\btodo\\b)",
+   "desc": "the Totals line names all five states"
+  },
+  {
+   "id": "items-from-queue",
+   "type": "regex",
+   "section": "^#+\\s*Items",
+   "pattern": "^Totals: todo \\d+, doing \\d+, done \\d+, prototype \\d+, blocked \\d+, owner-only \\d+ \\(\\d+ items?\\)\\s*$",
+   "desc": "D3: the Items table and Totals are pasted from pai queue table"
+  },
+  {
+   "id": "evidence-sha",
+   "type": "full_sha256",
+   "section": "^#+\\s*Evidence",
+   "desc": "every non-empty Evidence line has a full sha256 or starts with 'none' (as core's pai.handoff.check_v2)",
+   "per_line": true
+  },
+  {
+   "id": "evidence-local",
+   "type": "absent",
+   "section": "^#+\\s*Evidence",
+   "pattern": "^(?!.*>\\s?5\\s?MB).*(?:^|[\\s(`])(?:~/|/home/|/tmp/|/srv/)",
+   "desc": "D4: evidence files are copied into the cp folder (only files > 5 MB may stay outside, marked >5 MB)"
+  },
+  {
+   "id": "decisions-own",
+   "type": "section",
+   "pattern": "Decisions within authority"
+  },
+  {
+   "id": "decisions-owner",
+   "type": "section",
+   "pattern": "Decisions for the owner"
+  },
+  {
+   "id": "blockers",
+   "type": "section",
+   "pattern": "^#+\\s*Blockers"
+  },
+  {
+   "id": "blockers-cmd",
+   "type": "each_line",
+   "section": "^#+\\s*Blockers",
+   "pattern": "`[^`]+`[\\s。.)）]*$",
+   "allow": "^\\s*-?\\s*none\\.?\\s*$",
+   "desc": "D6: every blocker ends with a backticked command, or the section is just none"
+  },
+  {
+   "id": "next-id",
+   "type": "regex",
+   "section": "^#+\\s*Next",
+   "pattern": "\\b[A-Z][A-Z0-9]*-(?:[A-Z0-9]+-)*\\d{2,}\\b",
+   "desc": "Next names the next item ID"
+  },
+  {
+   "id": "no-session-link",
+   "type": "absent",
+   "pattern": "claude\\.ai/(?:code/)?(?:session|chat)[_/]|chatgpt\\.com/c/"
+  },
+  {
+   "id": "no-ai-attribution",
+   "type": "absent",
+   "pattern": "(?i)co-authored-by:\\s*claude|generated with \\[?claude"
+  },
+  {
+   "id": "full-ids",
+   "type": "absent",
+   "pattern": "\\b[A-Z][A-Z0-9]*-[A-Z]{2,5}-\\d{3}\\s*[、,，/]\\s*\\d{3}\\b",
+   "desc": "D7: item IDs written in full"
+  }
+ ],
+ "jev": [
+  {
+   "id": "numbers_labeled",
+   "maps_to": "state-labels",
+   "instructions": "In this State table, every row says where its claim comes from: a real run, a synthetic or mock test, or only the worker's own report.",
+   "section": "^#+\\s*State"
+  },
+  {
+   "id": "blockers_actionable",
+   "maps_to": "blockers-cmd",
+   "instructions": "Each blocker listed here names the exact command or concrete action the owner must take, or the text explicitly says there are no blockers.",
+   "section": "^#+\\s*Blockers"
+  },
+  {
+   "id": "evidence_verifiable",
+   "maps_to": "evidence-sha",
+   "instructions": "This evidence can be checked by someone else: it gives file paths together with complete checksums or the exact commands that produced them, not just a reference to another place.",
+   "section": "^#+\\s*Evidence"
+  }
+ ],
+ "behaviour_thresholds": {
+  "stop_ok": 1.0,
+  "placeholders_max": 0,
+  "handoff_complete": 1.0,
+  "labelled_share": 0.8,
+  "next_pr_exec": 1.0,
+  "note": "warnings only (R6-PRM-074)"
+ }
+}

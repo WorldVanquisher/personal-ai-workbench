@@ -1,0 +1,37 @@
+{
+ "format": "pai-contract/1",
+ "name": "research-report",
+ "version": 1,
+ "desc": "A sub-agent report as research-report.md asks for.",
+ "source_prompt": "research-report",
+ "checks": [
+  {
+   "id": "conclusions",
+   "type": "section",
+   "pattern": "结论|conclusion"
+  },
+  {
+   "id": "evidence",
+   "type": "section",
+   "pattern": "证据|evidence"
+  },
+  {
+   "id": "inferences",
+   "type": "section",
+   "pattern": "推断|inference"
+  },
+  {
+   "id": "citations",
+   "type": "regex",
+   "pattern": "https?://\\S+|arXiv[: ]\\s*\\d{4}\\.\\d{4,5}|\\b[\\w/.-]+\\.\\w+:\\d+",
+   "flags": "i",
+   "min": 1
+  }
+ ],
+ "jev": [
+  {
+   "id": "grounded",
+   "instructions": "Every conclusion in the REPORT is followed by a specific source (a link, a paper id, or a file and line), and guesses are marked as guesses."
+  }
+ ]
+}

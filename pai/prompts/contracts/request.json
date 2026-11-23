@@ -1,0 +1,64 @@
+{
+ "format": "pai-contract/1",
+ "name": "request",
+ "version": 1,
+ "desc": "A request note (template pai-request/1) before intake: front matter checks, and the JEV intake questions.",
+ "source_prompt": "intake",
+ "checks": [
+  {
+   "id": "frontmatter",
+   "type": "frontmatter",
+   "keys": [
+    "type",
+    "template",
+    "status",
+    "project",
+    "priority",
+    "budget"
+   ]
+  },
+  {
+   "id": "is-request",
+   "type": "regex",
+   "pattern": "^type:\\s*pai-request\\s*$"
+  },
+  {
+   "id": "inbox",
+   "type": "regex",
+   "pattern": "^status:\\s*inbox\\s*$"
+  },
+  {
+   "id": "has-body",
+   "type": "regex",
+   "section": "^#+\\s*需求|^#+\\s*Request",
+   "pattern": "^(?!\\s*（).{40,}$",
+   "desc": "the request section has at least one line of 40+ characters (not the template's hint)"
+  }
+ ],
+ "jev": [
+  {
+   "id": "actionable",
+   "instructions": "The note asks for specific changes to code or files in a software repository, and says what the result should be, so a developer could start without asking any questions."
+  },
+  {
+   "id": "tier",
+   "type": "choice",
+   "instructions": "How much reasoning the work needs.",
+   "criteria": {
+    "haiku": "Mechanical: rename, typo, formatting, one obvious edit.",
+    "sonnet": "Normal feature or bug fix touching a few files, with tests.",
+    "opus": "Design decisions, unknown-cause bugs, many modules, security or concurrency."
+   }
+  },
+  {
+   "id": "multi_lane",
+   "instructions": "This is a large request that should be split into several parallel lanes of work (separate areas of files, each with many items), rather than one task for one developer."
+  }
+ ],
+ "routing": {
+  "split": "multi_lane >= 0.8",
+  "single_task": "actionable >= 0.7 and multi_lane < 0.8",
+  "needs_detail": "otherwise",
+  "evidence": "docs/research/JEV-QUESTIONS.md §3"
+ }
+}

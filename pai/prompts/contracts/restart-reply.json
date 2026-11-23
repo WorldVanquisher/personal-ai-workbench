@@ -1,0 +1,32 @@
+{
+ "format": "pai-contract/1",
+ "name": "restart-reply",
+ "version": 1,
+ "desc": "The first reply after restart.md.",
+ "source_prompt": "restart",
+ "checks": [
+  {
+   "id": "read-restart",
+   "type": "regex",
+   "pattern": "RESTART\\.md"
+  },
+  {
+   "id": "read-handoff",
+   "type": "regex",
+   "pattern": "HANDOFF\\.md"
+  },
+  {
+   "id": "totals",
+   "type": "regex",
+   "pattern": "Totals|done\\s*\\d+",
+   "flags": "i"
+  },
+  {
+   "id": "next-ids",
+   "type": "ids",
+   "pattern": "\\bR\\d+-[A-Z]{2,5}-\\d{3}\\b",
+   "min": 3
+  }
+ ],
+ "jev": []
+}
