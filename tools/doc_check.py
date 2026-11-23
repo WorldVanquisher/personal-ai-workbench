@@ -149,8 +149,8 @@ class Pai:
             env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", COLUMNS="200")
             try:
                 p = subprocess.run([sys.executable, "-B", os.path.join(self.root, "bin", "pai.py")] + list(words)
-                                   + ["--help"], capture_output=True, text=True, timeout=60, env=env,
-                                   stdin=subprocess.DEVNULL)
+                                   + ["--help"], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                   timeout=60, env=env, stdin=subprocess.DEVNULL)
                 self.cache[key] = (p.returncode, p.stdout + p.stderr)
             except (OSError, subprocess.TimeoutExpired) as e:
                 self.cache[key] = (None, str(e))
@@ -172,8 +172,18 @@ def has_flag(help_text, flag):
     return re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(flag), help_text) is not None
 
 
+def shown(path, root):
+    """PATH as a message names it: relative to ROOT with / separators on every platform, or absolute when
+    there is no relative path (Windows: PATH on another drive than ROOT, such as a temporary file on C: and a
+    checkout on D:)."""
+    try:
+        return os.path.relpath(path, root).replace(os.sep, "/")
+    except ValueError:
+        return os.path.abspath(path)
+
+
 def check_file(path, root, pai):
-    rel = os.path.relpath(path, root)
+    rel = shown(path, root)
     with open(path, encoding="utf-8") as f:
         text = f.read()
     pending, pending_flags = set(), set()
@@ -266,11 +276,11 @@ def check_file(path, root, pai):
             file_part, _, anchor = target.partition("#")
             dest = os.path.normpath(os.path.join(os.path.dirname(path), file_part)) if file_part else path
             if not os.path.exists(dest):
-                problems.append("%s:%d: broken link %s (no file %s)" % (rel, no, target, os.path.relpath(dest, root)))
+                problems.append("%s:%d: broken link %s (no file %s)" % (rel, no, target, shown(dest, root)))
                 continue
             if anchor and os.path.isfile(dest) and dest.endswith(".md") and anchor not in anchors(dest):
                 problems.append("%s:%d: broken anchor %s (no such heading in %s)"
-                                % (rel, no, target, os.path.relpath(dest, root)))
+                                % (rel, no, target, shown(dest, root)))
     return problems, notes
 
 
@@ -306,7 +316,7 @@ def outline(path):
 def parity(en, zh, root):
     """Problems where FILE.zh-CN.md does not follow FILE.md section by section."""
     a, b = outline(en), outline(zh)
-    rel = os.path.relpath(zh, root)
+    rel = shown(zh, root)
     if [(x[0], x[1]) for x in a] != [(x[0], x[1]) for x in b]:
         return ["%s: headings differ from %s: %s vs %s" % (
             rel, os.path.basename(en), [("#" * x[0]) + " " + x[1] for x in a], [("#" * x[0]) + " " + x[1] for x in b])]
@@ -376,7 +386,7 @@ def template_fields(root):
                     break
                 m = FM_KEY.match(line.strip())
                 if m:
-                    out[(os.path.relpath(path, root), m.group(1))] = no
+                    out[(shown(path, root), m.group(1))] = no
     return out
 
 
@@ -405,7 +415,7 @@ def check_fields(files, root, schema):
         for name, no in sorted(named_fields(f).items(), key=lambda x: x[1]):
             if name not in allowed:
                 problems.append("%s:%d: front matter field `%s` is not in the schema %s"
-                                % (os.path.relpath(f, root), no, name, os.path.basename(schema)))
+                                % (shown(f, root), no, name, os.path.basename(schema)))
     for (rel, name), no in sorted(template_fields(root).items()):
         if name not in allowed:
             problems.append("%s:%d: template front matter field `%s` is not in the schema %s"
@@ -446,7 +456,7 @@ def main(argv=None):
     else:
         notes.append("front matter fields: not checked (no --schema; the vault schema is the core lane's R6-COR-039)")
     if a.json:
-        print(json.dumps({"files": [os.path.relpath(f, root) for f in files], "problems": problems, "notes": notes},
+        print(json.dumps({"files": [shown(f, root) for f in files], "problems": problems, "notes": notes},
                          indent=2, ensure_ascii=False))
     else:
         for line in notes + problems:

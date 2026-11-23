@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
@@ -207,6 +208,22 @@ class Main(unittest.TestCase):
             self.assertIn("1 PROBLEM(S)", out.getvalue())
             with contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(doc_check.main([os.path.join(d, "absent.md")]), 2)
+
+
+class Shown(unittest.TestCase):
+    def test_relative_with_slashes_or_absolute_on_another_drive(self):
+        self.assertEqual(doc_check.shown(os.path.join(ROOT, "pai", "templates", "t.md"), ROOT), "pai/templates/t.md")
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "m.md")
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("see /srv/data/x\n")
+            # what Windows does for a file on C: and a checkout on D: (the CI runner's temporary folder and checkout)
+            cross = ValueError("path is on mount 'C:', start on mount 'D:'")
+            with mock.patch.object(doc_check.os.path, "relpath", side_effect=cross):
+                self.assertEqual(doc_check.shown(p, ROOT), os.path.abspath(p))
+                problems, _ = doc_check.check_file(p, ROOT, doc_check.Pai(ROOT))
+            self.assertEqual(len(problems), 1, problems)
+            self.assertTrue(problems[0].startswith(os.path.abspath(p) + ":1: absolute developer path"), problems)
 
 
 if __name__ == "__main__":
