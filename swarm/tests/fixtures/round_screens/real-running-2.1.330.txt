@@ -1,0 +1,12 @@
+         case here runs the real hook                          
+       6 the way Claude Code does: JSON on stdin, exit 2 blocks."""
+     … +123 lines                 
+  Ran 1 shell command                                          
+● 问题复现了：基线上 20 多个用例都没被拦住。现在实现写入目标的识别：           
+● Running 1 shell command…                                                      
+✻ Jitterbugging… (7m 54s · ↓ 42.3k tokens)                                      
+  ⎿  Tip: Use /btw to ask a side question without interrupting Claude
+───────────────────────────────────────────────────────── PAI R6-20261122 core ─
+❯                                                                       
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on · 1 shell · esc to interrupt · ↓ to manage

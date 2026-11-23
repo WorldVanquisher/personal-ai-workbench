@@ -1,0 +1,8 @@
+● Running 1 shell command…
+✻ Jitterbugging… (1m 02s · ↓ 3.1k tokens)
+  ⎿  继续 R6-20261122 round 线：先完整读 RESTART.md
+  ⎿  Press up to edit queued messages
+───────────────────────────────────────────────────────── PAI R6-20261122 round ─
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt

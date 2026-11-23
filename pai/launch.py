@@ -22,6 +22,7 @@ import sys
 # Windows only PAI's own commands run.
 WORKBENCH = {"run", "status", "attach", "logs", "trust", "resume", "pr", "next", "cleanup", "setup", "config", "jev",
              "server", "task", "paste", "web", "guide", "inspect", "recover", "worktree", "plan"}
+WORKBENCH |= {"round", "decide"}  # R6 round lane: pai round ..., pai decide ...
 PACKAGE = os.path.dirname(os.path.abspath(__file__))
 NATIVE_WINDOWS = os.name == "nt"
 
@@ -149,6 +150,7 @@ def main(argv=None):
                   "  guide (the whole flow offline, with a fake worker), paste (text into a lane in one piece),\n"
                   "  web (the run in your browser),\n"
                   "  edit (one Markdown file in your browser; also on native Windows)\n"
+                  "  round, decide (a round of parallel lanes and its decision sheets; docs/ROUND.md)\n"
                   "  (`pai init PROJECT --vault ...`, `pai doctor PROJECT` and `pai doctor --agents` are PAI's own\n"
                   "  context and handoff commands, listed above)\n\n"
                   "exit codes (every command; scripts may rely on them across upgrades):\n"

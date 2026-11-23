@@ -1931,6 +1931,8 @@ COMMANDS = {"init": cmd_init, "doctor": cmd_doctor, "setup": cmd_setup, "run": c
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] in ("round", "decide"):  # R6 round lane: own parsers (swarm/round.py, swarm/decide.py)
+        return __import__(argv[0]).main(argv[1:])
     if argv and argv[0] in ("worktree", "plan"):  # their own parsers, `--help` included
         if argv[0] == "worktree":
             import refresh

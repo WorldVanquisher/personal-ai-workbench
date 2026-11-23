@@ -1,0 +1,9 @@
+> 不启动真实的 Claude Code 或 Codex worker。交互模式下的文件夹信任提示永远由 owner 回答。
+  识别信任提示：整理各个版本的提示文字（例如 "Quick safety check"、"Yes, I trust this
+  folder"），选项 "No, exit" 不能被代答。
+● 我先读这些文件。
+● Read 3 files (ctrl+o to expand)
+───────────────────────────────────────────────────────── PAI R6-20261122 round ─
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt
