@@ -53,5 +53,28 @@ class Tools(unittest.TestCase):
         self.assertIn("budget $0.00 reached", p.stdout)
 
 
+    def test_experiment_e3_dry_run_separates_the_fake_variants_and_resumes(self):
+        out = os.path.join(self.tmp, "e3")
+        p = run("experiment_e3.py", "--dry-run", "--runs", "2", "--out", out)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        p = run("experiment_e3.py", "--dry-run", "--runs", "2", "--out", out)
+        self.assertNotIn("score", p.stdout, "a rerun with the same plan starts no new run")
+        with open(os.path.join(out, "RESULT.json"), encoding="utf-8") as f:
+            r = json.load(f)
+        self.assertEqual(r["format"], "pai-experiment-e3/1")
+        self.assertEqual(r["variants"]["B"]["mean"], 1.0)
+        a = r["variants"]["A"]["per_check"]
+        self.assertEqual((a["first5-doable"], a["deps-named"], a["decisions-named"]), (0.0, 0.0, 0.0),
+                         "the fake A reply starts with the blocked R9-DOC-002, misses R9-RND-002 and D3")
+
+    def test_e3_task_checks_respect_the_dependency_order(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("e3", os.path.join(TOOLS, "experiment_e3.py"))
+        e3 = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(e3)
+        reply = "**先做的 5 个 ID**：R9-DOC-001、R9-DOC-004、R9-DOC-003、R9-DOC-005、R9-DOC-009\n**依赖其他线的地方**\n- x"
+        first = next(c for c in e3.task_checks(reply) if c["id"] == "first5-doable")
+        self.assertFalse(first["ok"], "R9-DOC-004 needs R9-DOC-009 first")
+
 if __name__ == "__main__":
     unittest.main()

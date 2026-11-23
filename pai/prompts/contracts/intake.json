@@ -1,7 +1,7 @@
 {
  "format": "pai-contract/1",
  "name": "intake",
- "version": 2,
+ "version": 3,
  "desc": "INTAKE.md as intake.md asks for.",
  "source_prompt": "intake",
  "checks": [
@@ -35,9 +35,9 @@
     "owner-only",
     "依赖|depend"
    ],
-   "min": 30,
+   "min": 10,
    "max": 50,
-   "desc": "every item has done criteria, owner-only and dependencies; 30-50 items per lane"
+   "desc": "every item has done criteria, owner-only and dependencies; 10-50 items per lane (PRM-D13=B)"
   },
   {
    "id": "decisions",

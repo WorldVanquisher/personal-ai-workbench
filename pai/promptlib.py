@@ -247,8 +247,13 @@ def render_prompts(prompts, values):
         errors.append("empty value for %s" % ", ".join(empty))
     if errors:
         raise PromptError("not rendered:\n  " + "\n  ".join(errors))
-    text = "\n".join(substitute(p.full(), values) for p in prompts)
+    text = "\n".join(substitute(MAINTAINER_NOTE_RE.sub("", p.full()), values) for p in prompts)
     return text, used
+
+
+# A one-line `<!-- Maintainers ... -->` comment records why a rule is worded as it is (e.g. worker-base's E2
+# basis, R6-PRM-083). It stays in the library file and in installed copies, but is never sent to a worker.
+MAINTAINER_NOTE_RE = re.compile(r"^<!-- Maintainers\b[^\n]*-->[ \t]*\n?", re.M)
 
 
 # ---------------------------------------------------------------- lint
@@ -909,3 +914,39 @@ def main(a):
         sys.stderr.write("pai prompt %s: %s\n" % (a.pcmd, e))
         return 1 if "not rendered" in str(e) or "exists" in str(e) else 2
     return 2
+
+
+# ---------------------------------------------------------------- command registry (R6-PRM-082)
+# pai/cli.py registers `pai prompt` with one line, `commands.use(promptlib.CLI)` (core's registry, R6-COR-049).
+# `pai init` runs the library install through the registry's hooks (R6-COR-081: `commands.hook(event, a)` with the
+# events "init before-write" and "init after-write"). A registry that predates R6-COR-081 has no `hooks` argument;
+# the module then still imports, with the hooks set as an attribute.
+
+INIT_PROMPTS_HELP = "prompt library folder, relative to the vault (default %(default)s; \"\" skips)"
+HOOKS = {
+    "init before-write": lambda a: init_hook(a, "before-write"),
+    "init after-write": lambda a: init_hook(a, "after-write"),
+}
+
+
+def _cli_add(sub, parsers):
+    if "init" in parsers:
+        parsers["init"].add_argument("--prompts", default=DEFAULT_DEST, help=INIT_PROMPTS_HELP)
+    add_parser(sub)
+
+
+def _cli_run(a, load_project):
+    return main(a) if a.cmd == "prompt" else None
+
+
+def _feature():
+    from pai import commands
+    try:
+        return commands.Feature("prompt", _cli_add, _cli_run, hooks=HOOKS)
+    except TypeError:  # registry before R6-COR-081
+        f = commands.Feature("prompt", _cli_add, _cli_run)
+        f.hooks = dict(HOOKS)
+        return f
+
+
+CLI = _feature()

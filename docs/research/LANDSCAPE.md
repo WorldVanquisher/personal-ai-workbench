@@ -73,6 +73,28 @@ Differences from what was written earlier on this page: none contradicted. There
 The fetch agent's model summary of the unread part of the page wrongly said the AGENTS.* names do not appear. The
 verbatim text above is what counts.
 
+### Real runs: Claude Code 2.1.330 (R6-PRM-086)
+
+Reported-by-mastermind: real runs on the mastermind's WSL, 2026-11-22, haiku, with
+`docs/research/tools/verify_claude_local.py`. First run: 4 of 4 cases as expected, $0.0045. Stricter rerun: all file
+tools disabled (the model can only answer from the instructions it was given at launch), each case twice, plus an
+"AGENTS.md only" case: 10 of 10 as expected, each answered in one turn, $0.0096. These four rules are now real-run
+facts, not only documentation quotes:
+
+| # | Rule | Before | Now |
+|---|---|---|---|
+| 1 | A git-ignored `CLAUDE.local.md` in a linked worktree is read | documented (page quote above) | real run |
+| 2 | When a `CLAUDE.md` exists, `AGENTS.md` is not read | documented | real run |
+| 3 | A `CLAUDE.md` holding only `@AGENTS.md` brings AGENTS.md in, so L0 is kept in one file | documented (`@` imports) | real run |
+| 4 | With no `CLAUDE.md` and only `AGENTS.md`, Claude Code reads `AGENTS.md` | documented ("only when you have no CLAUDE.md") | **real run; new for PAI** |
+
+What rule 4 changes: FLH links `CLAUDE.md` to `AGENTS.md` with a symbolic link so that Claude reads it. That is not
+needed. Either a one-line `CLAUDE.md` with `@AGENTS.md` (docs lane DOC-061) or no `CLAUDE.md` at all works, and both
+avoid symbolic links, which break on Windows checkouts. Keep the `@AGENTS.md` form when a repository also needs
+Claude-only rules in `CLAUDE.md`.
+
+Not verified on a real run: Codex. Its rules above are documentation quotes only.
+
 ### What follows for PAI (L0/L1/L2, COORDINATOR §7)
 
 - **L2 (PAI-generated, per lane).** Claude Code has a documented un-committed file for this:
@@ -80,11 +102,11 @@ verbatim text above is what counts.
   equivalent, so for Codex lanes L2 must stay in AGENTS.md's managed section (today's `pai-agents/1`)
   or in the rendered prompt. That keeps a dirty-tree risk (融合方案 §4.7).
 - **Do not rely on AGENTS.md for Claude Code lanes when CLAUDE.md exists.** Claude Code skips
-  AGENTS.md in that case unless a setting is changed. A CLAUDE.md with `@AGENTS.md` makes both agents
-  read L0.
+  AGENTS.md in that case unless a per-user setting is changed (real run, rule 2). A CLAUDE.md with `@AGENTS.md`
+  makes both agents read L0 (real run, rule 3); so does having no CLAUDE.md at all (real run, rule 4).
 - **Codex's 32 KiB cap** applies to the whole L0 + nested chain. Long managed sections count against it.
-- Proposal for core (agentsmd.py): offer `--file CLAUDE.local.md` for Claude lanes. That is not
-  verified on a real run; the owner decides (PRM-D9 in the prompts-lane handoff).
+- Proposal for core (agentsmd.py): offer `--file CLAUDE.local.md` for Claude lanes. Verified on a real run
+  (§2, "Real runs"); the owner chose it (PRM-D9 = A).
 
 ## 3. How PAI differs (定位 v2 §0, checked against §1)
 

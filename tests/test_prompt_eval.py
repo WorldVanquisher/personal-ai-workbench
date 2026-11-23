@@ -202,10 +202,21 @@ class BlockE(Base):
     def test_intake_items_fields_and_lane_size(self):
         fm = "---\ntype: pai-intake\nround: R7-20261201\nid_prefix: R7\n---\n"
         self.assertTrue(all(x["ok"] for x in self.checks(fm + self.plan(30), "intake").values()))
-        c = self.checks(self.plan(12), "intake")
-        self.assertIn("DOC has 12", c["items"]["detail"])
+        c = self.checks(self.plan(9), "intake")
+        self.assertIn("DOC has 9", c["items"]["detail"])
         c = self.checks(self.plan(30, missing=True), "intake")
         self.assertIn("R7-DOC-002: owner-only", c["items"]["detail"])
+
+    def test_intake_lane_size_is_10_to_50_after_prm_d13(self):
+        fm = "---\ntype: pai-intake\nround: R7-20261201\nid_prefix: R7\n---\n"
+        for n, ok in ((9, False), (10, True), (12, True), (50, True), (51, False)):
+            self.assertEqual(self.checks(fm + self.plan(n), "intake")["items"]["ok"], ok, n)
+        from pai import promptlib
+        for name in ("intake.md", "COORDINATOR.md"):
+            with open(os.path.join(promptlib.PACKAGED, name), encoding="utf-8") as f:
+                text = f.read()
+            self.assertIn("10–50", text, name)
+            self.assertNotIn("30–50", text, name)
 
     def test_intake_ids_must_use_the_round_prefix(self):
         plan = "---\ntype: pai-intake\nround: R7-20261201\nid_prefix: R7\n---\n" + self.plan(30)
@@ -378,6 +389,81 @@ class EvalCommand(Base):
                 rc = cli.main(["prompt", "eval", os.path.join(self.tmp, "nope.md"), "--contract", "handoff-v2"])
         self.assertEqual(rc, 2)
 
+
+class FirstIdsV3(unittest.TestCase):
+    """R6-PRM-084: first-reply v3. v2 counted any five IDs anywhere, so E2's free-form variant C passed first-ids
+    (reported-by-mastermind, 2026-11-22 WSL E2 run: C first_ids 1.0)."""
+
+    HEAD = "**读过的文件**\n- README.md\n**已有答案的决策**\n- D1=A\n"
+    TAIL = "\n**owner-only 或被阻塞的 ID**\n- R9-DOC-006：发布\n**依赖其他线的地方**\n- R9-COR-002\n"
+    FIVE = "R9-DOC-001、R9-DOC-002、R9-DOC-003、R9-DOC-004、R9-DOC-005"
+
+    def first_ids(self, text):
+        from pai import prompteval
+        c = prompteval.load_contract("first-reply")
+        return next((x["ok"], x["detail"]) for x in prompteval.run_checks(text, c) if x["id"] == "first-ids")
+
+    def test_five_full_ids_on_the_heading_line_pass(self):
+        ok, detail = self.first_ids(self.HEAD + "**先做的 5 个 ID**：" + self.FIVE + self.TAIL)
+        self.assertTrue(ok, detail)
+
+    def test_numbered_list_in_order_passes_and_out_of_order_fails(self):
+        items = "\n".join("%d. R9-DOC-00%d" % (i, i) for i in range(1, 6))
+        self.assertTrue(self.first_ids(self.HEAD + "## 先做的 5 个 ID\n" + items + self.TAIL)[0])
+        swapped = items.replace("1. R9-DOC-001", "2. R9-DOC-001", 1)
+        ok, detail = self.first_ids(self.HEAD + "## 先做的 5 个 ID\n" + swapped + self.TAIL)
+        self.assertFalse(ok)
+        self.assertIn("out of order", detail)
+
+    def test_shorthand_ids_fail(self):
+        ok, detail = self.first_ids(self.HEAD + "**先做的 5 个 ID**：R9-DOC-001、002、003、004、005" + self.TAIL)
+        self.assertFalse(ok)
+        self.assertIn("shorthand", detail)
+
+    def test_regression_free_form_reply_with_ids_in_prose_fails(self):
+        prose = "我读了 README.md 和 ITEMS.md，里面有 %s 和 R9-DOC-006，准备先做第一条。" % self.FIVE
+        ok, detail = self.first_ids(prose)
+        self.assertFalse(ok)
+        self.assertIn("no /", detail)
+
+    def test_ids_from_the_next_part_do_not_count(self):
+        ok, detail = self.first_ids(self.HEAD + "**先做的 5 个 ID**：R9-DOC-001、R9-DOC-002" + self.TAIL +
+                                    "- R9-DOC-003 R9-DOC-004 R9-DOC-005")
+        self.assertFalse(ok, detail)
+
+    def test_repeated_id_fails(self):
+        ok, _ = self.first_ids(self.HEAD + "**先做的 5 个 ID**：R9-DOC-001、R9-DOC-001、R9-DOC-002、R9-DOC-003、"
+                               "R9-DOC-004" + self.TAIL)
+        self.assertFalse(ok)
+
+    def test_replay_keeps_old_scores_beside_new_ones(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("replay_e2", os.path.join(ROOT, "docs", "research", "tools",
+                                                                                 "replay_e2.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        from pai import prompteval
+        runs = [{"id": "A-00", "variant": "A", "score": 1.0, "checks": {"first-ids": True},
+                 "reply": self.HEAD + "**先做的 5 个 ID**：" + self.FIVE + self.TAIL},
+                {"id": "C-00", "variant": "C", "score": 0.5, "checks": {"first-ids": True},
+                 "reply": "我读了 README.md，先做 " + self.FIVE}]
+        res = mod.replay(runs, prompteval.load_contract("first-reply"))
+        self.assertEqual(res["format"], "pai-replay-e2/1")
+        self.assertEqual(res["variants"]["A"]["new"]["first_ids"], 1.0)
+        self.assertEqual(res["variants"]["C"]["old"]["first_ids"], 1.0)
+        self.assertEqual(res["variants"]["C"]["new"]["first_ids"], 0.0)
+
+
+class OutNames(unittest.TestCase):
+    def test_regression_same_checkpoint_name_in_two_lanes_gets_two_files(self):
+        from pai import prompteval
+        self.assertEqual(prompteval.out_names(["/v/R6/core/cp-J/HANDOFF.md", "/v/R6/docs/cp-J/HANDOFF.md"], "handoff-v2"),
+                         ["core.cp-J.HANDOFF.handoff-v2.json", "docs.cp-J.HANDOFF.handoff-v2.json"])
+
+    def test_unique_names_keep_the_short_form(self):
+        from pai import prompteval
+        self.assertEqual(prompteval.out_names(["/v/a/cp-A/HANDOFF.md", "/v/a/cp-B/HANDOFF.md"], "x"),
+                         ["cp-A.HANDOFF.x.json", "cp-B.HANDOFF.x.json"])
 
 if __name__ == "__main__":
     unittest.main()

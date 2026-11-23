@@ -1,4 +1,4 @@
-<!-- pai-prompts/2 begin name=intake version=2 kind=intake vars=PROJECT,RUN_ID,ID_PREFIX,VAULT -->
+<!-- pai-prompts/2 begin name=intake version=3 kind=intake vars=PROJECT,RUN_ID,ID_PREFIX,VAULT -->
 ## 需求拆分（intake）：{{PROJECT}} {{RUN_ID}}
 
 你是 mastermind。输入是 owner 写的一篇需求笔记（{{VAULT}} 里 front matter 为 type: pai-request、status: inbox 的笔记）。你只读它，不改它。
@@ -12,7 +12,7 @@
 ### 拆分规则
 
 - 按文件归属拆 lane：两条 lane 不改同一个文件；"单行追加"文件写明各自追加什么。
-- 每条 lane 30–50 个条目，分成约 10 条一个的 Block，Block 最后一条是"封存 cp-<Block 字母>"。
+- 每条 lane 10–50 个条目（owner 决策 PRM-D13=B：小需求不凑数），分成约 10 条一个的 Block，Block 最后一条是"封存 cp-<Block 字母>"。
 - 条目 ID 写全称：{{ID_PREFIX}}-<线缩写>-<三位数>，例如 {{ID_PREFIX}}-DOC-001。轮次以本文写的 {{RUN_ID}} 为准，不看工作目录名或文件路径。
 
 ### 条目格式

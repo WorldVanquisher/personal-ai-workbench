@@ -1,7 +1,7 @@
 {
  "format": "pai-contract/1",
  "name": "first-reply",
- "version": 2,
+ "version": 3,
  "desc": "The first reply worker-base.md §0.3 asks for.",
  "source_prompt": "worker-base",
  "checks": [
@@ -26,10 +26,11 @@
   },
   {
    "id": "first-ids",
-   "type": "ids",
-   "pattern": "\\bR\\d+-[A-Z]{2,5}-\\d{3}\\b",
+   "type": "ordered_ids",
+   "section": "先做|first",
+   "pattern": "\\b[A-Z][A-Z0-9]*-[A-Z]{2,5}-\\d{3}\\b",
    "min": 5,
-   "desc": "at least 5 item IDs"
+   "desc": "under the 'first 5 IDs' heading: 5 distinct IDs in full, in the order written (v3, R6-PRM-084: v2 counted any 5 IDs anywhere, so free-form replies passed)"
   },
   {
    "id": "blocked",
@@ -59,7 +60,7 @@
   {
    "id": "names_ids",
    "maps_to": "first-ids",
-   "instructions": "The REPLY names at least five specific work item IDs (like R6-ABC-001) that its author will do first."
+   "instructions": "The REPLY has a part listing exactly the first five work item IDs its author will do, each written in full (like R6-ABC-001, never shortened to 002), in the order they will be done."
   }
  ]
 }

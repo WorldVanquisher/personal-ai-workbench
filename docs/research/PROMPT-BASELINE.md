@@ -179,3 +179,22 @@ metrics instead of text scores.
 ## 7. Usage (JEV)
 
 Baseline and calibration (Block C, purpose `eval:*` in `jev-usage.jsonl`): 378 requests, 329826 input + 13494 output tokens, largest request 2665 input tokens (JEV usage field, real run). By contract: first-reply 3, handoff-v1 63, handoff-v2 312.
+
+## 8. First reply: experiment E2 (R6-PRM-083) and contract first-reply v3 (R6-PRM-084)
+
+The only first-reply baseline before this was one real reply (6/7, real run, n = 1; §2). E2 is the first
+measurement with a control. Reported-by-mastermind: real run on the mastermind's WSL, 2026-11-22, haiku, 8 runs
+per variant, $0.048 in total; tool `docs/research/tools/experiment_e2.py`.
+
+| Variant | n | first-reply v2 mean pass rate | SD | first_ids |
+|---|---|---|---|---|
+| A: five headings (worker-base §0.3) | 8 | 1.00 | 0 | 1.0 |
+| B: A plus a filled example | 8 | 1.00 | 0 | 1.0 |
+| C: free form | 8 | 0.48 | 0.07 | 1.0 |
+
+- worker-base keeps A (maintainer comment in `pai/prompts/worker-base.md`; EXPERIMENTS.md E2).
+- first_ids at 1.0 for C showed that the v2 check was too loose. Contract first-reply v3 checks only the
+  "first 5 IDs" part of the reply: 5 distinct IDs in full, no shortened lists, numbered items in order.
+- These numbers are scored with v2. Under v3 the C share is expected to fall; the replay of the 24 real replies
+  (`docs/research/tools/replay_e2.py`, no model, JEV optional) is to be run where `runs.jsonl` is
+  (EXPERIMENTS.md E2, "Limits").

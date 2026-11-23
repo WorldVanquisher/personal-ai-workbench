@@ -23,7 +23,7 @@ Packaged in `pai/prompts/`; installed by default into `<vault>/PAI/prompts/`.
 | `decision-sheet.md` | decision-sheet | mastermind, worker | one decision: question, options, trade-offs, recommendation, default, blocked items |
 | `research-report.md` | research | sub-agent | a one-off research report: conclusions, evidence (file:line, link, arXiv id), inferences kept apart |
 | `next-pr.md` | next-pr | worker | NEXT-PR.md: branch, `git add` per commit, messages, PR body, checks before merge |
-| `intake.md` | intake | mastermind | split one request note (`type: pai-request`) into lanes of 30–50 items, each with done criteria, owner-only and dependencies, plus a decision sheet → INTAKE.md |
+| `intake.md` | intake | mastermind | split one request note (`type: pai-request`) into lanes of 10–50 items (PRM-D13 = B), each with done criteria, owner-only and dependencies, plus a decision sheet → INTAKE.md |
 | `obsidian/*.md` | — | owner (Obsidian) | templates for the core Templates plugin: `request.md`, `decision.md`, `handoff-view.md` (§6) |
 | `contracts/*.json` | — | `pai prompt eval` | machine-checkable output contracts (section 4) |
 
@@ -198,7 +198,7 @@ a prompt asks for must look like: deterministic checks, plus optional JEV questi
 | `next-pr` | next-pr.md | Branch, Commits with explicit paths (no `git add -A`), PR body, Checks before merge, Not included |
 | `decision-sheet` | decision-sheet.md | every `- [ ] **D…**` block has question, options, trade-offs, recommendation, default, blocked items |
 | `research-report` | research-report.md | conclusions, evidence, inferences; at least one link, arXiv id or file:line |
-| `intake` | intake.md | JEV part; Lanes table; every item has done criteria, owner-only and dependencies; 30–50 items per lane; complete decisions; a not-read part |
+| `intake` | intake.md | JEV part; Lanes table; every item has done criteria, owner-only and dependencies; 10–50 items per lane (PRM-D13 = B); complete decisions; a not-read part |
 | `request` | request template | front matter `type: pai-request`, `status: inbox`, body text; JEV intake questions `actionable`, `tier` (choice), `multi_lane` |
 | `restart-reply` | restart.md | names RESTART.md and HANDOFF.md, the Totals, ≥ 3 IDs |
 
@@ -341,8 +341,12 @@ size counts against `project_doc_max_bytes` (32 KiB by default).
 
 Before R7 adopts this (owner: "先核实再验证"):
 1. The citations are verified (above).
-2. The mastermind runs `docs/research/tools/verify_claude_local.sh` (R6-PRM-064) once with a real `claude -p`.
-3. Core changes `pai worktree init` to write `CLAUDE.local.md` for Claude lanes. That code is not in this lane.
+2. Done 2026-11-22 (reported-by-mastermind): `docs/research/tools/verify_claude_local.py` with a real `claude -p`
+   (Claude Code 2.1.330, haiku): 4/4, then a stricter rerun with file tools disabled 10/10. Four rules are real-run
+   facts now (LANDSCAPE §2, "Real runs"), including one new one: with no `CLAUDE.md`, Claude Code reads `AGENTS.md`.
+   So a repository needs either a one-line `CLAUDE.md` with `@AGENTS.md` or no `CLAUDE.md`; a symbolic link is not
+   needed.
+3. Core changes `pai worktree init` to write `CLAUDE.local.md` for Claude lanes (core lane, `--target claude-local`).
 
 ## 8. Behaviour metrics, eval notes and round prompts (Blocks G–H)
 
@@ -378,4 +382,10 @@ It refuses (exit 1) to replace a file that has no PAI managed marker.
 - `experiment_e2.py [--dry-run] --out DIR [--runs 8] [--budget 5]`: experiment E2 (first-reply checklist, 3 variants),
   scored by the `first-reply` contract. It resumes from `runs.jsonl` and starts no run after the budget is reached.
 
-Both pass with their fake agents (tests/test_prompt_tools.py). The real runs belong to the mastermind (PRM-D8, PRM-D9).
+- `experiment_e3.py [--dry-run] --out DIR [--runs 16] [--budget 1]`: experiment E3 (a 14-item first reply, variants A
+  and B, contract checks plus four task checks; EXPERIMENTS.md E3).
+- `replay_e2.py RUNS.jsonl [--jev]`: rescores recorded E2 replies with the current first-reply contract (no model).
+
+All pass with their fake agents (tests/test_prompt_tools.py, tests/test_prompt_eval.py). The real runs belong to the
+mastermind. Done so far (reported-by-mastermind, 2026-11-22): verify_claude_local 4/4 and 10/10; E2 A 1.00, B 1.00,
+C 0.48.

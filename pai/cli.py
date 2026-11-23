@@ -5,13 +5,13 @@ import os
 import sys
 
 from pai import __version__, config, context, doctor, handoff, initcfg, install, privacy, workqueue
-from pai import commands, vault  # registry: one `commands.use` line per feature (R6-COR-049)
+from pai import commands, promptlib, vault  # registry: one `commands.use` line per feature (R6-COR-049)
 
 commands.use(handoff.CLI)  # pai-handoff/2: handoff new v2 flags, seal, approve, reject (R6-COR-019..040)
 commands.use(vault.CLI)  # pai vault lint|wait|schema (R6-COR-039..044)
 commands.use(commands.CONTEXT_WORKTREE)  # pai context --worktree PATH (R6-COR-061)
 commands.use(commands.SECRETS_WHERE)  # pai secrets where (R6-COR-069)
-from pai import promptlib  # R6-PRM-011: the prompt library (pai prompt ...; pai init installs it)
+commands.use(promptlib.CLI)  # pai prompt ...; pai init installs the library (R6-PRM-011, R6-PRM-082)
 
 INIT_EPILOG = """examples:
   preview (writes nothing):
@@ -49,7 +49,6 @@ def _parser():
     i.add_argument("--proposal-file", action="append", default=None, help="memory file holding proposals (default knowledge-proposals.md)")
     i.add_argument("--budget", type=int, default=24000, help="default context budget in characters (default 24000)")
     i.add_argument("--write", action="store_true", help="write the previewed configuration (refuses to overwrite)")
-    i.add_argument("--prompts", default=promptlib.DEFAULT_DEST, help="prompt library folder, relative to the vault (default %(default)s; \"\" skips)")
 
     d = sub.add_parser("doctor", help="check Python, bundle integrity, configuration and roots (read-only)")
     d.add_argument("project", nargs="?", help="check only this project")
@@ -97,7 +96,6 @@ def _parser():
                    "(removed by default, so a handoff can be shared)")
     commands.add_all(sub, {"init": i, "handoff": hs, "handoff new": n, "context": c})
     workqueue.add_parser(sub)
-    promptlib.add_parser(sub)
     return p
 
 
@@ -119,13 +117,11 @@ def _init(a):
     for s in project.sources:
         print(f"#   {s.status:8} {s.kind:12} {s.label}{'  (' + s.reason + ')' if s.reason else ''}")
     print("".join(f"# WARNING: {w}\n" for w in handoff.layout_warnings(project)), end="")  # R6-COR-016
-    promptlib.init_hook(a, "before-write")
     commands.hook("init before-write", a)  # registered features (R6-COR-081)
     if not a.write:
         print(f"\n# Re-run with --write to create {path}. Existing files are never overwritten.")
         return 0
     initcfg.write(path, text)
-    promptlib.init_hook(a, "after-write")
     commands.hook("init after-write", a)
     print(f"\n# Wrote {path} ({initcfg.permission_note()}). Next: pai doctor {a.project}")
     return 0
@@ -142,8 +138,6 @@ def main(argv=None):
             return workqueue.main(a)
         if (code := commands.dispatch(a, lambda: config.load(a.project, a.config))) is not None:
             return code
-        if a.cmd == "prompt":
-            return promptlib.main(a)
         if a.cmd == "doctor":
             r = doctor.run(a.config, a.project, a.agents)
             print("\n".join(r.lines))

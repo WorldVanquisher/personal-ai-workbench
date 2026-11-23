@@ -1,8 +1,9 @@
-# Prompt experiments: design only (R6-PRM-037)
+# Prompt experiments (R6-PRM-037, R6-PRM-083, R6-PRM-085)
 
-Round R6-20261122, prompts lane. Nothing here has been run. Running any of it needs the owner's
-budget decision (定位 v2 §5 D7: up to $5 from the Anthropic credit; JEV is unmetered but logged).
-Estimates are labelled *(estimate)*. Measured inputs are labelled.
+Round R6-20261122, prompts lane. E2 has been run by the mastermind (results below, reported-by-mastermind).
+E1, E3 and E4 are designs. Running any of them needs the owner's budget decision (定位 v2 §5 D7: up to $5 from
+the Anthropic credit; JEV is unmetered but logged). Estimates are labelled *(estimate)*. Measured inputs are
+labelled.
 
 ## Common setup
 
@@ -39,14 +40,81 @@ Estimates are labelled *(estimate)*. Measured inputs are labelled.
   sentence. Literature: FollowBench (2310.20410), where constraint-following falls as constraints
   stack.
 
-## E2: the first-reply checklist
+## E2: the first-reply checklist (run 2026-11-22)
 
 - A: five headings (current). B: five headings plus a filled example. C: free form ("say what you
   read and what you will do first").
 - **Metric**: the `first-reply` pass rate, especially `first-ids` (full IDs) and `paths`. The
   baseline from this round is 6/7 (real run, n = 1).
+- Tool: `docs/research/tools/experiment_e2.py` (6-item task, haiku, `--allowedTools Read`).
 
-## E3: checkpoint cadence
+### Result (reported-by-mastermind: real run on the mastermind's WSL, 2026-11-22, haiku, $0.048 in total)
+
+| Variant | n | Mean contract pass rate (first-reply v2) | SD | first_ids |
+|---|---|---|---|---|
+| A: five headings (worker-base §0.3) | 8 | 1.00 | 0 | 1.0 |
+| B: A plus a filled example | 8 | 1.00 | 0 | 1.0 |
+| C: free form | 8 | 0.48 | 0.07 | 1.0 |
+
+- **Decision**: worker-base §0.3 keeps A. The checklist lifts the pass rate from 0.48 to 1.00; the example in B
+  adds nothing on this task, and A is shorter. The basis is recorded in a maintainer comment in
+  `pai/prompts/worker-base.md` that is not rendered (R6-PRM-083).
+- **Limits** (from the mastermind's review):
+  - The task was too easy for haiku to separate A and B. E3 below is the harder task.
+  - first_ids was 1.0 even for C. The v2 check counted any five IDs anywhere in the reply, so a free-form reply
+    that repeated the item list passed. first-reply v3 (R6-PRM-084) checks the "first 5 IDs" part only: 5
+    distinct IDs, written in full, numbered items in order. `docs/research/tools/replay_e2.py` rescores
+    recorded replies with the current contract (no model; JEV optional).
+  - The real `runs.jsonl` (24 replies) is in the mastermind's scratchpad, not on the prompts lane's machine. The
+    replay of the real replies is still to run: `python3 -B docs/research/tools/replay_e2.py out/real/e2/runs.jsonl
+    --jev --out out/real/e2/REPLAY.json`. On the dry-run replies (synthetic, n = 9) v3 gives first_ids A 0.0
+    (the fake A shortens IDs), B 1.0, C 0.0, and JEV's `names_ids` agrees with the check on 9 of 9 (JEV).
+
+## E3: a harder first reply, to separate A from B (design and dry-run, R6-PRM-085)
+
+- **Why**: E2's 6 items left A and B at 1.00 each. E3 makes the first reply depend on reading carefully.
+- **Task** (`docs/research/tools/experiment_e3.py`, files written into a fresh scratch repo per run):
+  - 14 items, R9-DOC-001 to R9-DOC-014, in 3 Blocks;
+  - R9-DOC-002 is blocked: it needs DEMO_KEY, and STATUS.md says the key is not there;
+  - R9-DOC-013 and R9-DOC-014 are owner-only (publish, tag);
+  - R9-DOC-004 depends on R9-DOC-009 in the same lane;
+  - 3 cross-lane dependencies: R9-DOC-006 on R9-COR-003 (already done, per NOTES-FOR-docs.md), R9-DOC-007 on
+    R9-COR-005 (not done), R9-DOC-011 on R9-RND-002;
+  - 3 decisions in two files: D1 answered A and D2 open (docs/PLAN.md), D3 answered B (DECISIONS.md).
+- **Variants**: A and B as in E2. C is left out: E2 already measured it, and it saves a third of the budget.
+- **Score per run**: mean of the first-reply v3 checks and four task checks:
+  - `first5-doable`: the first five IDs are distinct, none of R9-DOC-002, -007, -011, -013, -014, and R9-DOC-009
+    comes before R9-DOC-004 when R9-DOC-004 is among them;
+  - `blocked-named`: R9-DOC-002, -013 and -014 are in the owner-only/blocked part;
+  - `deps-named`: R9-COR-005 and R9-RND-002 are in the dependencies part;
+  - `decisions-named`: D1, D2 and D3 are in the decisions part.
+- **Runs**: 16 per variant, order shuffled with a fixed seed. Budget cap $2 (mastermind, R6-PRM-092). Cost *(estimate)*: E2 cost about
+  $0.002 per run (reported-by-mastermind: $0.048 / 24); E3 reads 6 files instead of 3, so about $0.004–0.008
+  per run, $0.13–0.26 for 32 runs.
+- **Reading the result**: if A and B differ by less than 0.05 again, keep A (shorter). If B is better by 0.10 or
+  more, propose B for worker-base through the decision sheet. Look at the per-check shares: they show which part
+  of the reply the example helps with.
+- **Dry-run** (fake agent, synthetic): 3 runs per variant, the fake A reply starts with the blocked R9-DOC-002 and
+  misses R9-RND-002 and D3. Result A 0.727, B 1.000; a rerun resumes and starts no new run. Tests:
+  `tests/test_prompt_tools.py` (`test_experiment_e3_dry_run_separates_the_fake_variants_and_resumes`,
+  `test_e3_task_checks_respect_the_dependency_order`).
+- **Full-size dry-run** (R6-PRM-092, fake agent, synthetic, 2026-11-23): `--runs 16 --budget 2` planned and finished 32 runs
+  (A 0.727, B 1.000, SD 0); the same command again started no run; `complete: true`.
+- **For the mastermind** (real run, from the repository root of the merged integ/0.5.0, with `claude` logged in or
+  `ANTHROPIC_API_KEY` set in that shell):
+
+      python3 -B docs/research/tools/experiment_e3.py --out out/real/e3 --runs 16 --budget 2
+
+  - Model haiku (the default), tools limited to Read, `--max-turns 10`, a fresh scratch repo per run.
+  - Budget: no new run starts once $2.00 is recorded. One run can still finish above the cap by its own cost
+    (about $0.01 *(estimate)*). Expected total $0.13–0.26 *(estimate)*.
+  - Resumable: rerun the same command after an interruption; finished runs in `runs.jsonl` are skipped.
+  - Output: `out/real/e3/RESULT.json` (pai-experiment-e3/1: per variant n, mean, SD, per-check shares, spent) and
+    `runs.jsonl` (reply text kept, so the contract can be replayed later without a model).
+  - Then: `python3 -B docs/research/tools/replay_e2.py out/real/e2/runs.jsonl --jev --out out/real/e2/REPLAY.json`
+    (R6-PRM-084, the E2 replay; JEV only).
+
+## E4: checkpoint cadence (was E3 before R6-PRM-085)
 
 - A: a checkpoint at each Block end (current). B: every 3 items. C: only at final.
 - **Metric**: the `handoff-v2` pass rate of the last checkpoint, and the share of items whose state
@@ -61,4 +129,5 @@ Estimates are labelled *(estimate)*. Measured inputs are labelled.
 
 ## Owner decision
 
-PRM-D8 in the cp-D handoff: which experiment first, the pilot size, and the budget.
+PRM-D8 in the cp-D handoff: which experiment first, the pilot size, and the budget. The owner chose E2 (D8 = A);
+it ran on 2026-11-22 (above). E3 is ready to run within the same $5 cap.

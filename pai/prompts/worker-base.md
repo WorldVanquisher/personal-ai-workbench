@@ -1,3 +1,4 @@
+<!-- Maintainers (not rendered): §0.3 keeps wording A, the five headings. E2 (PRM-D8, haiku, 8 runs per variant, reported-by-mastermind 2026-11-22 WSL, $0.048): A 1.00, B (A plus a filled example) 1.00, C (free form) 0.48 (SD 0.07), first-reply contract v2. The example in B added nothing, so the shorter A stays. docs/research/EXPERIMENTS.md E2. -->
 <!-- pai-prompts/2 begin name=worker-base version=2 kind=worker vars=PROJECT,REPO_URL,RUN_ID,BASE_SHA,LANE,WORKTREE,BRANCH,WORK_DIR,VAULT -->
 你是 {{PROJECT}}（{{REPO_URL}}）{{RUN_ID}} 轮的 worker，线名 {{LANE}}。你这条线的条目、文件归属和依赖写在本文后面的 lane 部分。
 基线：{{BASE_SHA}}，由 owner 确认，不要自己猜。

@@ -476,3 +476,50 @@ class PaiInitHook(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MaintainerNote(unittest.TestCase):
+    """R6-PRM-083: worker-base records the E2 basis for wording A in a maintainer comment that is not rendered."""
+
+    def test_worker_base_note_is_in_the_file_but_not_rendered(self):
+        with open(os.path.join(LIB, "worker-base.md"), encoding="utf-8") as f:
+            raw = f.read()
+        self.assertIn("<!-- Maintainers", raw)
+        self.assertIn("reported-by-mastermind", raw)
+        values = dict(v.split("=", 1) for v in WORKER_VARS)
+        values.update(RUN_ID="R9", LANE="docs")
+        text, _ = promptlib.render([promptlib.read(os.path.join(LIB, "worker-base.md"))], values)
+        self.assertNotIn("Maintainers", text)
+        self.assertIn("第一条回复必须有这五个小标题", text)
+
+
+class Registry(unittest.TestCase):
+    """R6-PRM-082: `pai prompt` and the `pai init` hooks go through core's command registry (R6-COR-049/081),
+    so pai/cli.py needs one line for the prompts lane."""
+
+    def test_cli_py_names_promptlib_only_in_its_registry_line(self):
+        with open(os.path.join(ROOT, "pai", "cli.py"), encoding="utf-8") as f:
+            lines = [ln for ln in f if "promptlib" in ln and not ln.startswith("from pai import")]
+        self.assertEqual([ln.split("#")[0].strip() for ln in lines], ["commands.use(promptlib.CLI)"])
+
+    def test_feature_declares_both_init_hooks(self):
+        self.assertEqual(promptlib.CLI.name, "prompt")
+        self.assertEqual(sorted(promptlib.CLI.hooks), ["init after-write", "init before-write"])
+
+    def test_run_ignores_other_commands(self):
+        import argparse
+        self.assertIsNone(promptlib.CLI.run(argparse.Namespace(cmd="doctor"), None))
+
+    def test_help_lists_every_command_once_and_keeps_the_prompt_texts(self):
+        env = dict(os.environ, COLUMNS="100")
+        pai_m = [sys.executable, "-B", "-m", "pai"]
+        top = subprocess.run(pai_m + ["--help"], capture_output=True, text=True, env=env, cwd=ROOT).stdout
+        for cmd in ("init", "doctor", "install", "check", "context", "handoff", "vault", "secrets", "queue", "prompt"):
+            self.assertEqual(len([ln for ln in top.splitlines() if ln.startswith("    " + cmd + " ")]), 1, cmd)
+        self.assertIn("the prompt library: render, lint, diff, init, eval", top)
+        init = subprocess.run(pai_m + ["init", "--help"], capture_output=True, text=True, env=env, cwd=ROOT).stdout
+        self.assertIn("--prompts PROMPTS", init)
+        self.assertIn("(default PAI/prompts;", init.replace("\n", " ").replace("  ", " "))
+        p = subprocess.run(pai_m + ["prompt", "--help"], capture_output=True, text=True, env=env, cwd=ROOT)
+        self.assertEqual(p.returncode, 0)
+        self.assertIn("{list,render,lint,diff,init,templates,eval,optimize}", p.stdout)

@@ -23,8 +23,9 @@ What the trial found:
    decision-sheet.md as "not read". v2 inlines the decision format. The JEV clarity scores showed the same pattern for
    "格式见 X" rules (JEV-QUESTIONS.md §1.4).
 3. **The 30-item minimum produces padding.** Agents on a small request made every lane exactly 30 and said "several
-   entries are small". The 30–50 rule came from the mastermind, so it stays; the decision sheet lists it as a question
-   for R7.
+   entries are small". The 30–50 rule came from the mastermind, so it stayed for this trial and went to the decision
+   sheet. The owner chose PRM-D13 = B on 2026-11-22: 10–50 per lane (intake.md v3, COORDINATOR v4, contract intake
+   v3; R6-PRM-087).
 4. Lane counts follow request size: 7 lanes for the big request, 3 for the medium one. Owner-only items were marked
    (buying storage, publishing; choosing websites, licensing). Spend, delete, publish and security decisions defaulted
    to "do not do", as the prompt says.
