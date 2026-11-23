@@ -809,6 +809,11 @@ def _sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def _slashed(rel):
+    """A relative path as SEAL.json records it: with / on every platform, as the handoff's Evidence line names it."""
+    return rel.replace(os.sep, "/")
+
+
 def _queue_item_for(doc, checkpoint):
     """The queue checkpoint a checkpoint folder stands for: cp-A the first, cp-B the second, ...,
     cp-final the last. None when it cannot be told (then --item is needed)."""
@@ -868,7 +873,7 @@ def seal(project, handoff_path, queue=None, item=None, next_pr=None, now=None, j
             probs.append(f"Evidence {path}: its sha256 is {_sha(data)}, the handoff says {want}")
             continue
         evidence.append((rel, data))
-    res["evidence"] = [r for r, _ in evidence]
+    res["evidence"] = [_slashed(r) for r, _ in evidence]
     item_ids = list(workqueue.parse_handoff(dict(sections(text)).get("Items", ""))[0])
     if next_pr is None:
         cand = os.path.join(os.path.dirname(os.path.abspath(handoff_path)), "NEXT-PR.md")
@@ -943,7 +948,7 @@ def seal(project, handoff_path, queue=None, item=None, next_pr=None, now=None, j
                   "source": os.path.abspath(handoff_path), "queue": os.path.abspath(queue) if queue else None,
                   "queue_item": item, "sealed_at": sealed_now.strftime("%Y-%m-%dT%H:%M:%SZ"),
                   "generator": f"pai {__version__}", "items": len(item_ids), "notes": res["notes"],
-                  "evidence": {rel: _sha(data) for rel, data in evidence},
+                  "evidence": {_slashed(rel): _sha(data) for rel, data in evidence},
                   "checks": ["pai-handoff/2 form", "privacy filter and AI attribution"] +
                             (["NEXT-PR.md sections and item ids"] if pr_raw else []) +
                             (["items and totals against the queue log"] if queue else [])}
