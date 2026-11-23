@@ -41,7 +41,7 @@ include-package-data = false
 "pai._workbench" = "swarm"
 
 [tool.setuptools.package-data]
-pai = ["templates/handoff.md"]
+pai = ["templates/handoff.md", "prompts/*.md", "prompts/contracts/*.json", "prompts/obsidian/*.md"]
 "pai._workbench" = ["WORKBENCH.md", "RUN-STATE.md", "BACKENDS.md", "CONTINUATION.md"]
 "pai._workbench.mdserver" = ["README.md", "static/*.html", "static/*.css", "static/*.js"]
 
