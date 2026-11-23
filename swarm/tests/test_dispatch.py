@@ -27,7 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # before anything is typed) defaults to 3 s. Only the tests whose trust prompt appears after the
 # first frame exercise it; they set the production value with production_settle(). Every other
 # test here uses a short test-local window, so it does not wait 3 s per dispatch for nothing.
-TEST_SETTLE = "0.5"
+TEST_SETTLE = helpers.FAKE_SETTLE
 PRODUCTION_SETTLE = "3"
 
 

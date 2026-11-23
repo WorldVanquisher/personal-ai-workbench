@@ -1,0 +1,91 @@
+{
+ "format": "pai-contract/1",
+ "name": "handoff-v1",
+ "version": 2,
+ "desc": "A pai handoff new draft (SESSION_START.md, pai 0.2-0.4), for the pre-R6 baseline.",
+ "source_prompt": "SESSION_START",
+ "checks": [
+  {
+   "id": "frontmatter",
+   "type": "frontmatter",
+   "keys": [
+    "status",
+    "approved",
+    "task",
+    "project"
+   ]
+  },
+  {
+   "id": "summary",
+   "type": "section",
+   "pattern": "^#+\\s*Summary"
+  },
+  {
+   "id": "state",
+   "type": "table_rows",
+   "section": "^#+\\s*State",
+   "rows": [
+    "Implementation",
+    "Validation",
+    "Commit",
+    "Merge",
+    "Deployment"
+   ]
+  },
+  {
+   "id": "labels-any",
+   "type": "regex",
+   "pattern": "real run|synthetic|fake|mock|self-report|reported-by",
+   "flags": "i",
+   "desc": "at least one evidence label anywhere"
+  },
+  {
+   "id": "evidence-in-vault",
+   "type": "absent",
+   "section": "^#+\\s*Evidence",
+   "pattern": "~/|/home/",
+   "desc": "evidence not only outside the vault"
+  },
+  {
+   "id": "evidence-sha",
+   "type": "full_sha256",
+   "section": "^#+\\s*Evidence"
+  },
+  {
+   "id": "blockers-stated",
+   "type": "absent",
+   "section": "^#+\\s*Blockers",
+   "pattern": "None supplied",
+   "desc": "blockers stated (not 'None supplied')"
+  },
+  {
+   "id": "merge-known",
+   "type": "absent",
+   "pattern": "^\\|\\s*Merge\\s*\\|\\s*UNKNOWN",
+   "desc": "Merge state stated, not UNKNOWN"
+  },
+  {
+   "id": "items-totals",
+   "type": "totals"
+  },
+  {
+   "id": "no-session-link",
+   "type": "absent",
+   "pattern": "claude\\.ai/(?:code/)?(?:session|chat)[_/]|chatgpt\\.com/c/"
+  }
+ ],
+ "jev": [
+  {
+   "id": "numbers_labeled",
+   "maps_to": "labels-any",
+   "instructions": "In this State table, every row says where its claim comes from: a real run, a synthetic or mock test, or only the worker's own report.",
+   "section": "^#+\\s*State"
+  },
+  {
+   "id": "evidence_verifiable",
+   "maps_to": "evidence-sha",
+   "instructions": "This evidence can be checked by someone else: it gives file paths together with complete checksums or the exact commands that produced them, not just a reference to another place.",
+   "section": "^#+\\s*Evidence"
+  }
+ ]
+}

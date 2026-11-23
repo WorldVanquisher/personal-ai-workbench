@@ -319,9 +319,38 @@ def walk(demo, sock, token, pai, pai_root, a):
     subprocess.run(["tmux", "-S", sock, "kill-server"], capture_output=True)
     say("\nDone: the guided run went plan -> dispatch -> %sdelivered -> completed, with a fake worker." % (
         "crashed -> recovery preview -> recovered -> " if getattr(a, "recovery", False) else ""))
-    say("Next, with your own project and a real agent: `pai doctor`, then `pai init` in your checkout (QUICKSTART.md).")
+    for line in next_lines():
+        say(line)
     say("Remove this demo: pai guide --cleanup %s" % shlex.quote(demo))
     return 0
+
+
+def manual(name):
+    """A manual's local copy (archive or checkout: docs/ beside swarm/), else the file on GitHub for
+    this version (an installed package has no docs/)."""
+    local = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", name)
+    if os.path.isfile(local):
+        return local
+    try:
+        from pai import __version__ as v
+        ref = "v" + v
+    except ImportError:
+        ref = "main"
+    return "https://github.com/WorldVanquisher/personal-ai-workbench/blob/%s/docs/%s" % (ref, name)
+
+
+def next_lines(kind=None):
+    """The end of the guide: the next step of the first-use manual, with your own project."""
+    if kind:  # the handoff guides: continuing a lane in a fresh session
+        return ["Next, for your own lanes: %s, part (e) \"Recovery\" (resuming after a stop, a full "
+                "context or a reboot)." % manual("REFRESH.md"),
+                "中文：%s 的 (e) 部分「恢复」。" % manual("REFRESH.zh-CN.md")]
+    # the Chinese twin names the Chinese manual (R6-FIN-030, newbie2 F3)
+    return ["Next, with your own project: %s, section 5 \"Save this checkout's defaults: pai init\", then "
+            "section 6 \"Your first round\". (Not done yet? Section 2a makes a practice repository; "
+            "section 3 is `pai doctor`.)" % manual("FIRST-USE.md"),
+            "中文：%s 第 5 节「保存这个仓库的默认设置」，然后第 6 节「第一轮：一个 worker」。（还没做？第 2a 节建一个"
+            "练习仓库，第 3 节是 `pai doctor`。）" % manual("FIRST-USE.zh-CN.md")]
 
 
 HANDOFF_NOTE = "guided-handoff"
@@ -541,5 +570,7 @@ def walk_handoff(demo, sock, token, pai, pai_root, kind):
         "not redone; one prompt per session." % (" and the open decision" if kind == "interrupted" else "",
                                                  label[first], label[second].split()[1],
                                                  " in a fresh HOME via a transfer packet" if moved else ""))
+    for line in next_lines(kind):
+        say(line)
     say("Remove this demo: pai guide --cleanup %s" % shlex.quote(demo))
     return 0

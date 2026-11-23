@@ -22,6 +22,7 @@ import sys
 # Windows only PAI's own commands run.
 WORKBENCH = {"run", "status", "attach", "logs", "trust", "resume", "pr", "next", "cleanup", "setup", "config", "jev",
              "server", "task", "paste", "web", "guide", "inspect", "recover", "worktree", "plan"}
+WORKBENCH |= {"round", "decide"}  # R6 round lane: pai round ..., pai decide ...
 PACKAGE = os.path.dirname(os.path.abspath(__file__))
 NATIVE_WINDOWS = os.name == "nt"
 
@@ -30,7 +31,7 @@ QUICKSTART = """pai: run Claude Code and Codex on your Git repository, one task 
 Try it first, offline (a synthetic project and a FAKE worker; no account needed):
   pai guide                plan -> dispatch -> status -> handoff in a disposable folder
 
-Start here, inside your Git checkout:
+Start here, inside your Git checkout (the workbench; docs/FIRST-USE.md walks these):
   pai doctor               check tools, agent logins and remote access (changes nothing)
   pai init                 save this repository's defaults (Enter keeps each suggested value)
   pai task new "TITLE"     preview a task note; add --write to save it
@@ -102,6 +103,23 @@ def _core():
 
 
 def main(argv=None):
+    """Every `pai` command. A reader that stops early (`pai status | head`, quitting `less`) closes
+    the pipe: that ends the command quietly with exit 141 like other Unix tools, not a traceback."""
+    try:
+        try:
+            return _route(argv)
+        finally:
+            sys.stdout.flush()  # inside the try: buffered output (help, argparse exits) fails here, not at exit
+    except BrokenPipeError:
+        try:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())  # the interpreter's final flush must not fail again
+        except (OSError, ValueError):
+            pass
+        return 141
+
+
+def _route(argv=None):
     if argv is not None:
         sys.argv[1:] = list(argv)
     args = sys.argv[1:]
@@ -140,21 +158,28 @@ def main(argv=None):
         return 0
     if args in (["-h"], ["--help"]) and swarm and not NATIVE_WINDOWS:
         print(QUICKSTART % guide() + "\n")
+        # R6-FIN-026 (newbie F14): the argparse part below is PAI's own init/doctor, not the ones above
+        print("PAI's own commands (project context and handoffs; `pai init PROJECT --vault ...` and\n"
+              "`pai doctor PROJECT` are these, not the workbench's `pai init` and `pai doctor` above):\n")
         try:
             return _core()
         finally:
             print("\nworkbench commands (`pai COMMAND --help`):\n"
-                  "  doctor, init, task, run, status, inspect, attach, logs, trust, resume, recover, pr, next, cleanup,\n"
-                  "  setup, config, jev,\n"
-                  "  guide (the whole flow offline, with a fake worker), paste (text into a lane in one piece),\n"
-                  "  web (the run in your browser),\n"
-                  "  edit (one Markdown file in your browser; also on native Windows)\n"
+                  "  first use (docs/FIRST-USE.md, in this order):\n"
+                  "    doctor, guide, init, task, run, status, trust, resume, attach, logs, pr, cleanup\n"
+                  "  later:\n"
+                  "    inspect, recover, next, setup, config, jev,\n"
+                  "    paste (text into a lane in one piece), web (the run in your browser),\n"
+                  "    edit (one Markdown file in your browser; also on native Windows),\n"
+                  "    worktree (list, refresh, verify, preview, publish, init), plan,\n"
+                  "    round, decide (a round of parallel lanes and its decision sheets; `pai round --help`)\n"
                   "  (`pai init PROJECT --vault ...`, `pai doctor PROJECT` and `pai doctor --agents` are PAI's own\n"
                   "  context and handoff commands, listed above)\n\n"
                   "exit codes (every command; scripts may rely on them across upgrades):\n"
                   "  0  done, or a preview with nothing in the way\n"
                   "  1  refused or needs a person (a REFUSED / CONFLICT / MISMATCH line says what to do);\n"
-                  "     pai status: a lane is still at work or waiting; pai doctor: an ESSENTIAL gap (0.5.0)\n"
+                  "     pai status: a lane waits for you, has no task yet, or its agent has exited\n"
+                  "     (0 while every agent runs with its task, even busy); pai doctor: an ESSENTIAL gap (0.5.0)\n"
                   "  2  usage error, or input that cannot be read; nothing was changed")
     if args in (["-h"], ["--help"]) and NATIVE_WINDOWS:
         print(WINDOWS_NOTE + "\n")

@@ -10,7 +10,7 @@
 A goals file has one slice per line:
     - api: Add the export endpoint | paths: src/api/, tests/api/ | verify: python -m pytest tests/api | prereqs: none | needs: schema
 
-`propose` reads the goals and who already owns what (each worktree's pai-managed AGENTS.md
+`propose` reads the goals and who already owns what (each worktree's pai-managed AGENTS.md or CLAUDE.md
 scope and lane), keeps the parent task ID, gives each slice a stable item number
 (PARENT-001...) and a worker: the owner of its paths when a worktree already owns them, else
 the least-loaded worker. It writes nothing but --out. The plan is a plain JSON file: edit it,
@@ -44,7 +44,9 @@ import gitprep  # noqa: E402
 from pai import workqueue  # noqa: E402
 
 FORMAT = "pai-split-plan"
-PARENT_RE = re.compile(r"[A-Za-z][A-Za-z0-9]{0,23}")
+# A parent ID: one word (PARENT) or a unified round-lane prefix (PAI-R6-COR, R6-COR; R6-COR-025),
+# so the queue items it numbers are PAI-R6-COR-001, ... It also becomes part of queue file names.
+PARENT_RE = re.compile(r"(?=.{1,40}$)[A-Za-z][A-Za-z0-9]{0,23}(?:-[A-Za-z][A-Za-z0-9]{0,23}){0,3}")
 WORKER_RE = re.compile(r"[a-z][a-z0-9-]{0,23}")  # both become part of queue file names
 SLICE_RE = re.compile(r"^\s*[-*+]\s+([a-z][a-z0-9-]{0,31}):\s*(.+?)\s*$")
 SCOPE_RE = re.compile(r"Change only files under: (.+?)\. ")
@@ -99,28 +101,38 @@ def parse_goals(text):
     return slices
 
 
+# `pai worktree init --file NAME` writes the managed section into one of these (R6-COR-015).
+SECTION_FILES = ("AGENTS.md", "CLAUDE.md", "CLAUDE.local.md")  # CLAUDE.local.md: R6-COR-060
+
+
 def ownership(repo):
-    """{scope path: {lane, worktree, branch}} from each linked worktree's managed AGENTS.md."""
+    """{scope path: {lane, worktree, branch, file}} from each linked worktree's managed section,
+    in AGENTS.md or CLAUDE.md (a lane initialised with `--file CLAUDE.md` owns its scope too)."""
     import refresh
     info = refresh.describe(repo)
     owned = {}
     for w in info["worktrees"]:
-        p = os.path.join(w["path"], "AGENTS.md")
-        if not w["exists"] or not os.path.isfile(p):
+        if not w["exists"]:
             continue
-        with open(p, encoding="utf-8-sig", errors="replace") as f:
-            text = f.read()
-        m, lane = SCOPE_RE.search(text), LANE_RE.search(text)
-        if not m:
-            continue
-        for d in re.findall(r"`([^`]+)/`", m.group(1)):
-            owned[norm_path(d)] = {"lane": lane.group(1) if lane else None, "worktree": w["path"], "branch": w["branch"]}
+        for name in SECTION_FILES:
+            p = os.path.join(w["path"], name)
+            if not os.path.isfile(p):
+                continue
+            with open(p, encoding="utf-8-sig", errors="replace") as f:
+                text = f.read()
+            m, lane = SCOPE_RE.search(text), LANE_RE.search(text)
+            if not m:
+                continue
+            for d in re.findall(r"`([^`]+)/`", m.group(1)):
+                owned.setdefault(norm_path(d), {"lane": lane.group(1) if lane else None, "worktree": w["path"],
+                                                "branch": w["branch"], "file": name})
     return owned, info["repository"]["path"]
 
 
 def propose(parent, goals_text, workers=4, repo=None):
     if not PARENT_RE.fullmatch(parent or ""):
-        raise PlanError("parent id %r: letters and digits, starting with a letter (it prefixes the queue items)" % parent)
+        raise PlanError("parent id %r: letters and digits, starting with a letter, optionally in up to four "
+                        "dash-separated words such as PAI-R6-COR (it prefixes the queue items)" % parent)
     if not 1 <= workers <= 26:
         raise PlanError("--workers must be 1..26")
     slices = parse_goals(goals_text)

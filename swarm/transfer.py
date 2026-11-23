@@ -289,6 +289,9 @@ def build(proj, folder, names=None, run_id=None, lanes=None, include_logs=False,
         section = section_of(t.body, mk) or ""
         ev = [{"id": "continuation", "kind": "continuation", "ref": "note:%s#continuation" % n,
                "sha256": sha(section), "included": "in the card's description"}]
+        if mk.get("handoff_sha256"):  # R6-COR-026: the continuation's pai-handoff/2 file, by its sha256
+            ev.append({"id": "handoff-v2", "kind": "handoff", "ref": "pai-handoff/2 continuation %s" % mk["id"], "sha256": mk["handoff_sha256"],
+                "included": "not carried: the destination checks it against this sha256 when it is sent along"})
         blob = gitprep.out(repo, "rev-parse", "%s:HANDOFF.md" % mk["head"]) if repo and gitprep.rev(repo, mk["head"]) else None
         if blob:
             ev.append({"id": "agent-handoff", "kind": "agent-handoff", "ref": "git:%s:HANDOFF.md" % mk["head"][:12],

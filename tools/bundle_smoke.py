@@ -26,6 +26,10 @@ Inside a new WORK directory (never the real vault):
   Ctrl-Break on Windows), and checks that `pai server` stays checkout-only;
 - checks that both locations report the same tool version while their local
   configurations differ;
+- checks the user manuals (docs/FIRST-USE, REFRESH, GLOSSARY, the map) are in the bundle and
+  in MANIFEST.json, that the install lines of README and FIRST-USE name this version, and, when
+  the bundle carries the prompt library, that each pai/prompts file's version marker is what
+  `pai prompt list` reports and that `pai prompt lint` passes (skipped, never passed, without it);
 - checks missing roots: a removed vault makes doctor and context fail
   clearly;
 - checks tampering: a third extraction with one modified file and one added
@@ -42,6 +46,7 @@ import hashlib
 import http.client
 import json
 import os
+import re
 import shutil
 import signal
 import stat
@@ -432,6 +437,62 @@ def editor_checks(info, work, env, cwd):
               rc == 2 and "not part of this installation" in out + err, (rc, (out + err)[-300:]))
 
 
+# The user manuals every bundle must carry (docs lane, R6), and the files whose install lines
+# must name this bundle's own version.
+MANUALS = ("docs/README.md", "docs/FIRST-USE.md", "docs/FIRST-USE.zh-CN.md", "docs/REFRESH.md",
+           "docs/REFRESH.zh-CN.md", "docs/GLOSSARY.md", "docs/GLOSSARY.zh-CN.md")
+VERSIONED_MANUALS = ("README.md", "README.zh-CN.md", "docs/FIRST-USE.md", "docs/FIRST-USE.zh-CN.md")
+VERSION_MENTION = re.compile(r"pai-workbench-(\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?)\.(?:tar\.gz|zip)|@v(\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?)")
+PROMPT_MARK = re.compile(r"<!-- pai-prompts/(\d+) begin name=(\S+) version=(\d+)")
+
+
+def manual_checks(info, env, cwd):
+    """The manuals and the prompt library are in the bundle, and the versions agree: MANIFEST.json,
+    `pai --version`, the install lines of the first-use manuals, and each prompt file's marker
+    against `pai prompt list`."""
+    bundle, run = info["bundle"], info["run"]
+    manifest = json.loads(Path(bundle, "MANIFEST.json").read_text(encoding="utf-8"))
+    listed = {f.get("path") for f in manifest.get("files", [])} if isinstance(manifest.get("files"), list) \
+        else set(manifest.get("files", {}))
+    missing = [m for m in MANUALS if not os.path.isfile(os.path.join(bundle, m)) or m not in listed]
+    check("manuals in the bundle and in MANIFEST.json (%d)" % len(MANUALS), not missing, "missing: %s" % missing)
+    version = info["version"].split()[-1]
+    check("MANIFEST.json version is `pai --version`", manifest.get("version") == version,
+          (manifest.get("version"), version))
+    wrong = []
+    for m in VERSIONED_MANUALS:
+        path = os.path.join(bundle, m)
+        if os.path.isfile(path):
+            for hit in VERSION_MENTION.finditer(Path(path).read_text(encoding="utf-8")):
+                v = hit.group(1) or hit.group(2)
+                if v != version:
+                    wrong.append("%s: %s" % (m, hit.group(0)))
+    check("install lines in README and FIRST-USE name this version (%s)" % version, not wrong, wrong[:5])
+
+    lib = os.path.join(bundle, "pai", "prompts")
+    files = sorted(f for f in os.listdir(lib) if f.endswith(".md")) if os.path.isdir(lib) else []
+    if not files:
+        skip("prompt library in the bundle", "this bundle has no pai/prompts/*.md (prompts lane not merged)")
+        return
+    marks = {}
+    for f in files:
+        m = PROMPT_MARK.search(Path(lib, f).read_text(encoding="utf-8"))
+        marks[f] = (m.group(2), m.group(3)) if m else None
+    check("every prompt file has a pai-prompts begin marker with a version (%d files)" % len(files),
+          all(marks.values()), [f for f, v in marks.items() if not v])
+    rc, out, err = run("prompt", "list")
+    listed_v = {}
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1].startswith("v") and parts[1][1:].isdigit():
+            listed_v[parts[0]] = parts[1][1:]
+    want = {n: v for n, v in (x for x in marks.values() if x)}
+    check("pai prompt list shows each file's marker version", rc == 0 and listed_v == want,
+          (rc, sorted(set(want.items()) ^ set(listed_v.items())), err[-200:]))
+    rc, out, err = run("prompt", "lint")
+    check("pai prompt lint passes on the bundled library", rc == 0, (out + err)[-300:])
+
+
 def sha256_text(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -483,6 +544,7 @@ def main(argv=None):
         two = location(archive, work, "location two with spaces/dossier é 日本", "two", env, cwd)
         launcher_checks(two, work, env, cwd)
         editor_checks(two, work, env, cwd)
+        manual_checks(two, env, cwd)
         check("same tool version in both locations", one["version"] == two["version"] and one["version"], (one["version"], two["version"]))
         c1 = Path(one["config"]).read_text(encoding=TEXT_ENCODING)
         c2 = Path(two["config"]).read_text(encoding=TEXT_ENCODING)

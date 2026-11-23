@@ -204,6 +204,120 @@ def section(f):
     return "\n".join(lines)
 
 
+ID_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z][A-Za-z0-9]*)*-\d{1,5}")  # pai.workqueue.ID
+
+
+def v2_handoff(f, n):
+    """The continuation as a pai-handoff/2 HANDOFF.md (R6-COR-026; docs/HANDOFF-V2.md): round = the
+    run, lane = the lane, checkpoint cp-cont<n>. Everything in it is what pai checked here (git, the
+    run record), so the State sources are real run; the agent's own note is quoted, not trusted."""
+    mk = f["marker"]
+    note = mk.get("note") or "?"
+    item = ID_RE.fullmatch(note)
+    commits = len(f["commits"])
+    def bullets(xs):
+        return "\n".join("- %s" % x for x in xs) or "- none"
+    items = ("| ID | state | evidence |\n| --- | --- | --- |\n| %s | doing | handed off at %s, %d commit(s) |\n\n"
+             "Totals: done 0, prototype 0, blocked 0, owner-only 0, todo 0, doing 1" % (note, (mk["head"] or "?")[:12], commits)
+             if item else "- The task note `%s` is not a queue item ID (such as PAI-R6-COR-001), so there is no item "
+                          "row; `pai handoff seal` refuses it until the note is named by its ID." % note)
+    return """---
+format: pai-handoff/2
+status: draft
+approved: false
+project: %(project)s
+round: %(run)s
+lane: %(lane)s
+checkpoint: cp-cont%(n)d
+task: %(task)s
+base_sha: %(base)s
+head_sha: %(head)s
+queue: none
+queue_sha256: none
+created: %(at)s
+generator: pai recover --continue
+---
+
+# Continuation of %(note)s (%(run)s/%(lane)s)
+
+## Summary
+
+Session 1 (%(agent)s) was stopped and handed off at %(head12)s with %(commits)d commit(s) since the base. A fresh
+session continues from that head (`pai run --continue %(note)s`). Continuation id %(id)s.
+
+## State
+
+| State | Value | Source |
+| --- | --- | --- |
+| Implementation | %(commits)d commit(s) on %(branch)s since the base | real run (git, read by pai) |
+| Validation | none recorded at handoff (no `pai pr check` for this head) | real run (run record, read by pai) |
+| Commit | %(commits)d local commit(s), head %(head12)s | real run (git, read by pai) |
+| Merge | not merged (owner-only) | self-report |
+| Deployment | none | self-report |
+
+## Items
+
+%(items)s
+
+## Evidence
+
+- none: no file was produced at handoff; the facts pai read from git and the run record follow.
+
+## Facts at handoff
+
+%(evidence)s
+
+## Decisions within authority
+
+- none
+
+## Decisions for the owner
+
+%(decisions)s
+
+## Blockers
+
+- none
+
+## Next
+
+- `pai run --continue %(note)s`
+""" % {"project": os.environ.get("PAI_PROJECT") if re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,31}",
+                                                                   os.environ.get("PAI_PROJECT") or "") else "UNKNOWN",
+       "run": mk["run"], "lane": mk["lane"], "n": n, "task": note if ID_RE.fullmatch(note) and len(note) <= 40 else "UNKNOWN",
+       "base": mk["base"] or "UNKNOWN", "head": mk["head"] or "UNKNOWN", "at": mk["at"], "note": note,
+       "agent": mk.get("agent") or "?", "head12": (mk["head"] or "?")[:12], "commits": commits, "id": mk["id"],
+       "branch": mk.get("branch") or "?", "items": items,
+       "evidence": bullets(["`%s` %s" % (sha, subj) for sha, subj in f["commits"]] + f["evidence"]),
+       "decisions": bullets(f["decisions"])}
+
+
+def write_v2(m, lane, f):
+    """Write the v2 continuation handoff under the pai-swarm home; (path, sha256). Never overwrites:
+    each continuation of a lane gets the next cp-cont<n> folder."""
+    import hashlib
+    import wtlock
+    base = os.path.join(wtlock.home(), "handoffs", m.run_id, lane)
+    os.makedirs(base, exist_ok=True)
+    n = 1
+    while True:
+        d = os.path.join(base, "cp-cont%d" % n)
+        try:
+            os.mkdir(d)
+            break
+        except FileExistsError:
+            n += 1
+    data = v2_handoff(f, n).encode("utf-8")
+    path = os.path.join(d, "HANDOFF.md")
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    try:
+        os.write(fd, data)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return path, hashlib.sha256(data).hexdigest()
+
+
 def capture(m, lane, write=False, choice=None):
     """`pai recover --continue LANE`: preview, or with write=True record the continuation."""
     import recovery
@@ -280,10 +394,13 @@ def capture(m, lane, write=False, choice=None):
         if choice == "mark-delivered" and row["dispatch"].get("state") == "unknown":
             dispatch.mark_delivered(m, w, rl, row.get("process") or {})
             f["evidence"].append("dispatch: recorded as delivered by the operator at handoff")
+        v2_path, v2_sha = write_v2(m, lane, f)  # R6-COR-026: the same continuation as a pai-handoff/2 file
+        f["marker"]["handoff_sha256"] = v2_sha  # the sha only: the marker travels in notes and packets, a path must not
         path = os.path.join(m.tasks_dir, rl["note"] + ".md")
         notes.Task(path).update(meta={"status": "todo", "handed_off_from": f["marker"]["id"]}, append=section(f))
         rl["handed_off"] = {"at": f["marker"]["at"], "head": f["head"], "branch": rl["branch"], "note": rl["note"],
-                            "id": f["marker"]["id"], "continued_by": None}
+                            "id": f["marker"]["id"], "continued_by": None, "handoff": v2_path,
+                            "handoff_sha256": v2_sha}
         gitprep.save_record(rec)
         import wtlock
         if wtlock.owned(wtlock.read(w.worktree), "rc", m.run_id, lane):
@@ -295,6 +412,9 @@ def capture(m, lane, write=False, choice=None):
         recovery.close_superseded(m, lane, begin["id"], after)
     log("\nwritten: %s now ends with the continuation (status todo); lane %s is handed off (never restarted here)."
         % (path, lane))
+    log("v2 handoff: %s (sha256 %s)" % (v2_path, v2_sha))
+    log("  seal it into the project's inbox: pai handoff seal PROJECT \"%s\"   (needs the note named by its task ID "
+        "and PAI_PROJECT=<project> set when the continuation was written)" % v2_path)
     log("Next, a fresh session continues it:")
     log("  pai run --continue %s                 # same agent (%s), or add --agent codex / --agent claude"
         % (rl["note"], f["marker"]["agent"]))

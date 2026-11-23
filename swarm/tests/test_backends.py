@@ -94,7 +94,7 @@ class Fixtures(WB):
     def setUp(self):
         super().setUp()
         self.note("task-a", priority=9)
-        self.env.update(PAI_DISPATCH_SETTLE="0.5", PAI_DISPATCH_CONFIRM_SECONDS="2")
+        self.env.update(PAI_DISPATCH_SETTLE=helpers.FAKE_SETTLE, PAI_DISPATCH_CONFIRM_SECONDS="2")
         self.init()
 
     def lanes(self):

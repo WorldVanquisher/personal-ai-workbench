@@ -10,12 +10,12 @@ run: use WSL (Ubuntu) for everything else, in a folder under the Linux file syst
 ## 1. Install
 
 ```sh
-uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.4.0
+uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.5.0
 ```
 
 If uv says its bin folder is not on your PATH, run `uv tool update-shell` (or the
 `export PATH=…` line it prints) and **open a new terminal**. Then `pai --version` answers
-`pai 0.4.0`. No uv? The [release page](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.4.0)
+`pai 0.5.0`. No uv? The [release page](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.5.0)
 has the same pai as a `.tar.gz` and a `.zip`, each with a `.sha256`; [INSTALL.md](INSTALL.md)
 shows the three lines to verify and install one (no sudo, nothing piped into a shell).
 
@@ -45,7 +45,7 @@ pai run --workers 1 --yes   # one worktree, branch and agent window for this tas
 pai status
 ```
 
-`pai status` exits with 1 while a lane is still at work or waiting for you; that is normal.
+`pai status` exits with 1 when a lane waits for you, has no task yet, or its agent has exited (a finished worker looks like that too); 0 while every agent runs with its task.
 If it says **waiting for folder trust**, the agent is asking whether to trust its folder: read
 the question and answer it yourself (`pai trust` opens it in this terminal, or type it in
 `pai web` below); pai then sends the task. When the agent is done, `pai pr plan a` shows what

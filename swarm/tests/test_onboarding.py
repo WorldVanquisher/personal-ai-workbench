@@ -56,12 +56,30 @@ class MissingPai(unittest.TestCase):
         self.assertNotIn("command not found", err, "the old wording check would have failed here")
         self.assertTrue(oa.pai_missing(rc), "exit %s; %s" % (rc, err))
 
+    def plain_bash(self, extra_env=None):
+        """bash with no startup files at all: `-i` would read the host's /etc/bash.bashrc, where
+        Ubuntu (and WSL) define command_not_found_handle, so the result would depend on the host.
+        The hook is also unset explicitly, in case the environment exports it as a function."""
+        with tempfile.TemporaryDirectory() as home:
+            env = {"HOME": home, "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "TERM": "dumb"}
+            env.update(extra_env or {})
+            return oa.sh(["bash", "--norc", "--noprofile", "-c", "unset -f command_not_found_handle; pai --version"],
+                         env, cwd=home)
+
     def test_plain_bash_and_a_found_command(self):
-        rc, _, err = self.fresh_shell("")
+        rc, _, err = self.plain_bash()
+        self.assertEqual(rc, 127, "exit %s; %s" % (rc, err))
         self.assertTrue(oa.pai_missing(rc), "exit %s; %s" % (rc, err))
-        self.assertIn("pai: command not found", err)
         self.assertFalse(oa.pai_missing(0))
         self.assertFalse(oa.pai_missing(1), "pai ran and failed: that is not a missing command")
+
+    def test_plain_bash_ignores_a_host_hook_exported_into_the_environment(self):
+        # Stand-in for a host whose shell defines the hook (Ubuntu's /etc/bash.bashrc): the hook
+        # exits 0, which would hide the missing command if it ran.
+        hook = {"BASH_FUNC_command_not_found_handle%%": "() {  echo \"Command '$1' not found, did you mean\" >&2; return 0\n}"}
+        rc, _, err = self.plain_bash(hook)
+        self.assertEqual(rc, 127, "exit %s; %s" % (rc, err))
+        self.assertNotIn("did you mean", err)
 
 
 @helpers.needs_tmux
@@ -72,7 +90,7 @@ class FirstRun(unittest.TestCase):
             work = os.path.join(t, "w")
             p = subprocess.run([sys.executable, "-B", os.path.join(ROOT, "tools", "onboarding_acceptance.py"),
                                 "--work", work], capture_output=True, text=True, timeout=900, stdin=subprocess.DEVNULL,
-                               env={k: v for k, v in os.environ.items() if k not in ("TMUX", "TMUX_PANE")})
+                               env=helpers.hermetic_env())
             self.assertEqual(p.returncode, 0, p.stdout[-3000:] + p.stderr[-2000:])
             with open(os.path.join(work, "onboarding-results.json")) as f:
                 res = json.load(f)

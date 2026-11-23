@@ -2,15 +2,29 @@
 
 [English](README.md) | 简体中文
 
-**第一次使用？** [QUICKSTART.zh-CN.md](QUICKSTART.zh-CN.md)：安装、第一个任务、浏览器控制台、升级、卸载。
+**PAI 是多个编码 agent 并行工作的润滑层。** 每一轮工作所需的东西，由它准备好、串起来、收回来交给你。所有最终决定都由你来做。它不替换、也不包装 Claude Code 或 Codex，而是在它们旁边工作。
 
-**一行安装**（Linux、macOS 或 WSL；需要 [uv](https://docs.astral.sh/uv/) 和 git）：
+和 LangGraph、CrewAI、AutoGen、OpenAI Agents SDK 这类"主 agent 统领子 agent"的框架相比（依据它们自己的文档，见 [docs/WHY-PAI.md](docs/WHY-PAI.md)），区别有三点：
+
+1. **由人决定，不由主 agent 决定。** agent 只提建议；悬而未决的问题会做成决策单交给你，附上选项和推荐。
+2. **状态是文件，不在运行时里。** 交接、queue 和决策都是文件夹里的 Markdown。清空对话或者重启机器都不会丢，任何编辑器都能读。
+3. **不换引擎。** PAI 驱动的就是你已经在用的 Claude Code 和 Codex 会话。驱动它们的 prompt 是一个带版本号的库，只有经你批准才会改。
+
+| 你现在是…… | 去读 |
+| --- | --- |
+| **第一次使用 PAI** | [docs/FIRST-USE.zh-CN.md](docs/FIRST-USE.zh-CN.md)：从零到跑完第一轮，每一步都写了预期输出 |
+| **开始新的一轮，或者要升级** | [docs/REFRESH.zh-CN.md](docs/REFRESH.zh-CN.md)：升级和回滚、从合并后的 main 开新一轮、常见的坑、恢复 |
+| **查资料** | [docs/README.md](docs/README.md)：每份文档回答什么问题；术语见 [docs/GLOSSARY.zh-CN.md](docs/GLOSSARY.zh-CN.md) |
+
+**赶时间？** [QUICKSTART.zh-CN.md](QUICKSTART.zh-CN.md)：安装、第一个任务、浏览器控制台、升级、卸载。
+
+**安装。** 拿不准用哪种，就用发布归档，[docs/FIRST-USE.zh-CN.md](docs/FIRST-USE.zh-CN.md#2-安装-pai) 里一步一步写了（方式 A：会校验 sha256，下载之后不需要联网，并保留上一个版本方便回滚）。**如果你已经在用 [uv](https://docs.astral.sh/uv/)**，一行就能装（Linux、macOS 或 WSL；需要 git）：
 
 ```sh
-uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.4.0
+uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.5.0
 ```
 
-如果 uv 提示它的 bin 目录不在 PATH 里，运行它打印的那行 `export PATH=…`（或 `uv tool update-shell`），然后打开一个新终端。接着在你的 Git checkout 里依次运行：`pai doctor` → `pai init` → `pai task new "标题" --write` → `pai run --dry-run`。升级：把这一行里的版本号换成新版本再运行一次。卸载：`uv tool uninstall pai-workbench`（配置和任务笔记会保留）。没有 uv？请从 [v0.4.0 发布页](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.4.0) 下载压缩包，按下面的“快速开始”操作。
+如果 uv 提示它的 bin 目录不在 PATH 里，运行它打印的那行 `export PATH=…`（或 `uv tool update-shell`），然后打开一个新终端。接着在你的 Git checkout 里依次运行：`pai doctor` → `pai init` → `pai task new "标题" --write` → `pai run --dry-run`。升级：把这一行里的版本号换成新版本再运行一次。卸载：`uv tool uninstall pai-workbench`（配置和任务笔记会保留）。压缩包在 [v0.5.0 发布页](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.5.0) 上，用法见下面的“快速开始”。
 
 PAI 把一个 AI 辅助项目的“工作记忆”保存在普通的 Markdown 文件里，并在你的控制下让编码 agent 基于它干活。
 
@@ -23,9 +37,9 @@ PAI 把一个 AI 辅助项目的“工作记忆”保存在普通的 Markdown �
 Linux、macOS 或 WSL，需要 Python 3.11+、git 和 tmux。全程不需要 sudo，也不需要把脚本管道给 shell：
 
 ```sh
-sha256sum -c pai-workbench-0.4.0.tar.gz.sha256      # macOS：shasum -a 256 -c pai-workbench-0.4.0.tar.gz.sha256
-tar -xzf pai-workbench-0.4.0.tar.gz
-pai-workbench-0.4.0/bin/pai install                  # 校验后复制到 ~/.local/share/pai-workbench，`pai` 放在 ~/.local/bin
+sha256sum -c pai-workbench-0.5.0.tar.gz.sha256      # macOS：shasum -a 256 -c pai-workbench-0.5.0.tar.gz.sha256
+tar -xzf pai-workbench-0.5.0.tar.gz
+pai-workbench-0.5.0/bin/pai install                  # 校验后复制到 ~/.local/share/pai-workbench，`pai` 放在 ~/.local/bin
 ```
 
 如果 `install` 提示 `~/.local/bin is not on PATH`，运行它为你的 shell 打印的那一行（bash：`echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc`），然后打开一个新终端。接着在你的 Git checkout 里：
@@ -42,7 +56,7 @@ pai web                  # 在浏览器里查看同一次运行（Ctrl-C 停止�
 
 `pai guide` 会在一个可删除的文件夹里，用一个假的 worker 离线走完这整条路径（不需要账号或网络）。单独运行 `pai` 会再次显示这条路径；`pai --help` 列出所有命令。如果某条 lane 在等 agent 首次使用时的“是否信任此文件夹”提示，`pai status` 会说明，`pai trust` 会逐个打开提示让你回答，任务随后送达。升级就是用新压缩包重复上面三行：任何一步失败，旧版本都照常可用；你的配置和任务笔记不会被改动。
 
-**获取压缩包。** 从 [v0.4.0 发布页](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.4.0) 下载 `pai-workbench-0.4.0.tar.gz` 和它的 `.sha256`（`.zip` 内容相同，供 Windows 使用）。也可以在源码 checkout 里构建同样的压缩包：`python3 -B tools/build_bundle.py --out dist`。
+**获取压缩包。** 从 [v0.5.0 发布页](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.5.0) 下载 `pai-workbench-0.5.0.tar.gz` 和它的 `.sha256`（`.zip` 内容相同，供 Windows 使用）。也可以在仓库的 Git clone 里构建同样的压缩包（压缩包里没有 `tools/`）：`python3 -B tools/build_bundle.py --out dist`。
 
 从远程仓库开始时，pai 会克隆到它管理的 checkout，在你审阅之前不启动任何 agent：`pai run --repo https://github.com/OWNER/REPO.git --workers 2 --agent claude --agent codex`。
 
@@ -71,7 +85,7 @@ pai web                  # 在浏览器里查看同一次运行（Ctrl-C 停止�
 - `swarm/WORKBENCH.md`（压缩包和 checkout 里都有）：工作台指南，包括平台安装、配置、文件夹信任、SSH、清理和 JEV 费用。
 - 提交审阅前检查改动：`python3 -B tools/verify.py` 运行核心和工作台测试套件（文件句柄泄漏也算失败），构建两种压缩包并做冒烟测试，然后运行 headless 测试、从刚构建的压缩包开始的新用户验收、QUICKSTART 演练、浏览器控制台演练和安装包检查（安装、升级、卸载）。测试目录自动发现（`--list`）；缺少所需工具（tmux、uv、setuptools）的步骤会标为跳过；汇总给出每一步的耗时和每个被跳过的测试及原因。`--quick` 只运行核心套件和压缩包检查。
 - `swarm/RUN-STATE.md`（运行状态名称、标识符以及每种状态背后的证据）和 `swarm/BACKENDS.md`（每个代理后端提供的能力，以及如何新增一个）；两者都随压缩包发布。
-- [docs/1.0/](docs/1.0/)：给所有者的 1.0 提案：验收清单、平台、兼容性承诺、实验功能政策、能力矩阵、从 0.4.x 迁移、真实代理冒烟清单、待办列表（英文）。
+- [docs/1.0/](https://github.com/WorldVanquisher/personal-ai-workbench/tree/v0.5.0/docs/1.0/)：给所有者的 1.0 提案：验收清单、平台、兼容性承诺、实验功能政策、能力矩阵、从 0.4.x 迁移、真实代理冒烟清单、待办列表（英文）。
 - [SESSION_START.md](SESSION_START.md)：agent 会话的开场提示；[RELEASE_NOTES.md](RELEASE_NOTES.md)：变更与测试记录。
 
 许可证：MIT，见 [LICENSE](LICENSE)。

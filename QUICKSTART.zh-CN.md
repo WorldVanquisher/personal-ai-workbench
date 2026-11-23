@@ -7,10 +7,10 @@
 ## 1. 安装
 
 ```sh
-uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.4.0
+uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.5.0
 ```
 
-如果 uv 提示它的 bin 目录不在 PATH 里，运行 `uv tool update-shell`（或它打印的那行 `export PATH=…`），然后**打开一个新终端**。之后 `pai --version` 会显示 `pai 0.4.0`。没有 uv？[发布页](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.4.0) 上有同样的 pai，分别打包成 `.tar.gz` 和 `.zip`，各带一个 `.sha256`；[INSTALL.md](INSTALL.md) 里有校验并安装的三行命令（不需要 sudo，也不需要把脚本管道给 shell）。
+如果 uv 提示它的 bin 目录不在 PATH 里，运行 `uv tool update-shell`（或它打印的那行 `export PATH=…`），然后**打开一个新终端**。之后 `pai --version` 会显示 `pai 0.5.0`。没有 uv？[发布页](https://github.com/WorldVanquisher/personal-ai-workbench/releases/tag/v0.5.0) 上有同样的 pai，分别打包成 `.tar.gz` 和 `.zip`，各带一个 `.sha256`；[INSTALL.md](INSTALL.md) 里有校验并安装的三行命令（不需要 sudo，也不需要把脚本管道给 shell）。
 
 **先离线体验完整流程：** `pai guide` 会创建一个可随时删除的演示文件夹，里面有一个合成项目、一条任务笔记和一个假的 worker（不需要账号、凭据或网络），并用正常的 `pai` 命令依次走完计划、派发、状态和 handoff。它会打印每样东西的位置；`pai guide --cleanup DIR` 删除该文件夹。需要 git 和 tmux。
 
@@ -33,7 +33,7 @@ pai run --workers 1 --yes   # 为这个任务开一个 worktree、一个分支�
 pai status
 ```
 
-当某条 lane 还在工作或在等你时，`pai status` 以 1 退出；这是正常的。如果它显示 **waiting for folder trust**，说明 agent 在问是否信任它的文件夹：阅读问题后由你自己回答（`pai trust` 会在这个终端里打开它，也可以在下面的 `pai web` 里直接输入）；之后 pai 才会发送任务。agent 完成后，`pai pr plan a` 显示将要发布的内容和还缺什么（它需要一个审阅检查，`pai init` 会问你）；只有你运行 `pai pr open a` 时才会 push。
+有 lane 在等你、还没拿到任务，或者 agent 已经退出（干完活的 worker 也是这样）时，`pai status` 以 1 退出；每个 agent 都在运行、都拿到了任务时以 0 退出。如果它显示 **waiting for folder trust**，说明 agent 在问是否信任它的文件夹：阅读问题后由你自己回答（`pai trust` 会在这个终端里打开它，也可以在下面的 `pai web` 里直接输入）；之后 pai 才会发送任务。agent 完成后，`pai pr plan a` 显示将要发布的内容和还缺什么（它需要一个审阅检查，`pai init` 会问你）；只有你运行 `pai pr open a` 时才会 push。
 
 ## 4. 在浏览器里查看 agent 并和它们交互
 

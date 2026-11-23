@@ -2,6 +2,7 @@
 # End-to-end tests with a fake `claude`. No Claude usage, no network.
 set -euo pipefail
 export PAI_JEV_CREDENTIAL_STORE=none  # never the operator's real credential store
+export PYTHONDONTWRITEBYTECODE=1  # the python3 calls below leave no __pycache__ in the checkout
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$HERE")"
 T="$(mktemp -d)"
@@ -41,6 +42,17 @@ FAKE_LOG="$T/fake.log" python3 "$ROOT/pai_swarm.py" run --repo "$T/repo" --tasks
 [ "$(git -C "$T/repo" rev-parse HEAD)" = "$HEAD0" ] && ok "no commits made" || bad "HEAD moved"
 [ "$(git -C "$T/repo" symbolic-ref --short HEAD)" = "swarm/t1" ] && ok "workers ran on the new task branch" || bad "branch"
 [ ! -e "$T/home/locks" ] || [ -z "$(ls "$T/home/locks")" ] && ok "worktree lock released after the run" || bad "lock left behind"
+python3 - "$T/fake.log" <<'EOF' && ok "default permission mode is acceptEdits (R6-COR-077, D-R6-1)" || bad "permission mode"
+import json, sys
+modes = {r.get("permission_mode") for r in (json.loads(l) for l in open(sys.argv[1])) if not r.get("extra")}
+assert modes == {"acceptEdits"}, modes
+EOF
+python3 - "$T/home/jev-usage.jsonl" <<'EOF' && ok "worker cost in the usage ledger (R6-COR-071)" || bad "ledger"
+import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1])]
+agent = [r for r in rows if r["kind"] == "agent"]
+assert len(agent) == 7 and all(r["cost_usd"] == 0.12 for r in agent), agent
+EOF
 python3 - "$T/fake.log" <<'EOF' && ok "concurrency limit, path locks, hooks, shim" || bad "see above"
 import json, sys
 rows = [r for r in (json.loads(l) for l in open(sys.argv[1])) if not r.get("extra")]
@@ -115,6 +127,8 @@ unset TYPESAFE_API_KEY TYPESAFE_BASE_URL
 grep -q "^status: todo" "$T/vault/Tasks/inbox-good.md" && grep -q "^model: opus" "$T/vault/Tasks/inbox-good.md" \
   && ok "triage: actionable inbox -> todo with model" || { bad "triage good"; cat "$T/vault/Tasks/inbox-good.md"; }
 grep -q "^status: needs-detail" "$T/vault/Tasks/inbox-vague.md" && ok "triage: vague -> needs-detail" || bad "triage vague"
+! grep -q "^model:" "$T/vault/Tasks/inbox-vague.md" && ok "triage: no model for a needs-detail note (R6-COR-032)" \
+  || { bad "triage vague got a model"; cat "$T/vault/Tasks/inbox-vague.md"; }
 grep -q "^jev_done: 0.91" "$T/vault/Tasks/verify-me.md" && ok "verify scores recorded" || { bad "verify"; cat "$T/vault/Tasks/verify-me.md"; }
 
 # ---- 5. older claude without --json-schema: STATUS block in text still works

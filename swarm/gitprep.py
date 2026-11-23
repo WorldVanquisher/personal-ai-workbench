@@ -305,6 +305,15 @@ def _home_short(path):
     return "~" + path[len(home):] if home != "~" and path.startswith(home + os.sep) else path
 
 
+def shell_path(path):
+    """PATH for a command the operator copies into a shell: under $HOME it reads `~/'rest'`,
+    so the tilde stays outside the quotes and still expands (`'~/x'` would not: R6-COR-009)."""
+    short = _home_short(path)
+    if short.startswith("~/"):
+        return "~/" + shlex.quote(short[2:])
+    return shlex.quote(path)
+
+
 AUTH_WORDS = ("permission denied", "publickey", "authentication failed", "too many authentication failures",
               "repository not found", "correct access rights", "could not read from remote repository")
 HOSTKEY_WORDS = ("host key verification failed", "remote host identification has changed",
@@ -354,7 +363,7 @@ def remote_auth(repo, remote, ref=None, push=False, timeout=30):
     if any(w in low for w in AUTH_WORDS):
         agent = agent_state()
         keys = identity_files(user, host, port)
-        add = "ssh-add %s" % shlex.quote(_home_short(keys[0])) if keys else "ssh-add"
+        add = "ssh-add %s" % shell_path(keys[0]) if keys else "ssh-add"
         state = {"no-agent": "no-agent", "agent-empty": "agent-empty"}.get(agent, "wrong-key")
         res["state"] = state
         res["detail"] = {
@@ -363,7 +372,7 @@ def remote_auth(repo, remote, ref=None, push=False, timeout=30):
             "agent-empty": "%s refused the connection: the ssh-agent holds no key" % host,
             "wrong-key": "%s refused the loaded key(s): ssh-agent has a key, but not one %s accepts for this repository"
                          % (host, host)}[state]
-        probe = "git -C %s ls-remote %s" % (shlex.quote(_home_short(repo)), shlex.quote(url) if push else remote)
+        probe = "git -C %s ls-remote %s" % (shell_path(repo), shlex.quote(url) if push else remote)
         steps = ['eval "$(ssh-agent -s)"   # starts an agent for this shell only'] if state == "no-agent" else []
         if state == "wrong-key":
             steps.append("ssh-add -l   # the keys loaded now; the one %s accepts is not among them" % host)

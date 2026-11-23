@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="endfield">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAI Round Board</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/round.css">
+<script src="/static/round.js" defer></script>
+</head>
+<body>
+<div class="app">
+  <header class="app-header">
+    <h1>PAI Round</h1>
+    <span class="tag signal" title="只读：这一页不会改任何东西">READ-ONLY</span>
+    <span id="state" class="state" role="status" aria-live="polite"></span>
+  </header>
+  <div id="error" class="banner error" role="alert" hidden></div>
+  <main class="panel round-main">
+    <section aria-labelledby="h-round">
+      <h2 id="h-round">轮次</h2>
+      <dl id="round" class="facts"></dl>
+    </section>
+    <section aria-labelledby="h-lanes">
+      <h2 id="h-lanes">Lane <button type="button" id="refresh">刷新状态</button></h2>
+      <div class="table-wrap"><table id="lanes">
+        <thead><tr><th>lane</th><th>状态</th><th>tmux</th><th>worktree</th><th>checkpoint</th><th>queue</th><th>会话名</th><th>分支</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <p class="hint">状态来自 tmux、/proc 和文件，不问模型。信任提示只由你回答。</p>
+    </section>
+    <section aria-labelledby="h-dec">
+      <h2 id="h-dec">待回答的决策</h2>
+      <ul id="decisions"></ul>
+      <p class="hint">回答：<code>pai decide answer SHEET ID --sha SHA --choice …</code>。这一页不提供回答按钮（本轮决策 D5）。</p>
+    </section>
+    <section aria-labelledby="h-col">
+      <h2 id="h-col">交接核对（最近一次 pai round collect）</h2>
+      <div class="table-wrap"><table id="collect">
+        <thead><tr><th>lane</th><th>checkpoint</th><th>SHA256SUMS</th><th>Items</th><th>JEV</th><th>说明</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </section>
+  </main>
+</div>
+</body>
+</html>

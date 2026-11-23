@@ -15,7 +15,10 @@ work in the same checkout at once.
 `<home>` is $PAI_SWARM_HOME or ~/.cache/pai-swarm. Standard library only; POSIX only.
 """
 import contextlib
-import fcntl
+try:
+    import fcntl
+except ImportError:  # native Windows: no lock is ever taken there (the workbench refuses to start), but the
+    fcntl = None     # round lane's modules that import this one must load for `pai vault lint`'s decision checks
 import hashlib
 import json
 import os

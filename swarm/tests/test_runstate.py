@@ -195,7 +195,7 @@ class EndToEnd(WB):
         super().setUp()
         self.note("task-a", priority=9)
         self.note("task-b", priority=8)
-        self.env["PAI_DISPATCH_SETTLE"] = "0.5"
+        self.env["PAI_DISPATCH_SETTLE"] = helpers.FAKE_SETTLE
         self.init()
 
     def json_status(self, *extra):

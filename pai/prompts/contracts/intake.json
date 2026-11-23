@@ -1,0 +1,73 @@
+{
+ "format": "pai-contract/1",
+ "name": "intake",
+ "version": 3,
+ "desc": "INTAKE.md as intake.md asks for.",
+ "source_prompt": "intake",
+ "checks": [
+  {
+   "id": "id-prefix",
+   "type": "ids_prefix",
+   "field": "id_prefix",
+   "pattern": "^\\s*(R\\d+)-[A-Z]{2,5}-\\d{3}\\s",
+   "desc": "every item ID uses the round's prefix from front matter (trial 2026-11-22: two agents took R6 from the directory instead of the prompt's R7)"
+  },
+  {
+   "id": "jev-scores",
+   "type": "section",
+   "pattern": "^#+\\s*JEV"
+  },
+  {
+   "id": "lanes-table",
+   "type": "table_rows",
+   "section": "^#+\\s*Lanes",
+   "rows": [
+    "."
+   ],
+   "desc": "a Lanes table with at least one row"
+  },
+  {
+   "id": "items",
+   "type": "item_blocks",
+   "start": "^\\s*R\\d+-([A-Z]{2,5})-\\d{3}\\s",
+   "fields": [
+    "完成标准|done when",
+    "owner-only",
+    "依赖|depend"
+   ],
+   "min": 10,
+   "max": 50,
+   "desc": "every item has done criteria, owner-only and dependencies; 10-50 items per lane (PRM-D13=B)"
+  },
+  {
+   "id": "decisions",
+   "type": "decisions",
+   "start": "^\\s*- \\[[ xX]\\] \\*\\*",
+   "fields": [
+    "问题|question",
+    "选项|options",
+    "取舍|trade",
+    "推荐|recommend",
+    "默认|default",
+    "阻塞|block"
+   ],
+   "min": 0
+  },
+  {
+   "id": "not-read",
+   "type": "section",
+   "pattern": "没读到|not read"
+  },
+  {
+   "id": "no-session-link",
+   "type": "absent",
+   "pattern": "claude\\.ai/(?:code/)?(?:session|chat)[_/]"
+  }
+ ],
+ "jev": [
+  {
+   "id": "split_ok",
+   "instructions": "Each item in this plan has a checkable completion criterion and says whether only the owner can do it and what it depends on."
+  }
+ ]
+}

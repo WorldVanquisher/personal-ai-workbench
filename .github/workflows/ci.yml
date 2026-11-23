@@ -1,6 +1,7 @@
 name: CI
 
-# Synthetic tests and release-bundle smoke checks on Windows, macOS and Linux, plus
+# Synthetic tests and release-bundle smoke checks on Windows, macOS and Linux, the workbench
+# suite (swarm/tests) and the headless fake-claude script on Linux, plus
 # lightweight runs in Debian, Ubuntu, Fedora and Alpine userspaces.
 # Nothing is published: no release, tag, package upload or secret is used. The uv check
 # installs uv from PyPI and builds the package with setuptools from PyPI.
@@ -62,6 +63,16 @@ jobs:
           else
             python -B -W error::ResourceWarning -m unittest discover -s tests -v
           fi
+
+      # docs lane (R6-DOC-019, R6-COR-008): every `pai` command and flag shown in the manuals exists in
+      # this checkout's --help, and every relative link and anchor resolves. Linux only: the manuals
+      # are the same everywhere, and workbench --help refuses on native Windows.
+      - name: Manuals match the commands (doc_check)
+        if: runner.os == 'Linux'
+        timeout-minutes: 3
+        # R6-COR-079: --schema also checks every front-matter field the manuals and templates name
+        # against docs/frontmatter.schema.json (`pai vault schema`)
+        run: python -B tools/doc_check.py --schema docs/frontmatter.schema.json
 
       - name: Build both release archives
         timeout-minutes: 3
@@ -207,6 +218,62 @@ jobs:
           path: ${{ runner.temp }}/smoke work/smoke-results.json
           if-no-files-found: ignore
           retention-days: 5
+
+  workbench:
+    # swarm/tests (wtpr, agentsmd, splitplan, continuation, transfer, recovery, dispatch, ...) and
+    # the headless end-to-end script. Fakes only: fake claude, fake gh, a private tmux socket and
+    # local bare remotes; no agent, no network, no secret. Linux only: the workbench needs tmux
+    # and /proc (native Windows is refused on purpose; macOS has no /proc).
+    name: workbench / ubuntu / Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+    env:
+      # A test identity for every git commit the suites make; no host configuration is relied on.
+      GIT_AUTHOR_NAME: PAI CI
+      GIT_AUTHOR_EMAIL: ci@example.invalid
+      GIT_COMMITTER_NAME: PAI CI
+      GIT_COMMITTER_EMAIL: ci@example.invalid
+      GIT_CONFIG_GLOBAL: /dev/null
+      PYTHONDONTWRITEBYTECODE: "1"
+      PAI_JEV_CREDENTIAL_STORE: none
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install tmux
+        timeout-minutes: 5
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq tmux > /dev/null
+          tmux -V
+          git --version
+
+      - name: Workbench suite (swarm/tests, strict)
+        timeout-minutes: 20
+        # one process per module, 4 at a time (R6-COR-007: 480 s sequential, 154 s with --jobs 4)
+        run: python -B tools/strict_unittest.py swarm/tests --jobs 4 -v
+
+      - name: Headless end-to-end (fake claude)
+        timeout-minutes: 8
+        env:
+          PAI_REPO: ${{ github.workspace }}
+        run: |
+          bash swarm/tests/run_tests.sh
+          test -z "$(find . -name __pycache__ -print -quit)"
 
   userspace:
     # Lightweight checks in other Linux userspaces, with each image's own python3. Containers run

@@ -19,6 +19,9 @@ FAKE_GH = os.path.join(HERE, "fake_gh.py")
 HUMAN = {"GIT_AUTHOR_NAME": "Ada Human", "GIT_AUTHOR_EMAIL": "ada@example.org",
          "GIT_COMMITTER_NAME": "Ada Human", "GIT_COMMITTER_EMAIL": "ada@example.org"}
 LANES = ("release", "extraction", "demo", "workbooks")
+# The dispatch settle window for every test with a fake agent (R6-COR-007): a fake shows its input box
+# at once, so waiting for it to "settle" only costs time. Tests of the window itself use the shipped 3 s.
+FAKE_SETTLE = "0.2"
 needs_git = unittest.skipUnless(shutil.which("git"), "git is not installed")
 needs_tmux = unittest.skipUnless(shutil.which("git") and shutil.which("tmux") and os.path.isdir("/proc"),
                                  "needs git, tmux and /proc")
@@ -38,9 +41,36 @@ def tmux_reports_bracketed_paste():
         shutil.rmtree(os.path.dirname(sock), ignore_errors=True)
 
 
+# Host variables a test must never inherit: the operator's tmux server, a real JEV key, a git
+# override, a repository a git hook exported, or the host's own git identity and pager.
+HOST_ONLY = ("TMUX", "TMUX_PANE", "TYPESAFE_API_KEY", "PAI_SWARM_GIT", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+             "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE",
+             "GIT_CEILING_DIRECTORIES", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR", "GIT_PAGER", "BASH_ENV", "ENV",
+             "ANTHROPIC_API_KEY", "ANTHROPIC_CUSTOM_HEADERS")
+
+
+# In-process JEV calls in tests (mock endpoints) never append to the operator's usage log.
+os.environ.setdefault("PAI_JEV_USAGE_LOG", os.devnull)
+
+
+def hermetic_env(base=None, **extra):
+    """A copy of the environment for a test's subprocess that does not depend on the host:
+    no global or system git configuration, a fixed test identity (HUMAN), no terminal prompts,
+    and none of HOST_ONLY. `extra` is applied last; a value of None removes that variable."""
+    e = dict(os.environ if base is None else base)
+    for k in HOST_ONLY:
+        e.pop(k, None)
+    e.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_TERMINAL_PROMPT="0", **HUMAN)
+    for k, v in extra.items():
+        if v is None:
+            e.pop(k, None)
+        else:
+            e[k] = v
+    return e
+
+
 def git(cwd, *args, check=True, env=None):
-    e = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_TERMINAL_PROMPT="0", **HUMAN)
-    e.update(env or {})
+    e = hermetic_env(**(env or {}))
     p = subprocess.run(["git", "-C", cwd] + list(args), capture_output=True, text=True, env=e)
     if check and p.returncode != 0:
         raise AssertionError("git %s failed: %s" % (" ".join(args), p.stderr))
@@ -68,19 +98,15 @@ class Fixture(unittest.TestCase):
         self.cfg, self.vault = os.path.join(self.tmp, "claude-config"), os.path.join(self.tmp, "vault")
         for d in (self.root, self.ctl, self.cfg, self.vault):
             os.makedirs(d)
-        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", self.origin], check=True)
-        subprocess.run(["git", "init", "-q", "-b", "main", self.upstream], check=True)
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", self.origin], check=True, env=hermetic_env())
+        subprocess.run(["git", "init", "-q", "-b", "main", self.upstream], check=True, env=hermetic_env())
         git(self.upstream, "remote", "add", "origin", self.origin)
         self.c0 = commit(self.upstream, "README.md", "hello\n", "init")
         git(self.upstream, "push", "-q", "origin", "main")
-        subprocess.run(["git", "clone", "-q", self.origin, self.repo], check=True,
-                       env=dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull))
-        self.env = dict(os.environ, PAI_SWARM_HOME=self.home, GIT_CONFIG_GLOBAL=os.devnull,
-                        GIT_CONFIG_SYSTEM=os.devnull, FAKE_GH_STATE=os.path.join(self.tmp, "gh.json"),
-                        FAKE_GH_REMOTE=self.origin, PAI_SWARM_GH=FAKE_GH, PAI_JEV_CREDENTIAL_STORE="none",
-                        CODEX_HOME=os.path.join(self.tmp, "codex-home"), **HUMAN)
-        for k in ("TMUX", "TMUX_PANE", "TYPESAFE_API_KEY", "PAI_SWARM_GIT"):
-            self.env.pop(k, None)
+        subprocess.run(["git", "clone", "-q", self.origin, self.repo], check=True, env=hermetic_env())
+        self.env = hermetic_env(PAI_SWARM_HOME=self.home, FAKE_GH_STATE=os.path.join(self.tmp, "gh.json"),
+                                FAKE_GH_REMOTE=self.origin, PAI_SWARM_GH=FAKE_GH, PAI_JEV_CREDENTIAL_STORE="none",
+                                CODEX_HOME=os.path.join(self.tmp, "codex-home"))
         self.socket = None
 
     # -- remote owner moves main

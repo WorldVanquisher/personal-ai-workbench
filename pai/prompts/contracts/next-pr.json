@@ -1,0 +1,63 @@
+{
+ "format": "pai-contract/1",
+ "name": "next-pr",
+ "version": 1,
+ "desc": "NEXT-PR.md as next-pr.md asks for.",
+ "source_prompt": "next-pr",
+ "checks": [
+  {
+   "id": "branch",
+   "type": "section",
+   "pattern": "^#+\\s*Branch"
+  },
+  {
+   "id": "commits",
+   "type": "section",
+   "pattern": "^#+\\s*Commits"
+  },
+  {
+   "id": "git-add-paths",
+   "type": "regex",
+   "section": "^#+\\s*Commits",
+   "pattern": "^\\s{2,}[\\w./-]+\\.\\w+\\s*$",
+   "min": 1,
+   "desc": "explicit paths to add"
+  },
+  {
+   "id": "no-add-all",
+   "type": "absent",
+   "pattern": "git add (?:-A|--all|\\.)(?:\\s|$)"
+  },
+  {
+   "id": "pr-body",
+   "type": "section",
+   "pattern": "PR body"
+  },
+  {
+   "id": "checks",
+   "type": "section",
+   "pattern": "Checks before merge"
+  },
+  {
+   "id": "not-included",
+   "type": "section",
+   "pattern": "Not included"
+  },
+  {
+   "id": "no-session-link",
+   "type": "absent",
+   "pattern": "claude\\.ai/(?:code/)?(?:session|chat)[_/]|chatgpt\\.com/c/"
+  },
+  {
+   "id": "no-ai-attribution",
+   "type": "absent",
+   "pattern": "(?i)co-authored-by:\\s*claude|generated with \\[?claude"
+  }
+ ],
+ "jev": [
+  {
+   "id": "ready",
+   "instructions": "An owner could publish this PR plan as written: it names the branch, the exact files of each commit, the commit messages and the checks to run before merging."
+  }
+ ]
+}

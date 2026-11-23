@@ -1,0 +1,12 @@
+ ▐▛███▛█   Claude Code v2.1.327
+▝▜██████▀  Opus 5.5 · Claude Max
+ ▝▝   ▝▝   ~/workspace/flh-workers/R6-20261122/release · /rc            
+▎ Your Max plan includes $100 a month in API credits to power your apps and
+▎ agents. Claim them at https://clau.de/api-credits
+  /remote-control is active · Continue here, on your phone, or at 
+  https://claude.ai/code/session_REDACTED
+                                        ✔ Update installed · Restart to update
+────────────────────────────────────────────────────── FLH R6-20261122 release ─
+❯ Try "fix typecheck errors"
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)               

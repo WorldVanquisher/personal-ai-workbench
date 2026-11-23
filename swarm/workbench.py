@@ -485,6 +485,8 @@ def jev_check(key, assume_yes):
 
 def cmd_jev(a):
     import jev
+    if (code := jev.run_extra(a, log)) is not None:  # jev's own verbs (usage), R6-COR-050
+        return code
     key, where = jev.api_key()
     if a.jev_cmd == "status":
         log("JEV: %s" % ("key available from %s" % {"env": "TYPESAFE_API_KEY"}.get(where, where) if key else
@@ -1407,8 +1409,10 @@ def cmd_doctor(a):
         proj = current_project(types.SimpleNamespace(project=a.project))
     except Stop:
         pass
-    names = a.agent or ([proj["default_agent"]] if proj and proj.get("default_agent") else list(agents.names()))
-    rows = self_rows(proj) + doctor.check(tuple(names))
+    chosen = a.agent or ([proj["default_agent"]] if proj and proj.get("default_agent") else None)
+    names = chosen or list(agents.names())
+    # before an agent is chosen (pai init), a missing agent is for later, not a failure (R6-FIN-020)
+    rows = self_rows(proj) + doctor.check(tuple(names), agents_essential=bool(chosen))
     if proj:
         res = gitprep.remote_auth(proj["repo"], proj["remote"], "refs/heads/" + proj["base_branch"])
         rows.append({"tool": "remote access", "used_by": "run, next", "state": "ok" if res["ok"] else "unknown",
@@ -1429,7 +1433,44 @@ def cmd_doctor(a):
     else:
         doctor.show(rows)
         log("\ndoctor changed nothing.%s" % ("" if proj else " (No pai project here: `pai init` in your checkout.)"))
+        log(doctor_next(proj, doctor.failing(rows), names))
     return 0 if not doctor.failing(rows) else 1
+
+
+def manual(name):
+    """A manual's local copy (archive or checkout: docs/ beside swarm/), else the file on GitHub
+    for this version (an installed package has no docs/)."""
+    local = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", name)
+    if os.path.isfile(local):
+        return local
+    try:
+        from pai import __version__ as v
+        ref = "v" + v
+    except ImportError:
+        ref = "main"
+    return "https://github.com/WorldVanquisher/personal-ai-workbench/blob/%s/docs/%s" % (ref, name)
+
+
+def doctor_next(proj, failing, agent_names=()):
+    """doctor's last line: the manual section that matches what it found."""
+    if failing and isinstance(failing, list) and all(
+            any(r["tool"] == a or r["tool"].startswith(a + " ") for a in agent_names) for r in failing):
+        # only the chosen agent is missing or logged out: that is the step before section 6, not a breakdown
+        return ('Next: install and log in to %s (the REPAIR lines above), then `pai doctor` again; %s, section 6 '
+                '"Your first round" needs it.\n中文：先装好并登录 %s，再跑 `pai doctor`；%s 第 6 节「第一轮：一个 worker」'
+                '需要它。' % (" or ".join(agent_names), manual("FIRST-USE.md"), " 或 ".join(agent_names),
+                             manual("FIRST-USE.zh-CN.md")))
+    # every Next line has a Chinese twin that names the Chinese manual (R6-FIN-030, newbie2 F3)
+    if failing:
+        return ('Next: fix each line marked for pai run above, then `pai doctor` again. Stuck? %s, section 8 '
+                '"When something goes wrong".\n中文：修好上面标给 pai run 的每一行，再跑 `pai doctor`。卡住了？%s '
+                '第 8 节「出错时怎么办」。' % (manual("FIRST-USE.md"), manual("FIRST-USE.zh-CN.md")))
+    if not proj:
+        return ('Next: %s, section 5 "Save this checkout\'s defaults: pai init".\n中文：%s 第 5 节「保存这个仓库的'
+                '默认设置」。' % (manual("FIRST-USE.md"), manual("FIRST-USE.zh-CN.md")))
+    return ('Next: %s, section 6 "Your first round" (or `pai guide` first); for a later round, %s, part (b).\n'
+            '中文：%s 第 6 节「第一轮：一个 worker」（也可以先跑 `pai guide`）；之后的轮次见 %s 的 (b) 部分。' % (
+                manual("FIRST-USE.md"), manual("REFRESH.md"), manual("FIRST-USE.zh-CN.md"), manual("REFRESH.zh-CN.md")))
 
 
 def cmd_setup(a):
@@ -1898,6 +1939,7 @@ def parser():
     nx.add_argument("--wait", type=float, default=10.0)
     jv = p("jev", "optional JEV: status, or check (one real, possibly billed request)", run=False)
     jv.add_argument("jev_cmd", choices=("status", "check"))
+    __import__("jev").extend_parser(jv)  # jev's own verbs (usage), R6-COR-050
     jv.add_argument("--yes", action="store_true", help="send the check request without asking")
     sv = p("server", "EXPERIMENTAL Markdown server: start | status | stop | token | uninstall", run=False)
     sv.add_argument("server_cmd", choices=("start", "status", "stop", "token", "uninstall"))
@@ -1928,6 +1970,8 @@ COMMANDS = {"init": cmd_init, "doctor": cmd_doctor, "setup": cmd_setup, "run": c
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] in ("round", "decide"):  # R6 round lane: own parsers (swarm/round.py, swarm/decide.py)
+        return __import__(argv[0]).main(argv[1:])
     if argv and argv[0] in ("worktree", "plan"):  # their own parsers, `--help` included
         if argv[0] == "worktree":
             import refresh

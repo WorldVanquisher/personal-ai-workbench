@@ -17,7 +17,9 @@ Steps, in order (each one's full output goes to WORK/logs/<step>.log):
   path-SHELL  tools/path_hint_check.py SHELL: pai install's PATH advice run in bash, zsh, fish and
               PowerShell (each needs that shell)
   package     tools/package_check.py (wheel, upgrade, interrupted install, uninstall, one build)
-              needs git, tmux and setuptools (importable, or --setuptools DIR for an offline build)
+              needs git, tmux, pip, venv with ensurepip and setuptools (importable, or --setuptools
+              DIR for an offline build); a missing one is SKIPPED with its name, never FAIL
+  doc-check   tools/doc_check.py: manuals against the real --help, links and anchors (when present)
   tests:DIR   any other folder of test_*.py files is found and run like core (strict)
 
 Test groups are discovered, not listed: every folder holding test_*.py files becomes a step
@@ -28,7 +30,8 @@ A step whose tools are missing is reported as SKIPPED with the missing tool, nev
 a step that depends on one that failed is SKIPPED with that reason. Exit 0 only when no step
 failed; skipped steps are listed in the summary (with --require-all they also fail the run).
 The summary also gives each step's wall time and every test the suites skipped, with its reason
-(platform-specific skips, such as Windows-only tests); WORK/verify-report.json holds all of it.
+(platform-specific skips, such as Windows-only tests); WORK/verify-report.json holds all of it,
+with `"ci": "yes"|"no"` per step: whether a workflow in .github/workflows runs that step's command too.
 Nothing here pushes, publishes or touches your configuration: every step works in WORK.
 Not covered: native Windows and macOS (CI), real agents (docs/1.0/REAL-AGENT-SMOKE.md), WSL.
 """
@@ -65,8 +68,99 @@ def tool_version(argv):
     except (OSError, subprocess.TimeoutExpired, IndexError):
         return None
 
+def package_missing(python=None, setuptools_dir=None):
+    """What the package step needs that this interpreter lacks: pip (it builds the wheel with
+    `python -m pip wheel` and installs it into venvs), ensurepip (a venv without it has no pip,
+    as on Ubuntu without python3-venv) and setuptools. An empty list means the step can run."""
+    python = python or sys.executable
+    lacking = []
+    probe = subprocess.run([python, "-B", "-m", "pip", "--version"], capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL) if os.path.exists(python) else None
+    if probe is None or probe.returncode != 0:
+        lacking.append("pip (`%s -m pip --version` failed; install python3-pip)" % os.path.basename(python))
+    probe = subprocess.run([python, "-B", "-c", "import ensurepip, venv"], capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL) if os.path.exists(python) else None
+    if probe is None or probe.returncode != 0:
+        lacking.append("venv with ensurepip (install python3-venv)")
+    if setuptools_dir:
+        if not os.path.isdir(os.path.join(setuptools_dir, "setuptools")):
+            lacking.append("setuptools in %s" % setuptools_dir)
+    else:
+        probe = subprocess.run([python, "-B", "-c", "import setuptools"], capture_output=True, text=True,
+                               stdin=subprocess.DEVNULL) if os.path.exists(python) else None
+        if probe is None or probe.returncode != 0:
+            lacking.append("setuptools (offline build; pass --setuptools DIR)")
+    return lacking
+
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# What each step runs, as it would appear in a CI workflow. A step is "covered by CI" when one of
+# its signatures appears in a `run:` line of .github/workflows/*.yml, so the answer follows the
+# workflow files instead of a hand-kept list (R6-COR-006). Read as text: no YAML parser needed.
+CI_SIGNATURES = {
+    "core": ("strict_unittest.py tests", "unittest discover -s tests"),
+    "workbench": ("strict_unittest.py swarm/tests",),
+    "archives": ("build_bundle.py",),
+    "bundle": ("bundle_smoke.py",),
+    "headless": ("swarm/tests/run_tests.sh",),
+    "onboarding": ("onboarding_acceptance.py",),
+    "quickstart": ("quickstart_walkthrough.py",),
+    "console": ("console_walkthrough.py",),
+    "package": ("package_check.py",),
+    "doc-check": ("doc_check.py",),
+}
+
+
+def doc_check_cmd(root):
+    """tools/doc_check.py's arguments, with --schema when the front matter schema is in the tree (R6-COR-079:
+    every front-matter field the manuals and templates name must be in docs/frontmatter.schema.json);
+    None when doc_check is not in the tree."""
+    tool = os.path.join(root, "tools", "doc_check.py")
+    if not os.path.exists(tool):
+        return None
+    schema = os.path.join(root, "docs", "frontmatter.schema.json")
+    return [tool] + (["--schema", schema] if os.path.exists(schema) else [])
+
+
+def ci_runs(root=None):
+    """The `run:` text of every workflow under ROOT/.github/workflows (comments dropped)."""
+    d = os.path.join(root or ROOT, ".github", "workflows")
+    text = []
+    if os.path.isdir(d):
+        for name in sorted(os.listdir(d)):
+            if name.endswith((".yml", ".yaml")):
+                with open(os.path.join(d, name), encoding="utf-8") as f:
+                    text.extend(line.split(" #", 1)[0] for line in f if not line.lstrip().startswith("#"))
+    return "".join(text)
+
+
+def ci_covers(step, runs):
+    """'yes' when CI runs this step's command too, else 'no' (path-SHELL: that shell's check)."""
+    sigs = CI_SIGNATURES.get(step)
+    if sigs is None and step.startswith("path-"):
+        sigs = ("path_hint_check.py " + step[5:],)
+    if sigs is None and step.startswith("tests:"):
+        sigs = ("strict_unittest.py " + step[6:],)
+    return "yes" if sigs and any(sg in runs for sg in sigs) else "no"
 PY = [sys.executable, "-B"]
+
+
+SOCKET_MAX = 107  # sun_path is 108 bytes on Linux, with the closing NUL
+
+
+def tmux_socket_warning(work, uid=None):
+    """A warning when tmux's socket under WORK would be too long (R6-FIN-007, round NOTES-FOR-core cp-K).
+    The steps run with TMPDIR=WORK/tmp, so tmux puts its socket at WORK/tmp/tmux-UID/default; past 107 bytes
+    tmux cannot create it and the tests fail later with a puzzling "no window". None when it fits."""
+    if uid is None:
+        uid = os.getuid() if hasattr(os, "getuid") else 0
+    sock = os.path.join(work, "tmp", "tmux-%d" % uid, "default")
+    n = len(sock.encode("utf-8"))
+    if n <= SOCKET_MAX:
+        return None
+    return ("WARNING: --work is too long for tmux: its socket %s would be %d bytes (at most %d), so the tmux steps "
+            "will fail with \"no window\". Use a shorter --work, e.g. /tmp/pv-1." % (sock, n, SOCKET_MAX))
 
 
 def main(argv=None):
@@ -90,6 +184,9 @@ def main(argv=None):
         return 0
     started = time.time()
     work = os.path.abspath(a.work) if a.work else tempfile.mkdtemp(prefix="pai-verify-")
+    warn = tmux_socket_warning(work)
+    if warn:  # before any step: the tmux steps would fail much later with only "no window"
+        print(warn, file=sys.stderr, flush=True)
     if a.work:
         if os.path.exists(work):
             ap.error("--work %s exists; give a new folder" % work)
@@ -147,22 +244,21 @@ def main(argv=None):
         return res
 
     def needs_extra(name):
-        if name != "package":
-            return []
-        if a.setuptools:
-            return [] if os.path.isdir(os.path.join(a.setuptools, "setuptools")) else ["setuptools in %s" % a.setuptools]
-        try:
-            import setuptools  # noqa: F401
-            return []
-        except ImportError:
-            return ["setuptools (offline build; pass --setuptools DIR)"]
+        return package_missing(setuptools_dir=a.setuptools) if name == "package" else []
 
     step("core", PY + [os.path.join(ROOT, "tools", "strict_unittest.py"), "tests", "-v"])
     if not a.quick:
-        step("workbench", PY + [os.path.join(ROOT, "tools", "strict_unittest.py"), "swarm/tests", "-v"],
+        step("workbench", PY + [os.path.join(ROOT, "tools", "strict_unittest.py"), "swarm/tests", "--jobs",
+                                str(min(4, os.cpu_count() or 1)), "-v"],
              needs=("git", "tmux"), timeout=2400)
         for g in extra:  # a test folder nobody listed is still run
             step("tests:" + g, PY + [os.path.join(ROOT, "tools", "strict_unittest.py"), g, "-v"])
+    doc_check = doc_check_cmd(ROOT)
+    if doc_check:  # docs lane, R6-COR-008: manuals against the real --help, links, anchors; R6-COR-079: + schema
+        step("doc-check", PY + doc_check)
+    else:
+        rows.append(("doc-check", "SKIPPED", "tools/doc_check.py is not in this tree"))
+        state["doc-check"], timings["doc-check"] = "SKIPPED", None
     dist = os.path.join(work, "dist")
     step("archives", PY + [os.path.join(ROOT, "tools", "build_bundle.py"), "--out", dist])
     tgz = zips = None
@@ -210,9 +306,14 @@ def main(argv=None):
         for (stp, reason), tests in sorted(by_reason.items()):
             print("  %-10s %3d  %s" % (stp, len(tests), reason))
     print("platform  %s" % ", ".join("%s %s" % kv for kv in plat.items() if kv[1]))
+    runs = ci_runs()
+    local_only = [n for n, _, _ in rows if ci_covers(n, runs) == "no"]
+    if local_only:
+        print("not run by CI (this machine is their only evidence): %s" % ", ".join(local_only))
     with open(os.path.join(work, "verify-report.json"), "w") as f:
         json.dump({"platform": plat, "wall_seconds": total, "steps": [{"step": n, "result": r, "detail": w,
-                                                                        "seconds": timings.get(n)} for n, r, w in rows],
+                                                                        "seconds": timings.get(n),
+                                                                        "ci": ci_covers(n, runs)} for n, r, w in rows],
                    "skipped_tests": skips, "groups": found}, f, indent=1)
     return 1 if failed or (a.require_all and skipped) else 0
 

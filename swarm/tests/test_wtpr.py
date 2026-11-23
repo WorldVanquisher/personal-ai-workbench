@@ -211,7 +211,7 @@ class WorktreePR(helpers.Fixture):
         msg = os.path.join(self.tmp, "msg")
         with open(msg, "w") as f:
             f.write(plan["draft"]["message"] + "\n")
-        env = dict(os.environ, GIT_LITERAL_PATHSPECS="1")
+        env = dict(self.env, GIT_LITERAL_PATHSPECS="1")  # hermetic: never the host's git identity
         subprocess.run(["git", "-C", self.wt, "add", "--", "docs/new note.md"], check=True, env=env)
         subprocess.run(["git", "-C", self.wt, "commit", "-q", "--only", "-F", msg, "--", "docs/new note.md", "README.md"],
                        check=True, env=env)  # what publish does, then the process dies before the journal write

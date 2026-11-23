@@ -1,0 +1,105 @@
+
+# 1. A tiny project with a local remote (a stand-in for a GitHub clone)
+
+$ ls
+shop.py
+test_shop.py
+
+# 2. Save this checkout's defaults (one review check: the tests)
+
+$ pai init --default-agent claude --base main --check "test=python3 test_shop.py" --workers 2 --no-input | tail -4
+  pai task new "What the agent should do" --body "How to check it" --write
+  pai run --dry-run
+  pai run
+(pai config edit changes any default; project shop)
+
+# 3. Two task notes: one per lane
+
+$ pai task new "Add a discount" --body "Add discount(prices, pct) to shop.py and a test for it in test_shop.py." --write | tail -1
+saved. Next: pai run --dry-run   (then pai run)
+
+$ pai task new "Write a README" --body "Create README.md: what shop.py does, and how to run the test." --write | tail -1
+saved. Next: pai run --dry-run   (then pai run)
+
+$ pai task list
+task notes in $WORK/home/.local/share/pai-workbench/tasks/shop (2; 2 todo)
+  todo         p1   add-a-discount                 Add a discount
+  todo         p1   write-a-readme                 Write a README
+
+`pai run` gives lanes the todo notes in this order. Next: pai run --dry-run
+
+# 4. The plan, then the run: two lanes, two worktrees, two fake agents
+
+$ pai run --dry-run | grep -E "^lane|DRY RUN"
+lane a    claude (rc)                worktree $WORK/home/code/shop-pai-lanes/a  (new directory: the agent will ask for folder trust)
+lane b    claude (rc)                worktree $WORK/home/code/shop-pai-lanes/b  (new directory: the agent will ask for folder trust)
+lane      a              create worktree + new branch
+lane      b              create worktree + new branch
+lane      a              worker: start a window and Claude; task note add-a-discount
+lane      b              worker: start a window and Claude; task note write-a-readme
+DRY RUN: nothing was fetched, created, written or started; the base commit is resolved when the run starts.
+
+$ pai run --yes --wait 20 | grep -E "^started|^summary|task: "
+started     a            window pai-20261122-142846:a (@0), claude (rc), branch pai/20261122-142846/a
+started     b            window pai-20261122-142846:b (@1), claude (rc), branch pai/20261122-142846/b
+  a            claude/rc                running (pid 3460426)        task: delivered  rc: verified
+  b            claude/rc                running (pid 3460441)        task: delivered  rc: verified
+summary   2 lane(s): 1 running, 1 delivered; every task delivered
+
+$ pai status --brief
+run shop/20261122-142846: 2 lane(s): 2 delivered; every task delivered
+
+a  delivered  pid 3460426
+  Claude's own transcript for this worktree records the prompt (user message at
+  2026-11-22T19:28:51.787Z); the agent is idle again (Claude's session record for this process says
+  idle (no dialog waiting))
+  next: pai logs a --run 20261122-142846 --tail 40   # its answer and handoff
+
+b  delivered  pid 3460441
+  Claude's own transcript for this worktree records the prompt (user message at
+  2026-11-22T19:28:52.397Z); the agent is idle again (Claude's session record for this process says
+  idle (no dialog waiting))
+  next: pai logs b --run 20261122-142846 --tail 40   # its answer and handoff
+
+# 5. (the agent's work, done by the script: the fake agent does not edit files)
+
+$ git -C "$LANES/a" log --oneline -2
+bc7dc6f Add discount()
+8117c6a A tiny shop
+
+$ git -C "$LANES/b" log --oneline -2
+c028a79 Add a README
+8117c6a A tiny shop
+
+# 6. What would be published, and the review check on each lane
+
+$ pai pr plan a | grep -E "^commits|^ +[0-9a-f]{7}|^check|^BLOCKED|^PLAN"
+commits   1 ahead of base:
+            bc7dc6f Example User: Add discount()
+check     test         python3 test_shop.py   last result for this commit: none (`pr open` runs it)
+BLOCKED   cannot ask GitHub about existing PRs: the remote is not a GitHub repository; set repository.github in the manifest
+PLAN ONLY: no check was run, nothing was pushed or opened.
+[exit 1]
+
+$ pai pr check a | grep -E "^check|^review"
+check test         PASSED (exit 0, 0.0s)  python3 test_shop.py
+review    checks passed at bc7dc6f0a5ab (snapshot sha256 eb599052ee55466f)
+
+$ pai pr check b | grep -E "^check|^review"
+check test         PASSED (exit 0, 0.0s)  python3 test_shop.py
+review    checks passed at c028a794173f (snapshot sha256 d06dbecdcbbfae69)
+
+# 7. Close the round: stop both workers (worktrees, branches and notes stay)
+
+$ pai cleanup --apply --stop-running | grep -E "stopped|closed"
+             stopped: the worker exited (exited (status 0))
+             closed window @0
+             stopped: the worker exited (exited (status 0))
+             closed window @1
+Worktrees, branches, uncommitted edits, task notes and review records were left as they are. To start the closed workers again on the same branches: `rc up MANIFEST --resume` (or `pai resume`).
+
+$ git -C "$HOME/code/shop" branch --list "pai/*"
++ pai/20261122-142846/a
++ pai/20261122-142846/b
+
+# Done. Everything is under $WORK (delete it when you have looked: rm -rf "$WORK").

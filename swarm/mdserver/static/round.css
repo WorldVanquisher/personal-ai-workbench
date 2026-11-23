@@ -1,0 +1,11 @@
+.round-main { display: grid; gap: 1.25rem; padding: 1rem; }
+.round-main h2 { display: flex; align-items: center; gap: .75rem; }
+.table-wrap { overflow-x: auto; }
+.round-main table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+.round-main th, .round-main td { border-bottom: 1px solid var(--border); padding: .35rem .5rem; text-align: left; vertical-align: top; }
+.round-main td.state-running { color: var(--add); }
+.round-main td.state-blocked-on-dialog, .round-main td.state-owner-draft { background: var(--signal); font-weight: 600; }
+.round-main td.state-exited, .round-main td.state-no-window { color: var(--del); }
+.round-main code, .round-main .mono { font-family: var(--ef-mono); }
+#decisions li { margin-bottom: .5rem; }
+.disagrees { color: var(--del); font-weight: 600; }

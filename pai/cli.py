@@ -1,15 +1,22 @@
-"""Command line: `python3 -m pai {init,doctor,check,context,handoff,install,queue} …`."""
+"""Command line: `python3 -m pai COMMAND …` (`pai --help` lists the commands)."""
 
 import argparse
 import os
 import sys
 
 from pai import __version__, config, context, doctor, handoff, initcfg, install, privacy, workqueue
+from pai import commands, promptlib, vault  # registry: one `commands.use` line per feature (R6-COR-049)
+
+commands.use(handoff.CLI)  # pai-handoff/2: handoff new v2 flags, seal, approve, reject (R6-COR-019..040)
+commands.use(vault.CLI)  # pai vault lint|wait|schema (R6-COR-039..044)
+commands.use(commands.CONTEXT_WORKTREE)  # pai context --worktree PATH (R6-COR-061)
+commands.use(commands.SECRETS_WHERE)  # pai secrets where (R6-COR-069)
+commands.use(promptlib.CLI)  # pai prompt ...; pai init installs the library (R6-PRM-011, R6-PRM-082)
 
 INIT_EPILOG = """examples:
   preview (writes nothing):
     pai init flh --repo /abs/path/repo --vault /abs/path/vault \\
-      --memory "Agent Inbox/PAI-001-X" --inbox "Agent Inbox" \\
+      --memory "Memory/PAI-001-X" --inbox "Agent Inbox" \\
       --markdown-root "30 Projects" --project-note "30 Projects/Project.md"
   (Windows: --repo "C:\\path\\to\\repo" --vault "D:\\path\\to\\vault"; on PowerShell continue lines with `)
   then write it, exactly as previewed:
@@ -24,7 +31,7 @@ def _parser():
     p.add_argument("--config", help="configuration file (default: $PAI_CONFIG, else %s)" % (
         config.DEFAULT_CONFIG.replace("%", "%%") if config.PACKAGED else "pai.local.toml in the pai directory"))
     p.add_argument("--version", action="version", version=f"pai {__version__}")
-    sub = p.add_subparsers(dest="cmd", required=True, metavar="{init,doctor,check,context,handoff,install,queue}")
+    sub = p.add_subparsers(dest="cmd", required=True)  # the usage line lists every command (R6-COR-080)
 
     i = sub.add_parser("init", help="create a local configuration from explicit paths (preview unless --write)",
                        epilog=INIT_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -87,6 +94,7 @@ def _parser():
                    "write nothing")
     n.add_argument("--keep-private", action="store_true", help="keep agent session links and credential-like text "
                    "(removed by default, so a handoff can be shared)")
+    commands.add_all(sub, {"init": i, "handoff": hs, "handoff new": n, "context": c})
     workqueue.add_parser(sub)
     return p
 
@@ -108,10 +116,13 @@ def _init(a):
     print("# Validation: roots valid. Sources:")
     for s in project.sources:
         print(f"#   {s.status:8} {s.kind:12} {s.label}{'  (' + s.reason + ')' if s.reason else ''}")
+    print("".join(f"# WARNING: {w}\n" for w in handoff.layout_warnings(project)), end="")  # R6-COR-016
+    commands.hook("init before-write", a)  # registered features (R6-COR-081)
     if not a.write:
         print(f"\n# Re-run with --write to create {path}. Existing files are never overwritten.")
         return 0
     initcfg.write(path, text)
+    commands.hook("init after-write", a)
     print(f"\n# Wrote {path} ({initcfg.permission_note()}). Next: pai doctor {a.project}")
     return 0
 
@@ -125,6 +136,8 @@ def main(argv=None):
             return install.main(a)
         if a.cmd == "queue":
             return workqueue.main(a)
+        if (code := commands.dispatch(a, lambda: config.load(a.project, a.config))) is not None:
+            return code
         if a.cmd == "doctor":
             r = doctor.run(a.config, a.project, a.agents)
             print("\n".join(r.lines))
@@ -171,7 +184,7 @@ def main(argv=None):
                                      {k: v for k, v in states.items() if v}, summary, *lists), end="")
                 return 0
             path = handoff.create(project, a.task_id, states, summary, *lists[:4], decisions=lists[4],
-                                  needs_owner=lists[5])
+                                  needs_owner=lists[5], **handoff.v2_args(a))
             print(path)
             return 0
     except (config.ConfigError, handoff.HandoffError) as e:

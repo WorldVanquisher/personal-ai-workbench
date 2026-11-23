@@ -30,7 +30,11 @@ class DiscoveryTests(unittest.TestCase):
                                 "--validation", "failed", "--proposal", "Lift the deployment freeze")
         self.assertEqual((rc, err), (0, ""))
         rc, listing, _ = run_cli(*args, "handoff", "list", "demo")
-        self.assertEqual(rc, 1)  # registered memory directory has no HANDOFF.md
+        # The fixture keeps its memory package inside the Inbox: a folder without HANDOFF.md is
+        # skipped with one line and a layout warning, not a discovery problem (R6-COR-016).
+        self.assertEqual(rc, 0, listing)
+        self.assertIn("Skipped 1 folder(s) without HANDOFF.md (not handoffs, e.g. a memory package): 'MEM-1/'", listing)
+        self.assertIn("WARNING: the memory package (Inbox/MEM-1) is inside the inbox (Inbox)", listing)
         self.assertIn(Path(path.strip()).parent.name, listing)
         self.assertIn("approved=false", listing)
         rc, out, err = run_cli(*args, "context", "demo", "--task", "release", "--handoffs", "1")
@@ -58,17 +62,18 @@ class DiscoveryTests(unittest.TestCase):
                                 "--needs-owner", "Token ghp_" + "Ab12Cd34" * 5 + " was in the log")
         self.assertEqual(rc, 0, err)
         text = Path(path.strip()).read_text(encoding="utf-8")
-        self.assertIn("## Decisions made within the worker's authority\n\nWhat was chosen, why, and how to reverse it.\n\n"
+        # pai-handoff/2 section names (R6-COR-020), the same as pai/prompts/checkpoint.md
+        self.assertIn("## Decisions within authority\n\nWhat was chosen, why, and how to reverse it.\n\n"
                       "- Quoted every value in the refresh commands", text)
-        self.assertIn("## Decisions for the owner (not acted on)", text)
+        self.assertIn("## Decisions for the owner\n\nAbove the worker's authority", text)
         self.assertIn("- Make --expect-plan required: safer but breaks scripts", text)
         self.assertNotIn("Ab12Cd34Ab12", text, "the privacy filter covers the new fields")
         self.assertIn("removed  needs-owner 2: GitHub token", err)
         rc, out, _ = run_cli(*args, "context", "demo", "--task", "release", "--handoffs", "1")
-        self.assertIn("Decisions for the owner (not acted on)", out)
+        self.assertIn("## Decisions for the owner", out)
         plain = self.create("T-2")
         body = plain.read_text(encoding="utf-8")
-        self.assertIn("## Decisions made within the worker's authority", body)
+        self.assertIn("## Decisions within authority", body)
         self.assertEqual(body.count("- None recorded."), 2, "empty sections say so")
 
     def test_isolation_metadata_and_shallow_reads(self):
@@ -128,8 +133,9 @@ class DiscoveryTests(unittest.TestCase):
         (invalid / "HANDOFF.md").write_bytes(b"\xff")
         reports, issues = handoff.discover(self.p)
         self.assertEqual(len(reports), 1)
-        self.assertEqual(len(issues), len(mutations) + 3)  # memory + missing + invalid UTF-8
-        self.assertTrue(any("missing/HANDOFF.md" in x for x in issues))
+        self.assertEqual(len(issues), len(mutations) + 1)  # + invalid UTF-8; folders without HANDOFF.md are skipped
+        self.assertFalse(any("missing/HANDOFF.md" in x for x in issues))
+        self.assertEqual(handoff.discover_all(self.p)[2], ["MEM-1", "missing"])
         out, problem = handoff.listing(self.p)
         self.assertTrue(problem)
         self.assertIn("MALFORMED", out)
@@ -268,6 +274,19 @@ class DiscoveryTests(unittest.TestCase):
         self.assertIn("[HUMAN] Public deployment is frozen.", out)
         self.assertNotIn("HANDOFF SHOULD WAIT", out)
         self.assertIn("OMITTED 1 for context budget", out)
+
+    def test_layout_warnings(self):
+        """R6-COR-016: pai init, pai doctor and handoff list warn when the memory package is inside the
+        Inbox (this fixture), and say nothing when they sit side by side."""
+        self.assertEqual(len(handoff.layout_warnings(self.p)), 1)
+        apart = mock.Mock(memory=os.path.join(self.p.vault, "Memory"), inbox=self.p.inbox, memory_rel="Memory",
+                          inbox_rel="Inbox")
+        self.assertEqual(handoff.layout_warnings(apart), [])
+        inbox_in_memory = mock.Mock(memory=os.path.join(self.p.vault, "Mem"), inbox=os.path.join(self.p.vault, "Mem", "In"),
+                                    memory_rel="Mem", inbox_rel="Mem/In")
+        self.assertIn("inside the memory package", handoff.layout_warnings(inbox_in_memory)[0])
+        rc, out, _ = run_cli("--config", str(self.f.cfg), "doctor", "demo")
+        self.assertIn("is inside the inbox", out)
 
     def test_default_does_not_discover(self):
         with mock.patch.object(handoff, "discover", side_effect=AssertionError("must not scan")):

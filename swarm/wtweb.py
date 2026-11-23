@@ -135,7 +135,8 @@ class WorktreeWeb:
             p = agentsmd.plan(w["path"], str(d.get("goal") or "").strip() or "(no goal given)",
                               [str(x) for x in d.get("scope") or [] if str(x).strip()], d.get("owner") or None,
                               d.get("lane") or None, checks, d.get("file") or "AGENTS.md", bool(d.get("jev")),
-                              [str(x) for x in d.get("accept") or []], None, existing=text)
+                              [str(x) for x in d.get("accept") or []], None, existing=text,
+                              remote=self.remote, base=self.base)
         except agentsmd.InitError as e:
             raise server.Refused(409, str(e))
         new = p["new"].lstrip("﻿").replace("\r\n", "\n")

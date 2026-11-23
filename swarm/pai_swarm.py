@@ -47,6 +47,13 @@ GUARD = os.path.join(HERE, "guard.py")
 CACHE = wtlock.home()  # $PAI_SWARM_HOME or ~/.cache/pai-swarm: run files, worktree locks, task records
 
 DEFAULT_TOOLS = ["Read", "Edit", "Write", "MultiEdit", "Glob", "Grep", "TodoWrite"]
+# R6-COR-077 (owner decision D-R6-1 = A): acceptEdits. A real run (2026-11-22, Claude Code 2.1.330,
+# haiku) showed that a headless worker under `manual` cannot even make the writes its task asks for:
+# the edit waits for an approval nobody can give in -p mode, and the task ends in review. Under
+# acceptEdits the same smoke passed 7/7 and the write outside the task's paths was still refused by
+# the guard hook (swarm/guard.py), which enforces `paths:` whatever the mode. `--permission-mode
+# manual` stays available for sessions where a person is present to approve.
+DEFAULT_PERMISSION_MODE = "acceptEdits"
 DEFAULT_BASH = [
     "npm test *", "npm run test *", "npm run lint *", "npm run build *", "npx tsc *",
     "pnpm test *", "yarn test *", "pytest *", "python -m pytest *", "python3 -m pytest *",
@@ -184,7 +191,7 @@ def worker_settings(repo, task_paths, no_agents=False):
         "hooks": {
             "PreToolUse": [
                 {"matcher": "Bash",
-                 "hooks": [{"type": "command", "command": "%s %s bash --root %s" % (py, guard, root)}]},
+                 "hooks": [{"type": "command", "command": "%s %s bash --root %s%s" % (py, guard, root, allow)}]},
                 {"matcher": "Edit|Write|MultiEdit|NotebookEdit",
                  "hooks": [{"type": "command",
                             "command": "%s %s edit --root %s%s" % (py, guard, root, allow)}]},
@@ -540,6 +547,11 @@ class Runner:
         body = head + "\n" + "\n".join(lines) + "\n" + jev_line + ("\n" + text if text else "")
         meta.update({"status": status, "last_run": self.run_id, "session": sid,
                      "cost_usd": round(cost, 4) if isinstance(cost, (int, float)) else None})
+        # R6-COR-071: the worker's own cost and tokens go to the usage ledger (numbers only)
+        usage = (res.get("data") or {}).get("usage") if isinstance(res.get("data"), dict) else None
+        jev.record_usage("agent", dict(usage if isinstance(usage, dict) else {},
+                                       **({"cost_usd": cost} if isinstance(cost, (int, float)) else {})),
+                         res.get("seconds") or 0, state=status, model=res.get("model"))
         task.update(meta=meta, append=body)
         res["status"], res["cost"] = status, cost
         log("%-8s %s (%dm%02ds)" % (status.upper(), task.name, mins, secs))
@@ -722,7 +734,9 @@ def cmd_triage(args):
             continue
         act = r["actionable"] or 0
         meta = {"jev_actionable": round(act, 2)}
-        if r["tier"] and (r["tier_confidence"] or 0) >= 0.6 and not t.meta.get("model"):
+        # R6-COR-032: a model only for a note that becomes todo; a vague note (needs-detail) or one that
+        # stays in the inbox has no task yet to pick a model for (2026-11-22: "make the app better" got opus).
+        if act >= 0.7 and r["tier"] and (r["tier_confidence"] or 0) >= 0.6 and not t.meta.get("model"):
             meta["model"] = r["tier"]
         if act >= 0.7:
             meta["status"] = "todo"
@@ -819,7 +833,10 @@ def main(argv=None):
     r.add_argument("--limit", type=int, default=0, help="run at most this many tasks (0 = all todo)")
     r.add_argument("--only", help="comma-separated task note names to run")
     r.add_argument("--model", default="sonnet", help="default model when a note has none (default sonnet)")
-    r.add_argument("--permission-mode", default="acceptEdits", help="acceptEdits (default), auto, dontAsk")
+    r.add_argument("--permission-mode", default=DEFAULT_PERMISSION_MODE,
+                   help="acceptEdits (default; the guard hook still refuses writes outside the task's paths), "
+                        "manual (only with a person present: headless, it blocks even the task's own writes), "
+                        "dontAsk (docs/0.5.0/PERMISSION-MODES.md)")
     r.add_argument("--allow-bash", help="extra comma-separated Bash patterns, e.g. 'npm run e2e *,uv run *'")
     r.add_argument("--bash-all", action="store_true", help="allow every shell command (git still blocked)")
     r.add_argument("--timeout-min", type=int, default=45)

@@ -27,16 +27,13 @@ class Install(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls._t = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls._t.cleanup)  # also when the build below fails (R6-COR-047): tearDownClass would not run
         cls.tmp = Path(cls._t.name)
         archives, _, _ = build_bundle.build(str(ROOT), str(cls.tmp / "dist"), 0)
         import tarfile
         with tarfile.open(archives["tar.gz"][0]) as t:
             t.extractall(cls.tmp / "x", filter="data")
         cls.bundle = cls.tmp / "x" / f"pai-workbench-{__version__}"
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._t.cleanup()
 
     def setUp(self):
         self.t = Path(tempfile.mkdtemp(dir=self.tmp))

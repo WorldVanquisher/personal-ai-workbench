@@ -1,0 +1,13 @@
+● 我先读这些文件。
+● Read 3 files (ctrl+o to expand)
+
+────────────────────────────────────────────────────────────────────────────────
+ Teach auto mode about your environment?
+
+ Auto mode works best when it knows which commands and folders are safe here.
+
+ ❯ 1. Yes, set it up
+   2. Not now
+   3. Don't ask again
+
+ Enter to confirm · Esc to cancel

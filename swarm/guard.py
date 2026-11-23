@@ -3,9 +3,12 @@
 
 Three entry points, all fail-closed (a bug blocks the action instead of letting it through):
 
-  guard.py bash  --root REPO                  PreToolUse hook for the Bash tool.
+  guard.py bash  --root REPO [--allow PATH]   PreToolUse hook for the Bash tool.
                                               Blocks git/gh commands that change anything,
-                                              and any command that touches the .git directory.
+                                              any command that touches the .git directory,
+                                              and writes (>, >>, tee, sed -i, cp, mv, rm, dd of=,
+                                              touch, truncate, ...) outside the repository or,
+                                              when --allow is given, outside the task's paths.
   guard.py edit  --root REPO [--allow PATH]   PreToolUse hook for Edit/Write/MultiEdit/NotebookEdit.
                                               Blocks writes into .git, outside the repo,
                                               and (when --allow is given) outside the task's paths.
@@ -17,6 +20,7 @@ and the stderr text is shown to Claude as the reason.
 """
 import json
 import os
+import re
 import shlex
 import shutil
 import sys
@@ -199,6 +203,205 @@ def check_edit_path(file_path, root, allowed, cwd):
     return None
 
 
+# ---------------------------------------------------------------- Bash write targets
+#
+# Claude Code may run a Bash command without asking (acceptEdits, a read-only-looking command, an
+# allow rule), so the hook, not the permission prompt, is where `paths:` is enforced for shell
+# writes too. The parser is deliberately simple and fails closed: a write target it cannot
+# resolve (a variable, a command substitution, an unknown `cd`) is refused when the task has
+# paths. It finds the targets of redirections and of the common file writers below; a program
+# that writes files on its own (a build tool, a script) is not inspected.
+
+REDIRECTS = {">", ">>", ">|", "&>", "&>>", ">&", "<>"}
+DEVICE_OK = ("/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/fd/")
+WRAPPERS = {"sudo", "env", "nohup", "time", "command", "exec", "nice", "stdbuf", "timeout", "builtin"}
+ALL_OPERANDS = {"rm", "unlink", "rmdir", "shred", "touch", "mkdir", "mv"}
+LAST_OPERAND = {"cp", "install", "ln"}
+OPT_VALUE = {"truncate": {"-s", "--size", "-r", "--reference"}, "touch": {"-d", "-r", "-t", "--date", "--reference"},
+             "mkdir": {"-m", "--mode"}, "install": {"-m", "-o", "-g", "--mode", "--owner", "--group", "-S"},
+             "cp": {"-S", "--suffix"}, "mv": {"-S", "--suffix"}, "timeout": {"-s", "-k"}, "nice": {"-n"}}
+HEREDOC_RE = re.compile(r"<<(-?)\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2")
+
+
+def _strip_heredocs(command):
+    """The command without here-document bodies (their text is data, not shell)."""
+    out, ends = [], []
+    for line in command.split("\n"):
+        if ends:
+            dash, word = ends[0]
+            if (line.lstrip("\t") if dash else line) == word:
+                ends.pop(0)
+            continue
+        out.append(line)
+        ends.extend((m.group(1), m.group(3)) for m in HEREDOC_RE.finditer(line))
+    return "\n".join(out)
+
+
+def _simple_commands(command):
+    """[[token, ...], ...]: the command split at ; & && | || ( ) and newlines."""
+    lex = shlex.shlex(_strip_heredocs(command).replace("\n", " ; "), posix=True, punctuation_chars=";&|()<>")
+    lex.whitespace_split = True
+    lex.commenters = ""
+    try:
+        toks = list(lex)
+    except ValueError:
+        return None  # unbalanced quotes: cannot tell
+    cmds, cur = [], []
+    for t in toks:
+        if t in (";", "&", "&&", "|", "||", "|&", "(", ")", ";;", "$"):
+            if cur:
+                cmds.append(cur)
+            cur = []
+        else:
+            cur.append(t)
+    if cur:
+        cmds.append(cur)
+    return cmds
+
+
+def _operands(words, prog):
+    """Non-option words after the program name, honouring `--` and options that take a value."""
+    takes = OPT_VALUE.get(prog, set())
+    out, i, opts_done = [], 1, False
+    while i < len(words):
+        w = words[i]
+        if not opts_done and w == "--":
+            opts_done = True
+        elif not opts_done and w.startswith("-") and w != "-":
+            if w in takes:
+                i += 1
+        else:
+            out.append(w)
+        i += 1
+    return out
+
+
+def _sed_targets(words):
+    in_place = any(w == "--in-place" or w.startswith("--in-place=") or
+                   (w.startswith("-") and not w.startswith("--") and "i" in w[1:].split(".", 1)[0]
+                    and not w.startswith(("-e", "-f", "-l")))
+                   for w in words[1:])
+    if not in_place:
+        return []
+    rest, script_given, i = [], False, 1
+    while i < len(words):
+        w = words[i]
+        if w in ("-e", "-f", "--expression", "--file", "-l", "--line-length"):
+            script_given = script_given or w in ("-e", "-f", "--expression", "--file")
+            i += 2
+            continue
+        if w.startswith(("--expression=", "--file=")) or (w.startswith(("-e", "-f")) and len(w) > 2):
+            script_given = True
+        elif not w.startswith("-") or w == "-":
+            rest.append(w)
+        i += 1
+    return rest if script_given else rest[1:]
+
+
+def write_targets(command, _depth=0):
+    """Every path a shell command writes to, as written (relative paths unresolved), plus the
+    `cd` steps in between as ("cd", DIR) tuples. None when the command cannot be parsed."""
+    out = []
+    cmds = _simple_commands(command)
+    if cmds is None:
+        return None
+    for toks in cmds:
+        words, i = [], 0
+        while i < len(toks):
+            t = toks[i]
+            if t in REDIRECTS or (t.startswith(">") and set(t) <= set(">|&")):
+                nxt = toks[i + 1] if i + 1 < len(toks) else ""
+                if not (t.endswith("&") or t == ">&") or not (nxt.isdigit() or nxt == "-"):
+                    out.append(nxt)
+                i += 2
+                continue
+            if t in ("<", "<<", "<<<", "<<-"):
+                i += 2
+                continue
+            words.append(t)
+            i += 1
+        while words and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]):
+            words = words[1:]
+        while words and os.path.basename(words[0]) in WRAPPERS:
+            prog = os.path.basename(words[0])
+            words = words[1:]
+            while words and (words[0].startswith("-") or re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0])
+                             or (prog == "timeout" and re.match(r"^[0-9.]+[smhd]?$", words[0]))):
+                words = words[1:]
+        if not words:
+            continue
+        prog = os.path.basename(words[0])
+        if prog == "xargs":  # R6-COR-067: the operands arrive on stdin, so the targets cannot be known
+            rest = [w for w in words[1:] if not w.startswith("-")]
+            if rest and (os.path.basename(rest[0]) in ALL_OPERANDS | LAST_OPERAND | {"tee", "dd", "truncate", "sed"}):
+                out.append("$(xargs %s)" % os.path.basename(rest[0]))
+            continue
+        if prog == "find" and any(w in ("-delete", "-exec", "-execdir", "-ok", "-fprint", "-fls") for w in words):
+            out.append("$(find %s)" % " ".join(words[1:3]))  # matched files are only known at run time
+            continue
+        if prog == "cd":
+            out.append(("cd", words[1] if len(words) > 1 else "~"))
+        elif prog in SHELLS and _depth < TEXT_LIMIT_DEPTH:
+            code = words[1:] if prog == "eval" else (
+                [words[words.index("-c") + 1]] if "-c" in words[:-1] else [])
+            for c in code:
+                inner = write_targets(c, _depth + 1)
+                if inner is None:
+                    return None
+                out.extend(inner)
+        elif prog == "tee":
+            out.extend(_operands(words, prog))
+        elif prog == "sed":
+            out.extend(_sed_targets(words))
+        elif prog == "dd":
+            out.extend(w[3:] for w in words[1:] if w.startswith("of="))
+        elif prog in ("cp", "mv"):
+            target = [w.split("=", 1)[1] for w in words if w.startswith("--target-directory=")]
+            ti = [k for k, w in enumerate(words) if w == "-t" and k + 1 < len(words)]
+            target += [words[k + 1] for k in ti] + [w[2:] for w in words[1:] if w.startswith("-t") and len(w) > 2]
+            ops = [w for k, w in enumerate(words) if w in _operands(words, prog) and (k - 1) not in ti]
+            if target:
+                out.extend(target + (ops if prog == "mv" else []))
+            elif prog == "mv":
+                out.extend(ops)
+            else:
+                out.extend(ops[-1:])
+        elif prog in LAST_OPERAND:
+            out.extend(_operands(words, prog)[-1:])
+        elif prog in ALL_OPERANDS or prog == "truncate":
+            out.extend(_operands(words, prog))
+    return out
+
+
+def check_write_targets(command, root, allowed, cwd):
+    """None if every write the command makes stays inside the repository (and the task's paths
+    when given; temporary folders are always fine), else a reason."""
+    targets = write_targets(command)
+    if targets is None:
+        return "cannot parse this command to check where it writes" if allowed else None
+    here = cwd or root
+    for t in targets:
+        if isinstance(t, tuple):  # cd DIR
+            d = t[1]
+            if d == "-" or "$" in d or "`" in d:
+                here = None
+            elif here is not None or os.path.isabs(os.path.expanduser(d)):
+                here = os.path.join(here or "/", os.path.expanduser(d))
+            continue
+        if t.startswith(DEVICE_OK):
+            continue
+        if not t or "$" in t or "`" in t or t.startswith(("<(", ">(")) or (here is None and not os.path.isabs(
+                os.path.expanduser(t))):
+            if allowed:
+                return ("cannot tell where this command writes (%r); with task paths set, write to a "
+                        "literal path inside them" % (t or "?"))
+            continue
+        reason = check_edit_path(t, root, allowed, here)
+        if reason:
+            return "this command writes to %s: %s" % (t, reason)
+    return None
+
+
 # ---------------------------------------------------------------- entry points
 
 def _parse(argv):
@@ -228,7 +431,8 @@ def hook_main(mode, argv):
     cwd = data.get("cwd") or root or os.getcwd()
     root = root or os.environ.get("CLAUDE_PROJECT_DIR") or cwd
     if mode == "bash":
-        reason = check_command(tin.get("command", ""))
+        command = tin.get("command", "")
+        reason = check_command(command) or check_write_targets(command, root, allowed, cwd)
     else:
         path = tin.get("file_path") or tin.get("notebook_path") or tin.get("path")
         reason = check_edit_path(path, root, allowed, cwd)

@@ -79,7 +79,7 @@ class WB(helpers.Fixture):
         # A short dispatch settle window for every fixture run: only the tests of the window itself
         # (test_dispatch, production_settle()) use the shipped 3 s. pai guide and the onboarding
         # acceptance keep the shipped default on purpose: they check the product as shipped.
-        self.env["PAI_DISPATCH_SETTLE"] = "0.5"
+        self.env["PAI_DISPATCH_SETTLE"] = helpers.FAKE_SETTLE
         self.env.update(PATH=self.bin + os.pathsep + os.environ.get("PATH", ""), PAI_WORKBENCH_HOME=os.path.join(self.tmp, "wb"),
                         PAI_WORKBENCH_DATA=os.path.join(self.tmp, "wbdata"), FAKE_RC_DIR=self.ctl, CLAUDE_CONFIG_DIR=self.cfg,
                         FAKE_SSH_LOG=self.sshlog, FAKE_SSH_KEYFILE=self.keyfile, FAKE_SSH_ACCEPT="good-key")
@@ -365,7 +365,16 @@ class SSH(WB):
         self.assertEqual(p.returncode, 1, out)
         self.assertIn("no ssh-agent is reachable from this shell (SSH_AUTH_SOCK is not set)", out)
         self.assertIn('eval "$(ssh-agent -s)"', out)
-        self.assertIn("ssh-add %s" % self.keyfile, out)
+        # Whatever the folder (verify.py's --work under $HOME made it `~/...`), the printed command
+        # must name this key in a form a shell expands back to it.
+        # `ssh-add -l` is the listing line; compare the argument, not a substring (R6-FIN-028: a temp folder
+        # named pai-swarm-test-l… contains "-l" and dropped the key line)
+        add = [ln.split("#")[0].strip() for ln in out.splitlines()
+               if ln.strip().startswith("ssh-add ") and ln.split()[1] != "-l"]
+        self.assertEqual(len(add), 1, out)
+        sh = subprocess.run(["bash", "--norc", "--noprofile", "-c", "printf %s " + add[0][len("ssh-add "):]],
+                            capture_output=True, text=True, env=dict(os.environ, HOME=os.path.expanduser("~")))
+        self.assertEqual(sh.stdout, self.keyfile, add[0])
         self.assertIn("Nothing was locked, fetched, created or started", out)
         self.assert_nothing_started()
         wrong = self.agent_file("wrong", ["other-key"])
@@ -599,6 +608,9 @@ class Cleanup(WB):
         rows, _ = self.status()
         p = self.pai("cleanup", "--apply")
         self.assertEqual(p.returncode, 1, p.stdout)  # live and mismatched lanes were kept
+        # R6-FIN-032 (newbie2 F7): the user's command, never rc's internal `rc up MANIFEST --resume`
+        self.assertIn("To start the closed workers again on the same branches: `pai resume`.", p.stdout)
+        self.assertNotIn("rc up", p.stdout)
         after = self.windows_now()
         self.assertNotIn("a", after)
         self.assertEqual({k: after[k] for k in ("b", "c", "d", "notes")}, {k: wins[k] for k in ("b", "c", "d", "notes")})
@@ -747,8 +759,8 @@ class Planner(unittest.TestCase):
     def test_pai_run_on_native_windows_is_refused_before_anything(self):
         tmp = os.path.realpath(__import__("tempfile").mkdtemp(prefix="pai-planner-"))
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        subprocess.run(["git", "init", "-q", tmp], check=True)
-        env = dict(os.environ, PAI_SWARM_PLATFORM="Windows", PAI_WORKBENCH_HOME=os.path.join(tmp, "wb"),
+        subprocess.run(["git", "init", "-q", tmp], check=True, env=helpers.hermetic_env())
+        env = helpers.hermetic_env(PAI_SWARM_PLATFORM="Windows", PAI_WORKBENCH_HOME=os.path.join(tmp, "wb"),
                    PAI_SWARM_HOME=os.path.join(tmp, "home"))
         p = subprocess.run([sys.executable, "-B", PAI, "run", "--agent", "codex", "--remote", "x", "--base", "main",
                             "--yes"], cwd=tmp, env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL)

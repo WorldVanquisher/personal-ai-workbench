@@ -65,7 +65,7 @@ the evidence it points to is in `~/.cache/pai-0.5.0-continuation/` (`SHA256SUMS`
       v1, the hand-paste record, the recovery log's `superseded by` end records: accept or keep
       experimental (EXPERIMENTAL.md "Feature boundaries for 0.5.0").
 - [ ] Keep `pai web` experimental for 0.5.0 (recommended) or run the browser kit first.
-- [ ] Set the version: `pai/__init__.py` `__version__ = "0.5.0"`, the `@v0.4.0` install lines in
+- [ ] Set the version (prepared in the release branch by the fin lane, R6-FIN-012; the owner ticks this on review): `pai/__init__.py` `__version__ = "0.5.0"`, the `@v0.4.0` install lines in
       README*.md, INSTALL.md and QUICKSTART*.md, and a RELEASE_NOTES.md section built from
       `docs/1.0/MIGRATION.md` and `docs/1.0/CAPABILITIES.md`.
 

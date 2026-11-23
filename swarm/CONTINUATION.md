@@ -144,5 +144,5 @@ the notes that name R1 (worker, branch, base), and the delivery must be treated 
 
 ## Switching agents with real programs
 
-`docs/1.0/REAL-AGENT-SWITCH.md` (in a checkout) is the owner's checklist for a real Claude Code to
+[`docs/1.0/REAL-AGENT-SWITCH.md`](https://github.com/WorldVanquisher/personal-ai-workbench/blob/v0.5.0/docs/1.0/REAL-AGENT-SWITCH.md) (in a checkout) is the owner's checklist for a real Claude Code to
 Codex switch and the reverse, and what each run proves.

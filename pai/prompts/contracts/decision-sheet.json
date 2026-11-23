@@ -1,0 +1,34 @@
+{
+ "format": "pai-contract/1",
+ "name": "decision-sheet",
+ "version": 1,
+ "desc": "Decisions as decision-sheet.md asks for.",
+ "source_prompt": "decision-sheet",
+ "checks": [
+  {
+   "id": "has-decisions",
+   "type": "regex",
+   "pattern": "^\\s*- \\[[ xX]\\] \\*\\*",
+   "min": 1
+  },
+  {
+   "id": "fields",
+   "type": "decisions",
+   "start": "^\\s*- \\[[ xX]\\] \\*\\*",
+   "fields": [
+    "问题|question",
+    "选项|options",
+    "取舍|trade-?off",
+    "推荐|recommend",
+    "默认|default",
+    "阻塞|block"
+   ]
+  }
+ ],
+ "jev": [
+  {
+   "id": "decidable",
+   "instructions": "Each decision in the TEXT can be answered by its reader in under a minute: one question, a short list of options with their costs, a recommendation and what happens if nobody answers."
+  }
+ ]
+}

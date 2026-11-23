@@ -1,0 +1,66 @@
+{
+ "format": "pai-contract/1",
+ "name": "first-reply",
+ "version": 3,
+ "desc": "The first reply worker-base.md §0.3 asks for.",
+ "source_prompt": "worker-base",
+ "checks": [
+  {
+   "id": "files-read",
+   "type": "section",
+   "pattern": "读过|读了|files? read",
+   "desc": "a 'files read' part"
+  },
+  {
+   "id": "paths",
+   "type": "regex",
+   "pattern": "(?<![\\w/.-])(?:[\\w.@~-]+/)*[\\w-]+\\.(?:md|py|sh|json|txt|toml|go|ts)\\b",
+   "min": 3,
+   "desc": "at least 3 file paths (root files like README.md count)"
+  },
+  {
+   "id": "decisions",
+   "type": "section",
+   "pattern": "决策|decision",
+   "desc": "a part on answered / defaulted decisions"
+  },
+  {
+   "id": "first-ids",
+   "type": "ordered_ids",
+   "section": "先做|first",
+   "pattern": "\\b[A-Z][A-Z0-9]*-[A-Z]{2,5}-\\d{3}\\b",
+   "min": 5,
+   "desc": "under the 'first 5 IDs' heading: 5 distinct IDs in full, in the order written (v3, R6-PRM-084: v2 counted any 5 IDs anywhere, so free-form replies passed)"
+  },
+  {
+   "id": "blocked",
+   "type": "section",
+   "pattern": "owner-only|阻塞|blocked",
+   "desc": "a part on owner-only / blocked items"
+  },
+  {
+   "id": "deps",
+   "type": "section",
+   "pattern": "依赖|depend|cross-lane|其他线",
+   "desc": "a part on dependencies on other lanes"
+  },
+  {
+   "id": "no-session-link",
+   "type": "absent",
+   "pattern": "claude\\.ai/(?:code/)?(?:session|chat)[_/]|chatgpt\\.com/c/",
+   "desc": "no agent session link"
+  }
+ ],
+ "jev": [
+  {
+   "id": "lists_files",
+   "maps_to": "paths",
+   "instructions": "The REPLY lists, by path, the specific files its author read before starting work."
+  },
+  {
+   "id": "names_ids",
+   "maps_to": "first-ids",
+   "instructions": "The REPLY has a part listing exactly the first five work item IDs its author will do, each written in full (like R6-ABC-001, never shortened to 002), in the order they will be done."
+  }
+ ]
+}

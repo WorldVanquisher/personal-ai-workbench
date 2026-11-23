@@ -28,7 +28,8 @@ notes always give the same bytes, so a card file diffs cleanly in review):
   to the repository. Absolute paths, `..` that leaves the repository, backslashes and unsupported
   versions are refused on import.
 - Privacy-sensitive fields stay out of a default export: what pai writes into a note while it
-  runs (worker, rc_run, branch, base_sha, remote, worktree, jev_intake, the review keys and the
+  runs (worker, rc_run, branch, base_sha, remote, worktree, every jev_* score, handoff, session,
+  cost_usd, last_run, handed_off_from, continued_marker, continued_in, the review keys and the
   `## Review ... · checks ...` sections `pai pr check` appends, which name the worktree path and
   the approved check commands) and personal fields
   (owner, assignee, author, reviewer, email, learner, student, and keys with those words). With
@@ -71,8 +72,16 @@ class CardError(Exception):
     pass
 
 
+# What the runners record about one run in a note's front matter (R6-COR-017): where its handoff
+# draft is (a vault path), the Claude session, the cost, the run and continuation ids, and every
+# JEV score (`jev_*`). They describe a run on this machine, not the task, so they stay private.
+RUN_RECORD_FIELDS = ("handoff", "session", "session_id", "cost_usd", "last_run", "handed_off_from",
+                     "continued_marker", "continued_in")
+
+
 def private_key(k):
-    return k in RUN_FIELDS or bool(PERSONAL.search(k))
+    return (k in RUN_FIELDS or k in RUN_RECORD_FIELDS or k.startswith(("jev_", "jev-"))
+            or bool(PERSONAL.search(k)))
 
 
 def valid_name(name):

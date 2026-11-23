@@ -190,10 +190,13 @@ def check_config(r, path, only=None):
             continue
         if not os.access(proj.inbox, os.W_OK):
             r.problem(f"{key}: inbox is not writable: {proj.inbox_rel}", "handoff new will fail until it is")
+        __import__("pai.commands", fromlist=["x"]).doctor_checks(r, key, proj)  # core-lane checks (R6-COR-051)
         counts = {}
         for s in proj.sources:
             counts[s.status] = counts.get(s.status, 0) + 1
-            if s.status != "ok":
+            if s.status == "missing" and s.kind == "instructions":  # R6-FIN-004 (core NOTES C10): not a failure
+                r.warn(f"{key}: instructions source MISSING: {s.label} (not found; optional: pai context uses it when present)")
+            elif s.status != "ok":
                 r.warn(f"{key}: {s.kind} source {s.status.upper()}: {s.label} ({s.reason})")
         r.ok(f"{key}: roots valid; sources " + ", ".join(f"{v} {k}" for k, v in sorted(counts.items())))
 
@@ -215,4 +218,28 @@ def run(config_path=None, project=None, agents=False):
     if agents:
         check_agents(r)
     r.lines.append(f"\n{'NO PROBLEMS FOUND' if not r.problems else str(r.problems) + ' PROBLEM(S) FOUND'}")
+    r.lines.append(next_step(r.problems))
     return r
+
+
+REPO_URL = "https://github.com/WorldVanquisher/personal-ai-workbench"
+
+
+def manual(name):
+    """Where to read a manual: the copy in this bundle or checkout if there is one (an installed
+    package has none), else the file on GitHub for this version."""
+    from pai import __version__
+    local = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", name)
+    return local if os.path.isfile(local) else f"{REPO_URL}/blob/v{__version__}/docs/{name}"
+
+
+def next_step(problems):
+    """The last line of doctor: which manual section to read next."""
+    if problems:  # each line has a Chinese twin (R6-FIN-030)
+        return ("Next: fix each PROBLEM above (the → line says how), then run this doctor again. "
+                f"Stuck? {manual('FIRST-USE.md')}, section 8 \"When something goes wrong\".\n"
+                f"中文：按 → 那一行修好每个 PROBLEM，再跑一次。卡住了？{manual('FIRST-USE.zh-CN.md')} 第 8 节「出错时怎么办」。")
+    return (f"Next: {manual('FIRST-USE.md')}, section 6 \"Your first round\"; "
+            f"for a later round, {manual('REFRESH.md')}, part (b) \"Every round\".\n"
+            f"中文：{manual('FIRST-USE.zh-CN.md')} 第 6 节「第一轮：一个 worker」；之后的轮次见 "
+            f"{manual('REFRESH.zh-CN.md')} 的 (b) 部分「每一轮的刷新」。")
