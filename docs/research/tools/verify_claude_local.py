@@ -49,7 +49,8 @@ print(json.dumps({"type": "result", "result": w.group(1) if w else "I don't see 
 
 
 def sh(args, cwd, env=None):
-    return subprocess.run(args, cwd=cwd, capture_output=True, text=True, env=env, timeout=300)
+    return subprocess.run(args, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
+                          timeout=300)
 
 
 def make_case(root, files, word):
@@ -58,20 +59,20 @@ def make_case(root, files, word):
     env = dict(os.environ, GIT_AUTHOR_NAME="pai-verify", GIT_AUTHOR_EMAIL="pai-verify@example.invalid",
                GIT_COMMITTER_NAME="pai-verify", GIT_COMMITTER_EMAIL="pai-verify@example.invalid")
     sh(["git", "init", "-q", "-b", "main"], repo, env)
-    with open(os.path.join(repo, "README.md"), "w") as f:
+    with open(os.path.join(repo, "README.md"), "w", encoding="utf-8") as f:
         f.write("# scratch\n")
-    with open(os.path.join(repo, ".gitignore"), "w") as f:
+    with open(os.path.join(repo, ".gitignore"), "w", encoding="utf-8") as f:
         f.write("CLAUDE.local.md\n")
     for n, body in files.items():
         if n != "CLAUDE.local.md":
-            with open(os.path.join(repo, n), "w") as f:
+            with open(os.path.join(repo, n), "w", encoding="utf-8") as f:
                 f.write(body.format(w=word))
     sh(["git", "add", "-A"], repo, env)
     sh(["git", "commit", "-qm", "scratch"], repo, env)
     wt = os.path.join(root, "lane")
     sh(["git", "worktree", "add", "-q", "-b", "lane", wt], repo, env)
     if "CLAUDE.local.md" in files:  # git-ignored: exists only in this worktree, as the docs say
-        with open(os.path.join(wt, "CLAUDE.local.md"), "w") as f:
+        with open(os.path.join(wt, "CLAUDE.local.md"), "w", encoding="utf-8") as f:
             f.write(files["CLAUDE.local.md"].format(w=word))
     return wt
 
@@ -85,13 +86,14 @@ def main(argv=None):
     ap.add_argument("--out", default=".")
     a = ap.parse_args(argv)
     tmp = tempfile.mkdtemp(prefix="pai-verify-local-")
-    claude = a.claude
+    claude = [a.claude]
     if a.dry_run:
-        claude = os.path.join(tmp, "fake-claude")
-        with open(claude, "w") as f:
+        fake = os.path.join(tmp, "fake-claude")
+        with open(fake, "w", encoding="utf-8") as f:
             f.write(FAKE)
-        os.chmod(claude, 0o755)
-    version = sh([claude, "--version"], tmp).stdout.strip() if not a.dry_run else "fake (dry run)"
+        os.chmod(fake, 0o755)
+        claude = [sys.executable, fake]  # through this Python: Windows does not run a script by its #! line
+    version = sh([*claude, "--version"], tmp).stdout.strip() if not a.dry_run else "fake (dry run)"
     results, spent = [], 0.0
     try:
         for name, files, expect in CASES:
@@ -100,7 +102,7 @@ def main(argv=None):
                 continue
             word = "PAI-" + secrets.token_hex(4).upper()
             wt = make_case(os.path.join(tmp, name), files, word)
-            cmd = [claude, "-p", QUESTION, "--output-format", "json", "--max-turns", "2"]
+            cmd = [*claude, "-p", QUESTION, "--output-format", "json", "--max-turns", "2"]
             if not a.dry_run:
                 cmd += ["--model", a.model]
             p = sh(cmd, wt)
@@ -120,7 +122,7 @@ def main(argv=None):
            "model": None if a.dry_run else a.model, "total_cost_usd": round(spent, 5), "cases": results,
            "all_pass": all(r.get("pass") for r in results if "skipped" not in r)}
     os.makedirs(a.out, exist_ok=True)
-    with open(os.path.join(a.out, "RESULT.json"), "w") as f:
+    with open(os.path.join(a.out, "RESULT.json"), "w", encoding="utf-8") as f:
         json.dump(res, f, indent=2)
     for r in results:
         print("%-18s %s" % (r["case"], r.get("skipped") or ("PASS" if r["pass"] else "FAIL") + " (found=%s, expected=%s)" % (r["found"], r["expect_found"])))

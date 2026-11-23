@@ -55,10 +55,11 @@ def run_one(claude, variant, model, dry, timeout):
         os.makedirs(os.path.dirname(os.path.join(d, n)) or d, exist_ok=True)
         with open(os.path.join(d, n), "w", encoding="utf-8") as f:
             f.write(body)
-    cmd = [claude, "-p", TASK + "\n" + VARIANTS[variant], "--output-format", "json", "--max-turns", "6"]
+    cmd = [*claude, "-p", TASK + "\n" + VARIANTS[variant], "--output-format", "json", "--max-turns", "6"]
     if not dry:
         cmd += ["--model", model, "--allowedTools", "Read"]
-    p = subprocess.run(cmd, cwd=d, capture_output=True, text=True, timeout=timeout)
+    p = subprocess.run(cmd, cwd=d, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       timeout=timeout)
     try:
         out = json.loads(p.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
@@ -86,12 +87,13 @@ def main(argv=None):
                 if line.strip():
                     r = json.loads(line)
                     done[r["id"]] = r
-    claude = a.claude
+    claude = [a.claude]
     if a.dry_run:
-        claude = os.path.join(a.out, "fake-agent")
-        with open(claude, "w") as f:
+        fake = os.path.join(a.out, "fake-agent")
+        with open(fake, "w", encoding="utf-8") as f:
             f.write(FAKE)
-        os.chmod(claude, 0o755)
+        os.chmod(fake, 0o755)
+        claude = [sys.executable, fake]  # through this Python: Windows does not run a script by its #! line
     plan = [(v, s) for v in sorted(VARIANTS) for s in range(a.runs)]
     random.Random(a.seed).shuffle(plan)
     contract = prompteval.load_contract("first-reply")
@@ -126,7 +128,7 @@ def main(argv=None):
     res = {"format": "pai-experiment-e2/1", "mode": "dry-run" if a.dry_run else "real", "model": a.model,
            "runs_per_variant": a.runs, "budget_usd": a.budget, "spent_usd": round(spent, 5), "variants": summary,
            "complete": len(done) == len(plan)}
-    with open(os.path.join(a.out, "RESULT.json"), "w") as f:
+    with open(os.path.join(a.out, "RESULT.json"), "w", encoding="utf-8") as f:
         json.dump(res, f, indent=2)
     print(json.dumps(res["variants"]))
     return 0
