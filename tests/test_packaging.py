@@ -55,7 +55,7 @@ class Metadata(unittest.TestCase):
         self.assertEqual(st["packages"], ["pai", "pai._workbench", "pai._workbench.mdserver"])
         self.assertEqual(st["package-dir"], {"pai._workbench": "swarm"})
         self.assertFalse(st["include-package-data"])
-        self.assertEqual(st["package-data"], {"pai": ["templates/handoff.md"],
+        self.assertEqual(st["package-data"], {"pai": ["templates/handoff.md", "prompts/*.md", "prompts/contracts/*.json", "prompts/obsidian/*.md"],
                                               "pai._workbench": ["WORKBENCH.md", "RUN-STATE.md", "BACKENDS.md",
                                                                  "CONTINUATION.md"],
                                               "pai._workbench.mdserver": ["README.md", "static/*.html", "static/*.css",
@@ -65,6 +65,8 @@ class Metadata(unittest.TestCase):
         shipped = {"pai/" + f.name for f in (ROOT / "pai").glob("*.py")} | {"swarm/" + f.name for f in (ROOT / "swarm").glob("*.py")}
         shipped |= {"swarm/mdserver/" + f.name for f in md.glob("*.py")}
         shipped |= {"swarm/mdserver/static/" + f.name for f in (md / "static").iterdir()}
+        for sub in ("prompts", "prompts/contracts", "prompts/obsidian"):
+            shipped |= {"pai/%s/%s" % (sub, f.name) for f in (ROOT / "pai" / sub).iterdir() if f.is_file()}
         shipped |= {"pai/templates/handoff.md", "swarm/WORKBENCH.md", "swarm/RUN-STATE.md", "swarm/BACKENDS.md",
                     "swarm/CONTINUATION.md", "swarm/mdserver/README.md"}
         self.assertEqual(shipped - allowlist(), set())
