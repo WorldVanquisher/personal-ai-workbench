@@ -243,7 +243,7 @@ class Transfer(TwoAgents):
         self.assertEqual([c["subject"] for c in tk["completed"]], ["step 1: STEP-1.md", "handoff after step 1"])
         self.assertEqual(tk["decisions"], [])
         ev = {e["id"]: e for e in tk["evidence"]}
-        self.assertEqual(set(ev), {"continuation", "agent-handoff", "check:unit"})
+        self.assertEqual(set(ev), {"continuation", "agent-handoff", "check:unit", "handoff-v2"})  # R6-COR-026
         self.assertEqual(ev["check:unit"]["ref"], "run:s1/a/check/unit")
         self.assertEqual(ev["check:unit"]["sha256"], hashlib.sha256(b"3 passed\n").hexdigest())
         self.assertNotIn("text", ev["check:unit"], "check output stays unless --include-logs")

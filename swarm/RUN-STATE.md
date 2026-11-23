@@ -97,7 +97,7 @@ added to, never renamed, removed or given another meaning):
 | `lanes[].dispatch.state` | `none`, `pending`, `sent`, `delivered`, `unknown` |
 | `lanes[].process.state` | `running`, `exited`, `no-window`, `no-claude`, `ambiguous`, `mismatched` |
 | `lanes[].agent.name`, `.mode` | backend and launch mode |
-| `lanes[].handed_off` | null, or `{at, head, branch, note, id, continued_by}` |
+| `lanes[].handed_off` | null, or `{at, head, branch, note, id, continued_by, handoff, handoff_sha256}` (`handoff`: the continuation's pai-handoff/2 file on this machine, and its sha256; absent before R6) |
 | `lanes[].continues` | null, or `{id, from, head, branch, agent}` for a continuation run |
 
 Text fields (`lifecycle.why`, every `evidence`, `detail` and `cause`) are for people: their wording

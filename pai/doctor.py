@@ -190,6 +190,7 @@ def check_config(r, path, only=None):
             continue
         if not os.access(proj.inbox, os.W_OK):
             r.problem(f"{key}: inbox is not writable: {proj.inbox_rel}", "handoff new will fail until it is")
+        __import__("pai.commands", fromlist=["x"]).doctor_checks(r, key, proj)  # core-lane checks (R6-COR-051)
         counts = {}
         for s in proj.sources:
             counts[s.status] = counts.get(s.status, 0) + 1

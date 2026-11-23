@@ -19,6 +19,9 @@ CASES = {
                   "            def __del__(self):\n                warnings.warn('unclosed thing', ResourceWarning)\n\n"
                   "        Holder()\n"),
     "failing": "def test_fails(self):\n        self.assertEqual(1, 2)\n",
+    # R6-COR-047: setUpClass fails after creating a TemporaryDirectory, so tearDownClass never cleans it
+    "tempdir": ("@classmethod\n    def setUpClass(cls):\n        import tempfile\n        cls.t = tempfile.TemporaryDirectory()\n"
+                "        raise RuntimeError('build failed')\n\n    def test_x(self):\n        pass\n"),
 }
 
 
@@ -35,7 +38,7 @@ class StrictRunner(unittest.TestCase):
         p = self.run_case(CASES["clean"])
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
         self.assertIn("strict_unittest: OK", p.stdout + p.stderr)
-        for name in ("leak", "finalizer", "failing"):
+        for name in ("leak", "finalizer", "failing", "tempdir"):
             p = self.run_case(CASES[name])
             self.assertEqual(p.returncode, 1, "%s: %s" % (name, p.stdout + p.stderr))
             self.assertIn("strict_unittest: FAILED", p.stdout + p.stderr, name)
@@ -48,6 +51,27 @@ class StrictRunner(unittest.TestCase):
         p = subprocess.run([sys.executable, "-B", "-W", "error::ResourceWarning", "-m", "unittest", "discover", "-s", d],
                            capture_output=True, text=True, timeout=120)
         self.assertEqual(p.returncode, 0, "why the strict runner exists: the plain command misses it")
+
+    def test_jobs_runs_each_module_in_its_own_strict_process(self):
+        """R6-COR-007: --jobs N keeps the strict checks per module and fails on any failing module."""
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        for name in ("clean", "leak", "failing"):
+            with open(os.path.join(d, "test_%s.py" % name), "w") as f:
+                f.write("import unittest\n\n\nclass T(unittest.TestCase):\n    %s" % CASES[name])
+        def run(*extra):
+            return subprocess.run([sys.executable, "-B", str(ROOT / "tools" / "strict_unittest.py"), d, "--jobs", "3"]
+                                  + list(extra), capture_output=True, text=True, timeout=120)
+        p = run()
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn("FAILED (modules: ", p.stderr)
+        self.assertIn("test_leak.py", p.stderr)
+        self.assertIn("test_failing.py", p.stderr)
+        self.assertNotIn("test_clean.py", p.stderr.split("FAILED (modules: ")[1])
+        self.assertIn("Ran 3 tests", p.stdout)
+        p = run("--pattern", "test_clean.py")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("OK (1 modules in 3 processes", p.stderr)
 
 
 if __name__ == "__main__":

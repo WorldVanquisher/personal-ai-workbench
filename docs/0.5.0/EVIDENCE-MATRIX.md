@@ -13,13 +13,17 @@ zsh, fish or PowerShell. Fakes only. Logs: `~/.cache/pai-0.5.0-r2/` (`user/`, `r
 | macOS | **owner**: PLATFORMS.md "macOS workbench" (process age is `/proc`-only: BACKLOG P2 6) | **CI defined** (`macos-latest`, core + packaging) | **CI defined** | - | **CI defined** |
 | Windows (native) | core commands only; workbench **not offered** (WSL message, asserted in CI) | **CI defined** (`windows-latest` 3.11, 3.13: `tests/`, incl. `test_workqueue`, installed `pai edit`) | not offered | **CI defined** (`test_portable` launcher tests); by hand: PLATFORMS.md "Native Windows, by hand" and "`pai queue` by hand" | **CI defined** |
 
-Per capability, beyond the table:
+Per capability, beyond the table. "CI covers?" (R6-COR-006, lane tree; rerun on merged main needed) is
+read from `.github/workflows/ci.yml`; `tools/verify.py` writes the same answer per step as `"ci"` in
+`verify-report.json`.
 
-| Capability | Linux evidence (both users) | Elsewhere |
-| --- | --- | --- |
-| Continuation and transfer packets, both directions | test_transfer, test_r2_recovery, test_guide; installed `pai guide --handoff clean/reverse/interrupted` (`user/demo-transcripts/`, `root/demo-transcripts/`) | owner: WSL row; real agents: REAL-AGENT-SWITCH.md runs A, B, C |
-| `pai queue` | tests/test_workqueue (core, strict), `runs/queue-demo/transcript.txt` | CI (macOS, Windows core) |
-| Console (`pai web`, experimental) | test_console (API, loopback listener), package check `console` from the wheel | browser: owner kit `sh ~/.cache/pai-1.0-work/browser/run.sh W` |
-| PATH advice with spaces, quotes, `$`, backticks, Unicode | bash: `runs/path-bash.log` (10/10) | zsh, fish, PowerShell: `tools/path_hint_check.py SHELL` (owner) |
-| Reading 0.4.0 run state | saved fixture `swarm/tests/fixtures/run-0.4.0` (test_contracts), package check 083 and `rollback` | - |
-| Artifact privacy | `runs/artifact-scan.txt` + review: no session link, credential or machine path in the wheel or archives; sample packet 0 hits | - |
+Per capability:
+
+| Capability | Linux evidence (both users) | Elsewhere | CI covers? |
+| --- | --- | --- | --- |
+| Continuation and transfer packets, both directions | test_transfer, test_r2_recovery, test_guide; installed `pai guide --handoff clean/reverse/interrupted` (`user/demo-transcripts/`, `root/demo-transcripts/`) | owner: WSL row; real agents: REAL-AGENT-SWITCH.md runs A, B, C | yes, after R6-COR-001: `workbench` job (ubuntu, 3.11/3.13) runs test_transfer, test_r2_recovery, test_guide; the installed `pai guide` transcripts are not |
+| `pai queue` | tests/test_workqueue (core, strict), `runs/queue-demo/transcript.txt` | CI (macOS, Windows core) | yes: `test` job on all three OSes (tests/) |
+| Console (`pai web`, experimental) | test_console (API, loopback listener), package check `console` from the wheel | browser: owner kit `sh ~/.cache/pai-1.0-work/browser/run.sh W` | partly: test_console in the `workbench` job (after R6-COR-001); package check `console` and the browser kit: no |
+| PATH advice with spaces, quotes, `$`, backticks, Unicode | bash: `runs/path-bash.log` (10/10) | zsh, fish, PowerShell: `tools/path_hint_check.py SHELL` (owner) | no: `tools/path_hint_check.py` is not in CI (verify.py `path-*` steps) |
+| Reading 0.4.0 run state | saved fixture `swarm/tests/fixtures/run-0.4.0` (test_contracts), package check 083 and `rollback` | - | yes, after R6-COR-001: test_contracts in the `workbench` job; package check 083: no |
+| Artifact privacy | `runs/artifact-scan.txt` + review: no session link, credential or machine path in the wheel or archives; sample packet 0 hits | - | partly: byte-identical rebuild and bundle smoke in CI; the artifact scan: no |

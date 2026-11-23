@@ -89,7 +89,7 @@ class Draft(WB):
     def setUp(self):
         super().setUp()
         self.note("task-a", priority=9, body="Write JSON when asked.\n\n" + PR_SECTION)
-        self.env["PAI_DISPATCH_SETTLE"] = "0.5"
+        self.env["PAI_DISPATCH_SETTLE"] = helpers.FAKE_SETTLE
         self.init()
         self.set_config({("review", "strip_trailers"): ["Assisted-by"]})
         self.guard = os.path.join(self.tmp, "guard")

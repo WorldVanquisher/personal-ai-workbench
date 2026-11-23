@@ -485,6 +485,8 @@ def jev_check(key, assume_yes):
 
 def cmd_jev(a):
     import jev
+    if (code := jev.run_extra(a, log)) is not None:  # jev's own verbs (usage), R6-COR-050
+        return code
     key, where = jev.api_key()
     if a.jev_cmd == "status":
         log("JEV: %s" % ("key available from %s" % {"env": "TYPESAFE_API_KEY"}.get(where, where) if key else
@@ -1898,6 +1900,7 @@ def parser():
     nx.add_argument("--wait", type=float, default=10.0)
     jv = p("jev", "optional JEV: status, or check (one real, possibly billed request)", run=False)
     jv.add_argument("jev_cmd", choices=("status", "check"))
+    __import__("jev").extend_parser(jv)  # jev's own verbs (usage), R6-COR-050
     jv.add_argument("--yes", action="store_true", help="send the check request without asking")
     sv = p("server", "EXPERIMENTAL Markdown server: start | status | stop | token | uninstall", run=False)
     sv.add_argument("server_cmd", choices=("start", "status", "stop", "token", "uninstall"))

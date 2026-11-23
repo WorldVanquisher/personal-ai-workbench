@@ -1,17 +1,26 @@
 ---
+format: pai-handoff/2
 status: draft
 approved: false
-task: ${task_id}
 project: ${project}
+round: ${round}
+lane: ${lane}
+checkpoint: ${checkpoint}
+task: ${task_id}
+base_sha: ${base_sha}
+head_sha: ${head_sha}
+queue: ${queue}
+queue_sha256: ${queue_sha256}
 created: ${created}
 generator: pai ${version}
 ---
 
 # ${task_id} handoff (DRAFT, not approved)
 
-Draft created by `pai handoff new`. Creating it marks no work complete and
-approves no knowledge. Values below are exactly what was supplied; anything
-not supplied is UNKNOWN. The tool ran no Git, tests or deployment checks.
+Draft created by `pai handoff new` (format pai-handoff/2, docs/HANDOFF-V2.md). Creating it
+marks no work complete and approves no knowledge. Values below are exactly what was supplied;
+anything not supplied is UNKNOWN. The tool ran no Git, tests or deployment checks; the Items
+table, when present, is the queue log's record, not a check of the work.
 
 ## Summary
 
@@ -21,34 +30,38 @@ ${summary}
 
 Each state is separate; none is inferred from another.
 
-| State | Value |
-| --- | --- |
+| State | Value | Source |
+| --- | --- | --- |
 ${state_rows}
+
+## Items
+
+${items}
 
 ## Evidence
 
 ${evidence}
 
-## Blockers
-
-${blockers}
-
-## Next steps
-
-${next_steps}
-
-## Decisions made within the worker's authority
+## Decisions within authority
 
 What was chosen, why, and how to reverse it.
 
 ${decisions}
 
-## Decisions for the owner (not acted on)
+## Decisions for the owner
 
 Above the worker's authority: the options, their trade-offs and a recommendation. Nothing here
 was done; the work that depends on it waits for the owner.
 
 ${needs_owner}
+
+## Blockers
+
+${blockers}
+
+## Next
+
+${next_steps}
 
 ## Knowledge-update proposals (UNAPPROVED)
 

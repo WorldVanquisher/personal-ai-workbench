@@ -143,7 +143,8 @@ class Continue(WB):
         self.assert_ok(self.pai("recover", "--run", "s1", "--continue", "a", "--write"))
         rows, d = self.status("s1")
         self.check_contract(d)
-        self.assertEqual(set(rows["a"]["handed_off"]), {"at", "head", "branch", "note", "id", "continued_by"})
+        self.assertEqual(set(rows["a"]["handed_off"]), {"at", "head", "branch", "note", "id", "continued_by",
+                                                         "handoff", "handoff_sha256"})  # + the v2 file (R6-COR-026)
         self.pai("run", "--continue", "task-a", "--agent", "codex", "--yes", "--wait", "8", "--run-id", "s2")
         rows, d = self.status("s2")
         self.check_contract(d)

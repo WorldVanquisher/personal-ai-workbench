@@ -24,7 +24,8 @@ prompt = argv[argv.index("-p") + 1]
 settings = json.load(open(argv[argv.index("--settings") + 1]))
 task = os.environ["PAI_TASK"]
 repo = os.getcwd()
-log = {"task": task, "start": time.time(), "argv_flags": [a for a in argv if a.startswith("--")]}
+log = {"task": task, "start": time.time(), "argv_flags": [a for a in argv if a.startswith("--")],
+       "permission_mode": argv[argv.index("--permission-mode") + 1] if "--permission-mode" in argv else None}
 
 
 def run_hook(matcher, tool_input, tool_name):

@@ -200,9 +200,56 @@ def text_findings(title, body, message):
     return found
 
 
+def _pai_handoff():
+    try:
+        from pai import handoff, privacy
+    except ImportError:  # the workbench started without the pai package on sys.path (its own tests)
+        import sys
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from pai import handoff, privacy
+    return handoff, privacy
+
+
+def handoff_info(path):
+    """What a plan records about a sealed pai-handoff/2 checkpoint (R6-COR-027): {dir, task,
+    queue_sha256, handoff_sha256, status, approved, problems}, from pai.handoff.sealed_state
+    (handoff_sha256 is the sealed body's sha256, stable when the owner approves in Obsidian)."""
+    ph, _ = _pai_handoff()
+    return ph.sealed_state(path)
+
+
+def body_from_handoff(d, sha=None):
+    """A PR body from a sealed v2 handoff (R6-COR-028): its Summary, State table and Totals line,
+    and NEXT-PR.md's `## PR body` when there is one, through the privacy filter and the
+    publication redaction; the handoff's sha256 is named so the PR points at what was reviewed."""
+    ph, privacy = _pai_handoff()
+    with open(os.path.join(d, "HANDOFF.md"), encoding="utf-8") as f:
+        text = f.read()
+    secs = dict(ph.sections(text))
+    parts = []
+    try:
+        with open(os.path.join(d, "NEXT-PR.md"), encoding="utf-8") as f:
+            pr = dict(ph.sections(f.read())).get("PR body", "").strip()
+    except OSError:
+        pr = ""
+    if pr:
+        parts.append(pr)
+    else:
+        parts.append(secs.get("Summary", "").strip())
+    parts.append("### State\n\n" + secs.get("State", "").strip())
+    totals = [ln for ln in secs.get("Items", "").splitlines() if ln.lower().startswith("totals:")]
+    if totals:
+        parts.append("Items: " + totals[-1].split(":", 1)[1].strip())
+    parts.append("Handoff sha256 `%s` (pai-handoff/2, sealed)." % (sha or ph.body_sha(text)))
+    body, _removed = privacy.scrub("\n\n".join(p for p in parts if p))
+    return publish_check.redact(body)
+
+
 def preview(path, paths, title, body="", message=None, branch=None, base="main", remote="origin", offline=False,
-            github=None):
-    """Everything an owner needs before publishing; reads only."""
+            github=None, handoff=None, require_approved=False):
+    """Everything an owner needs before publishing; reads only. `handoff`: a sealed pai-handoff/2
+    checkpoint folder; the plan then records task, queue_sha256 and handoff_sha256, and an empty
+    body is generated from it. `require_approved`: refuse unless that handoff is approved."""
     wt = os.path.realpath(os.path.abspath(os.path.expanduser(path)))
     top = gitprep.toplevel(wt) if os.path.isdir(wt) else None
     if top != wt:
@@ -264,6 +311,17 @@ def preview(path, paths, title, body="", message=None, branch=None, base="main",
         if r["partly_staged"]:
             warnings.append("%s has staged and unstaged changes; the commit takes the working-tree file as previewed"
                             % r["path"])
+    hinfo = handoff_info(handoff) if handoff else None
+    if hinfo:
+        problems.extend("handoff: %s" % x for x in hinfo["problems"])
+        if require_approved and not hinfo["approved"]:
+            problems.append("handoff: %s is %s, not approved (--require-approved-handoff): pai handoff approve PROJECT "
+                            "\"%s\" --expect-sha %s" % (hinfo["dir"], hinfo["status"], hinfo["dir"],
+                                                       (hinfo["handoff_sha256"] or "?")[:16]))
+        if not (body or "").strip() and not hinfo["problems"]:
+            body = body_from_handoff(hinfo["dir"], hinfo["handoff_sha256"])
+    elif require_approved:
+        problems.append("--require-approved-handoff needs --handoff DIR (a sealed checkpoint folder)")
     message = message or (title + ("\n\n" + body.strip() if body and body.strip() else ""))
     found = text_findings(title, body, message)
     for field, why in found:
@@ -274,7 +332,11 @@ def preview(path, paths, title, body="", message=None, branch=None, base="main",
             "branch": branch, "head": head, "base": base_info, "pushed": pushed,
             "paths": {"approved": rows, "staged": staged, "staged_unrelated": staged_unrelated, "unexpected": unexpected},
             "caches": caches, "existing_prs": prs, "existing_prs_how": prs_how,
-            "draft": {"title": title, "body": body, "message": message}, "problems": problems, "warnings": warnings}
+            "draft": {"title": title, "body": body, "message": message}, "problems": problems, "warnings": warnings,
+            "task": hinfo["task"] if hinfo else None, "queue_sha256": hinfo["queue_sha256"] if hinfo else None,
+            "handoff_sha256": hinfo["handoff_sha256"] if hinfo else None,
+            "handoff": {"dir": hinfo["dir"], "status": hinfo["status"], "required": bool(require_approved)}
+            if hinfo else None}
 
 
 def render(pv):
@@ -291,6 +353,10 @@ def render(pv):
         "approved    %s" % (", ".join("%s [%s]" % (r["path"], r["status"].strip() or "?") for r in pa["approved"]) or "none"),
         "staged      %s" % (", ".join(pa["staged"]) or "none"),
         "unexpected  %s" % (", ".join(pa["unexpected"]) or "none"),
+        "handoff     %s" % ("%s %s (task %s, sha256 %s%s)" % (pv["handoff"]["status"], pv["handoff"]["dir"], pv.get("task"),
+                                                          (pv.get("handoff_sha256") or "?")[:16], "; approval required"
+                                                          if pv["handoff"]["required"] else "")
+                               if pv.get("handoff") else "none"),
         "", "title       %s" % publish_check.redact(pv["draft"]["title"]), "body:"]
     out += ["  " + l for l in publish_check.redact(pv["draft"]["body"] or "(empty)").splitlines()]
     out += ["commit message:"] + ["  " + l for l in publish_check.redact(pv["draft"]["message"]).splitlines()]
@@ -493,6 +559,14 @@ def _publish(plan_path, yes, draft, no_pr, log, expect):
             log("REFUSED     %s is not the plan that was reviewed: its sha256 is %s, the reviewed one starts %s. It "
                 "changed after the review; preview again. Nothing was staged, committed, pushed or opened."
                 % (plan_path, got[:16], want[:16]))
+            return 1
+    h = plan.get("handoff") or {}
+    if h.get("required"):  # the approval is checked again now, not only at preview time
+        now = handoff_info(h["dir"])
+        if now["problems"] or not now["approved"] or now["handoff_sha256"] != plan.get("handoff_sha256"):
+            log("REFUSED     the plan requires the approved handoff %s (sha256 %s); now: %s. Nothing was staged, "
+                "committed, pushed or opened." % (h["dir"], (plan.get("handoff_sha256") or "?")[:16], "; ".join(
+                    now["problems"]) or "%s, sha256 %s" % (now["status"], (now["handoff_sha256"] or "?")[:16])))
             return 1
     j = _journal(plan_path)
     wt, branch, remote = plan["worktree"], plan["branch"], plan["remote"]["name"]

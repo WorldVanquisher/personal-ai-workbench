@@ -1,0 +1,168 @@
+{
+ "format": "pai-frontmatter-schema/1",
+ "kinds": {
+  "decision": {
+   "fields": {
+    "options": {
+     "type": "list"
+    },
+    "pai_sha256": {
+     "pattern": "[0-9a-f]{64}"
+    },
+    "source_sha": {
+     "pattern": "[0-9a-f]{12,64}"
+    },
+    "status": {
+     "enum": [
+      "open",
+      "answered"
+     ]
+    }
+   },
+   "match": {
+    "pai_managed": "decision/1"
+   },
+   "owner_fields": [
+    "choice",
+    "choice_note"
+   ],
+   "required": [
+    "pai_managed",
+    "status",
+    "options",
+    "source",
+    "source_sha",
+    "pai_sha256"
+   ],
+   "written_by": "pai round (round lane, swarm/round_vault.py)"
+  },
+  "handoff": {
+   "fields": {
+    "approval": {
+     "enum": [
+      "pending",
+      "approved",
+      "rejected",
+      "stale"
+     ]
+    },
+    "approved": {
+     "enum": [
+      "true",
+      "false"
+     ]
+    },
+    "base_sha": {
+     "pattern": "[0-9a-f]{40}|UNKNOWN"
+    },
+    "checkpoint": {
+     "pattern": "cp-(?:[A-Za-z0-9]{1,16}|final)|UNKNOWN"
+    },
+    "head_sha": {
+     "pattern": "[0-9a-f]{40}|UNKNOWN"
+    },
+    "lane": {
+     "pattern": "[A-Za-z0-9][A-Za-z0-9._-]{0,63}|UNKNOWN"
+    },
+    "project": {
+     "pattern": "[a-z0-9][a-z0-9_-]{0,31}"
+    },
+    "queue_sha256": {
+     "pattern": "[0-9a-f]{64}|none|UNKNOWN"
+    },
+    "round": {
+     "pattern": "[A-Za-z0-9][A-Za-z0-9._-]{0,63}|UNKNOWN"
+    },
+    "sealed_sha256": {
+     "pattern": "[0-9a-f]{64}"
+    },
+    "status": {
+     "enum": [
+      "draft",
+      "sealed",
+      "approved",
+      "rejected",
+      "superseded",
+      "continued",
+      "published"
+     ]
+    }
+   },
+   "match": {
+    "format": "pai-handoff/2"
+   },
+   "owner_fields": [
+    "approved"
+   ],
+   "required": [
+    "format",
+    "status",
+    "approved",
+    "project",
+    "round",
+    "lane",
+    "checkpoint",
+    "base_sha",
+    "head_sha",
+    "queue",
+    "queue_sha256"
+   ],
+   "written_by": "the worker (pai handoff new); seal adds status, sealed_sha256, approval"
+  },
+  "lane": {
+   "fields": {
+    "needs_owner": {
+     "enum": [
+      "true",
+      "false"
+     ]
+    },
+    "pai_sha256": {
+     "pattern": "[0-9a-f]{64}"
+    }
+   },
+   "match": {
+    "pai_managed": "lane/1"
+   },
+   "owner_fields": [],
+   "required": [
+    "pai_managed",
+    "round",
+    "status",
+    "pai_sha256"
+   ],
+   "written_by": "pai round (round lane)"
+  },
+  "request": {
+   "fields": {
+    "created": {
+     "pattern": "\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\dZ"
+    },
+    "status": {
+     "enum": [
+      "open",
+      "accepted",
+      "done",
+      "declined"
+     ]
+    }
+   },
+   "match": {
+    "pai_managed": "request/1"
+   },
+   "owner_fields": [
+    "status",
+    "answer"
+   ],
+   "required": [
+    "pai_managed",
+    "id",
+    "status",
+    "from",
+    "to",
+    "created"
+   ],
+   "written_by": "a lane or the mastermind asking another lane or the owner for something"
+  }
+ }
+}

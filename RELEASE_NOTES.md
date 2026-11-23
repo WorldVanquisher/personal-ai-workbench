@@ -1,6 +1,6 @@
 # pai release notes
 
-## 0.4.0 (candidate; not tagged or published)
+## 0.4.0 (released 2026-11-18; tag v0.4.0 at b02acec)
 
 pai in your browser, and long prompts that arrive whole. Configuration files, task notes and
 every 0.3.0 command are unchanged.
@@ -8,7 +8,7 @@ every 0.3.0 command are unchanged.
 ### Install
 
 - **uv:** `uv tool install git+https://github.com/WorldVanquisher/personal-ai-workbench@v0.4.0`
-  (the line works once the owner pushes the `v0.4.0` tag). The package now also carries the
+  (tag `v0.4.0`, pushed 2026-11-18). The package now also carries the
   browser pages (`pai/_workbench/mdserver`).
 - **Archives:** `pai-workbench-0.4.0.tar.gz` / `.zip` with their `.sha256`; 55 files, now with
   `QUICKSTART.md`, `QUICKSTART.zh-CN.md`, the editor and the console.

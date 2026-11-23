@@ -358,6 +358,11 @@ def ask_branches(workers, input_fn=input, out=sys.stderr):
             w.branch, w.branch_source = answer, "prompt"
 
 
+def handed_off(t):
+    """The continuation marker a note was handed off with (`handed_off_from`), or ''."""
+    return str(t.meta.get("handed_off_from") or "").strip()
+
+
 def assign_tasks(m):
     """Bind task notes to workers: named assignments first, then the queue (todo, by
     priority) for workers without one. Returns problems."""
@@ -368,6 +373,7 @@ def assign_tasks(m):
         return ["tasks folder not found: %s" % m.tasks_dir]
     by_name = {t.name: t for t in notes.load_tasks(m.tasks_dir)}
     problems, taken = [], set()
+    continuing = bool((m.data or {}).get("continues"))
     for w in m.workers:
         if not w.task:
             continue
@@ -378,10 +384,17 @@ def assign_tasks(m):
             problems.append("task %s is assigned to more than one worker" % w.task)
         elif t.status != "todo":
             problems.append("lane %s: task %s has status %s, not todo" % (w.lane, w.task, t.status))
+        elif handed_off(t) and not continuing:
+            problems.append("lane %s: task %s was handed off (%s); continue it from the handed-off head with "
+                            "`pai run --continue %s`, not as a new start" % (w.lane, w.task, handed_off(t),
+                                                                            handed_off(t)))
         else:
             w.note = t
             taken.add(w.task)
-    queue = sorted((t for t in by_name.values() if t.status == "todo" and t.name not in taken),
+    # A handed-off note is todo again, but only `pai run --continue` may pick it up: a plain run
+    # would start it on a fresh base instead of the head it was handed off at (R6-COR-013).
+    queue = sorted((t for t in by_name.values() if t.status == "todo" and t.name not in taken
+                    and (continuing or not handed_off(t))),
                    key=lambda t: (-t.priority, t.name))
     for w in m.workers:
         if not w.task and queue:

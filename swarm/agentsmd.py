@@ -29,6 +29,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -370,10 +371,18 @@ def sections(text):
     return out
 
 
+REF_NAME = re.compile(r"^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]{1,100}(?<![./])$")
+
+
 def plan(path, goal, scope=(), owner=None, lane=None, checks=(), file="AGENTS.md", use_jev=False, accept=(), profile=None,
-         existing=None, reserve=()):
+         existing=None, reserve=(), remote="origin", base="main"):
     """The proposal for one worktree. `existing` (the editor's unsaved text) replaces the file's
-    content as the text the section is merged into; the diff is then against that text."""
+    content as the text the section is merged into; the diff is then against that text.
+    `remote`/`base` name the base the section records (`<remote>/<base>`), the same pair
+    `pai worktree refresh` and `pai worktree web` take; nothing is fetched here."""
+    for what, v in (("--remote", remote), ("--base", base)):
+        if not REF_NAME.match(str(v or "")):
+            raise InitError("%s %r is not a plain remote or branch name" % (what, v))
     wt = os.path.realpath(os.path.abspath(os.path.expanduser(path)))
     if gitprep.toplevel(wt) != wt:
         raise InitError("%s is not the top of a Git worktree" % wt)
@@ -401,8 +410,7 @@ def plan(path, goal, scope=(), owner=None, lane=None, checks=(), file="AGENTS.md
             raise InitError("%s is not a pai rule profile" % profile)
         checks = list(checks) + [tuple(c) for c in prof.get("checks", []) if tuple(c) not in [tuple(x) for x in checks]]
         accept = list(accept) + [a for a in prof.get("accepted", []) if a not in accept]
-    remote = "origin"
-    base_ref = "%s/main" % remote
+    base_ref = "%s/%s" % (remote, base)
     goal_clean, goal_removed = sanitize(goal)
     files, rules = inherited(wt, scope)
     props, jstate, jdetail = proposals(goal_clean, list(scope), use_jev)
@@ -453,6 +461,35 @@ def plan(path, goal, scope=(), owner=None, lane=None, checks=(), file="AGENTS.md
             "decisions": info["decisions"], "other_lanes": info["other_lanes"]}
 
 
+# `--target claude-local` (PRM-D9 = A, R6-COR-057..059; default off): the lane's L2 section goes to
+# CLAUDE.local.md, which Claude Code reads next to CLAUDE.md, git never sees (info/exclude), and
+# each worktree has its own. AGENTS.md is not touched, so the worktree stays clean for continuations
+# and reuse. Codex lanes keep AGENTS.md (Codex does not read CLAUDE.local.md).
+TARGETS = {"agents": "AGENTS.md", "claude-local": "CLAUDE.local.md"}
+LOCAL_FILE = "CLAUDE.local.md"
+
+
+def exclude_local(wt, name=LOCAL_FILE):
+    """Add `/NAME` to the repository's info/exclude (shared by its worktrees) unless git already ignores
+    it; returns True when a line was added. NAME is then never staged by `git add -A` either."""
+    if subprocess.run([gitprep.git_bin(), "-C", wt, "check-ignore", "-q", "--no-index", name],
+                      capture_output=True, stdin=subprocess.DEVNULL).returncode == 0:
+        return False  # already ignored (an earlier run, or the repository's own .gitignore)
+    cdir = gitprep.common_dir(wt)
+    path = os.path.join(cdir, "info", "exclude")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    old = ""
+    if os.path.exists(path):
+        with open(path, encoding="utf-8", errors="replace") as f:
+            old = f.read()
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(("" if not old or old.endswith("\n") else "\n") +
+                "# pai: per-worktree Claude instructions, never committed (R6-COR-059)\n/%s\n" % name)
+        f.flush()
+        os.fsync(f.fileno())
+    return True
+
+
 def write(p):
     """Write the planned file (atomic), refusing when it changed since the plan was made."""
     raw = ""
@@ -464,6 +501,8 @@ def write(p):
         raise InitError("%s changed since the preview; nothing written" % p["file"])
     if p["unchanged"]:
         return False
+    if p["file"] == LOCAL_FILE:  # excluded before it exists: there is no moment git could see it
+        exclude_local(p["worktree"])
     tmp = p["target"] + ".pai-%d.tmp" % os.getpid()
     with open(tmp, "wb") as f:
         f.write(p["new"].encode("utf-8"))

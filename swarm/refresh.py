@@ -250,6 +250,10 @@ def parser():
     pv.add_argument("--path", dest="paths", action="append", default=[], metavar="FILE",
                     help="an approved path, relative to the worktree (repeatable; literal, no globs)")
     pv.add_argument("--title", required=True)
+    pv.add_argument("--handoff", metavar="DIR", help="a sealed pai-handoff/2 checkpoint folder: the plan records its task, "
+                    "queue_sha256 and handoff_sha256, and an empty body is generated from it")
+    pv.add_argument("--require-approved-handoff", action="store_true",
+                    help="refuse (now and again at publish) unless that handoff is approved for exactly these bytes")
     pv.add_argument("--body-file")
     pv.add_argument("--message-file", help="commit message (default: title, blank line, body)")
     pv.add_argument("--branch", help="the branch the PR comes from (default: the worktree's; must match)")
@@ -275,13 +279,18 @@ def parser():
     it.add_argument("--owner")
     it.add_argument("--lane")
     it.add_argument("--check", action="append", default=[], metavar="NAME=COMMAND")
-    it.add_argument("--file", default="AGENTS.md", help="instruction file name at the worktree root (default AGENTS.md)")
+    it.add_argument("--file", default=None, help="instruction file name at the worktree root (default AGENTS.md)")
+    it.add_argument("--target", choices=("agents", "claude-local"), default="agents",
+                    help="claude-local: write the section to CLAUDE.local.md (not committed, one per worktree; for "
+                         "Claude lanes) instead of AGENTS.md (default: agents)")
     it.add_argument("--profile", help="a rule profile exported earlier")
     it.add_argument("--jev", action="store_true", help="let JEV score the rule library for this goal (optional)")
     it.add_argument("--accept", action="append", default=[], metavar="RULE", help="add a proposed rule (repeatable)")
     it.add_argument("--reserve", action="append", default=[], choices=("implementation", "testing", "design"),
                     help="keep this kind of decision with the owner (repeatable; by default the worker owns all three)")
     it.add_argument("--export-profile", metavar="FILE", help="write the accepted rules and checks as a profile (with --write)")
+    it.add_argument("--remote", default="origin", help="remote the base is recorded from (default origin)")
+    it.add_argument("--base", default="main", help="base branch recorded in the section (default main)")
     it.add_argument("--write", action="store_true")
     it.add_argument("--json", action="store_true")
     wb = sub.add_parser("web", help="the worktrees in the browser: instruction files, refresh state, split plan, PR preview")
@@ -313,8 +322,11 @@ def main(argv=None):
                     if not sep or not name.strip() or not cmd.strip():
                         raise agentsmd.InitError("--check looks like NAME=COMMAND, not %r" % c)
                     checks.append((name.strip(), cmd.strip()))
-                p = agentsmd.plan(a.path, a.goal, a.scope, a.owner, a.lane, checks, a.file, a.jev, a.accept, a.profile,
-                                  reserve=a.reserve)
+                if a.file and a.target != "agents":
+                    raise agentsmd.InitError("--file and --target claude-local exclude each other")
+                p = agentsmd.plan(a.path, a.goal, a.scope, a.owner, a.lane, checks,
+                                  a.file or agentsmd.TARGETS[a.target], a.jev, a.accept, a.profile,
+                                  reserve=a.reserve, remote=a.remote, base=a.base)
                 if a.json:
                     print(json.dumps({k: v for k, v in p.items() if k != "new"}, indent=1))
                 else:
@@ -348,7 +360,8 @@ def main(argv=None):
                     with open(p, encoding="utf-8") as f:
                         return f.read()
                 info = wtpr.preview(a.path, a.paths, a.title, read(a.body_file), read(a.message_file) or None,
-                                    a.branch, a.base, a.remote, a.offline, a.github)
+                                    a.branch, a.base, a.remote, a.offline, a.github, handoff=a.handoff,
+                                    require_approved=a.require_approved_handoff)
             except wtpr.PlanError as e:
                 print("pai worktree: %s" % e, file=sys.stderr)
                 return 2

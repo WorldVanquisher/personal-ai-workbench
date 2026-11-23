@@ -5,6 +5,12 @@ import os
 import sys
 
 from pai import __version__, config, context, doctor, handoff, initcfg, install, privacy, workqueue
+from pai import commands, vault  # registry: one `commands.use` line per feature (R6-COR-049)
+
+commands.use(handoff.CLI)  # pai-handoff/2: handoff new v2 flags, seal, approve, reject (R6-COR-019..040)
+commands.use(vault.CLI)  # pai vault lint|wait|schema (R6-COR-039..044)
+commands.use(commands.CONTEXT_WORKTREE)  # pai context --worktree PATH (R6-COR-061)
+commands.use(commands.SECRETS_WHERE)  # pai secrets where (R6-COR-069)
 
 INIT_EPILOG = """examples:
   preview (writes nothing):
@@ -87,6 +93,7 @@ def _parser():
                    "write nothing")
     n.add_argument("--keep-private", action="store_true", help="keep agent session links and credential-like text "
                    "(removed by default, so a handoff can be shared)")
+    commands.add_all(sub, {"handoff": hs, "handoff new": n, "context": c})
     workqueue.add_parser(sub)
     return p
 
@@ -108,6 +115,7 @@ def _init(a):
     print("# Validation: roots valid. Sources:")
     for s in project.sources:
         print(f"#   {s.status:8} {s.kind:12} {s.label}{'  (' + s.reason + ')' if s.reason else ''}")
+    print("".join(f"# WARNING: {w}\n" for w in handoff.layout_warnings(project)), end="")  # R6-COR-016
     if not a.write:
         print(f"\n# Re-run with --write to create {path}. Existing files are never overwritten.")
         return 0
@@ -125,6 +133,8 @@ def main(argv=None):
             return install.main(a)
         if a.cmd == "queue":
             return workqueue.main(a)
+        if (code := commands.dispatch(a, lambda: config.load(a.project, a.config))) is not None:
+            return code
         if a.cmd == "doctor":
             r = doctor.run(a.config, a.project, a.agents)
             print("\n".join(r.lines))
@@ -171,7 +181,7 @@ def main(argv=None):
                                      {k: v for k, v in states.items() if v}, summary, *lists), end="")
                 return 0
             path = handoff.create(project, a.task_id, states, summary, *lists[:4], decisions=lists[4],
-                                  needs_owner=lists[5])
+                                  needs_owner=lists[5], **handoff.v2_args(a))
             print(path)
             return 0
     except (config.ConfigError, handoff.HandoffError) as e:

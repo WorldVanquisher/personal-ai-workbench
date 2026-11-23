@@ -18,6 +18,8 @@ PAI = os.path.join(os.path.dirname(SWARM), "bin", "pai.py")
 sys.path.insert(0, os.path.join(SWARM, "mdserver"))
 import render  # noqa: E402
 import server  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import helpers  # noqa: E402
 
 TOKEN = "test-token-not-secret"
 needs_linux = unittest.skipUnless(sys.platform.startswith("linux") and sys.version_info >= (3, 11), "Linux, Python 3.11+")
@@ -200,7 +202,7 @@ class Pack(Base):
         s.bind(("127.0.0.1", 0))
         self.port = s.getsockname()[1]
         s.close()
-        self.env = dict(os.environ, PAI_WORKBENCH_DATA=os.path.join(self.tmp, "data"),
+        self.env = helpers.hermetic_env(PAI_WORKBENCH_DATA=os.path.join(self.tmp, "data"),
                         PAI_WORKBENCH_HOME=os.path.join(self.tmp, "config"), PAI_SWARM_HOME=os.path.join(self.tmp, "home"))
         self.addCleanup(lambda: self.pai("server", "stop"))
 
@@ -265,8 +267,8 @@ class Edit(Base):
     """`pai edit FILE.md` through the real launcher: one file, one-time link, loopback."""
 
     def start(self, *extra):
-        env = dict(os.environ, PAI_WORKBENCH_HOME=os.path.join(self.tmp, "config"),
-                   PAI_SWARM_HOME=os.path.join(self.tmp, "home"))
+        env = helpers.hermetic_env(PAI_WORKBENCH_HOME=os.path.join(self.tmp, "config"),
+                                   PAI_SWARM_HOME=os.path.join(self.tmp, "home"))
         env.pop("DISPLAY", None)
         env.pop("WAYLAND_DISPLAY", None)
         p = subprocess.Popen([sys.executable, "-B", PAI, "edit", self.note] + list(extra), cwd=self.tmp, env=env,

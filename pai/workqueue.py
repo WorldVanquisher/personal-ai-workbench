@@ -44,6 +44,21 @@ NEEDS_REASON = ("prototype", "blocked", "owner-only", "todo")  # todo: reopening
 NEEDS_EVIDENCE = ("done", "prototype")
 # an item id: one or more prefix words, then a number (R2-001, R4-PAI-001, W-01)
 ID = r"[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z][A-Za-z0-9]*)*-\d{1,5}"
+ITEM_ID = re.compile(ID)  # use with fullmatch
+# The one task ID of a round (R6-COR-025; docs/HANDOFF-V2.md): <PROJECT>-<ROUND>-<LANE>-<NNN>, such as
+# PAI-R6-COR-001, or without the project, R6-COR-001. Every such ID is also an ID above, so queues,
+# handoffs (pai.handoff.TASK_ID) and plans (`pai plan propose --parent PAI-R6-COR`) all take it.
+UNIFIED_ID = re.compile(r"(?:([A-Z][A-Z0-9]{0,15})-)?(R\d+[A-Za-z0-9]{0,8})-([A-Z][A-Z0-9]{0,15})-(\d{3,5})")
+
+
+def parse_id(text):
+    """{project, round, lane, number} of a unified task ID, or None for another form (R2-001)."""
+    mt = UNIFIED_ID.fullmatch(text or "")
+    if not mt:
+        return None
+    return {"project": mt.group(1), "round": mt.group(2), "lane": mt.group(3), "number": int(mt.group(4))}
+
+
 ITEM_RE = re.compile(r"^\s*(?:[-*+]\s+)?(?:\*\*)?(" + ID + r")(?:\*\*)?[.:)]?\s+(.+?)\s*$")
 ROW_RE = re.compile(r"^\|\s*`?(" + ID + r")`?\s*\|\s*`?([a-z][a-z-]*)`?\s*\|")
 TOTALS_RE = re.compile(r"^\s*(?:\*\*)?totals?(?:\*\*)?\s*:", re.I)
