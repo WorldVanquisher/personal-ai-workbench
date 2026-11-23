@@ -173,7 +173,7 @@ left alone.
 
 `pai prompt init --dest DIR` previews; `--write` applies: CREATE for missing files, UPDATE for
 changed managed text (outside text byte-identical, CRLF files stay CRLF, written atomically),
-SAME, CONFLICT (never written). Exit 1 if any conflict. `pai init ... --write` runs the same
+SAME, CONFLICT (never written). Exit 1 if any conflict. `pai init PROJECT --vault PATH ... --write` runs the same
 install into `<vault>/PAI/prompts` after it has written the configuration (preview: it only
 lists what it would do); `--prompts DIR` picks another folder relative to the vault, `--prompts ""`
 skips it. A conflict never fails `pai init`.
@@ -291,7 +291,7 @@ State is Markdown + front matter; PAI and agents read and write files directly. 
 queries only display; every page PAI generates also reads without plugins. PAI never edits a note
 it did not generate.
 
-**Templates** (`pai/prompts/obsidian/`, installed by `pai init --write` into
+**Templates** (`pai/prompts/obsidian/`, installed by `pai init PROJECT --vault PATH ... --write` into
 `<vault>/99 Templates/PAI/`, or `pai prompt templates --dest DIR [--write]`):
 
 | Template | front matter | For |

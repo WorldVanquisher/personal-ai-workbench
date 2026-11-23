@@ -62,7 +62,7 @@ Every command uses one resolver (`pai.vault.resolve`). Its sources, in order: th
 `--vault`, the folder above a script kept in the vault (`99 Templates/…`), then `$VAULT`. When the
 configuration and `--vault` disagree, the command is refused. A path that does not exist on this
 machine is refused with a hint: a container path such as `/vaults/MainVault` is not the host path
-(on the NAS host the vault is `/srv/data/obsidian/MainVault`).
+(on the NAS host the vault is `<host path>/obsidian/MainVault`).
 
 ## Not notes: the lane's L2 instructions (R6-COR-063)
 

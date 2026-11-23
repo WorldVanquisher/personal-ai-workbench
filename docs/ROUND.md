@@ -29,16 +29,16 @@ Everything a round knows is in files, so clearing a conversation loses nothing:
  "round": "R6-20261122",
  "project": "pai",
  "github": "worldvanquisher/personal-ai-workbench",
- "repo": "/home/me/workspace/personal-ai-workbench",
+ "repo": "<home>/workspace/personal-ai-workbench",
  "repo_found": "found under ~, /srv",
  "base_branch": "main",
  "base_sha": "c8bc51e4674f33e3afb9f8dc02d390085c840d64",
  "base_source": "git ls-remote origin refs/heads/main",
- "vault": "/srv/data/obsidian/MainVault",
+ "vault": "<vault>",
  "vault_source": "config",
- "trusted_root": "/home/me/workspace/pai-workers/R6-20261122",
- "work_root": "/home/me/.cache/pai-R6-20261122",
- "state_dir": "/srv/data/obsidian/MainVault/Agent Inbox/R6-20261122",
+ "trusted_root": "<home>/workspace/pai-workers/R6-20261122",
+ "work_root": "<home>/.cache/pai-R6-20261122",
+ "state_dir": "<vault>/Agent Inbox/R6-20261122",
  "tmux_session": "r6",
  "prompt": {"file": ".../99 Templates/PAI Worker Prompt R6b 润滑层.md", "sha256": "…"},
  "decision_sheets": ["30 Projects/PAI 定位 v2：多 agent 润滑层.md"],
@@ -46,14 +46,14 @@ Everything a round knows is in files, so clearing a conversation loses nothing:
  "status": "open",
  "lanes": [
   {"name": "round",
-   "worktree": "/home/me/workspace/pai-workers/R6-20261122/round",
+   "worktree": "<home>/workspace/pai-workers/R6-20261122/round",
    "branch": "worker/R6-20261122/round",
    "session_name": "PAI R6-20261122 round",
    "tmux_target": "r6:pai-round",
-   "prompt_file": "/home/me/.cache/pai-R6-20261122/prompts/round.txt",
+   "prompt_file": "<home>/.cache/pai-R6-20261122/prompts/round.txt",
    "prompt_sha256": "…",
-   "work_dir": "/home/me/.cache/pai-R6-20261122/round",
-   "handoff_dir": "/srv/data/obsidian/MainVault/Agent Inbox/R6-20261122/round"}
+   "work_dir": "<home>/.cache/pai-R6-20261122/round",
+   "handoff_dir": "<vault>/Agent Inbox/R6-20261122/round"}
  ]
 }
 ```
@@ -88,7 +88,7 @@ a different base or repository (`MISMATCH`): a round keeps its base.
 `$PAI_ROUND_CONFIG`, else `~/.config/pai/round.toml`:
 
 ```toml
-vault = "/srv/data/obsidian/MainVault"   # host path; not a Syncthing container path
+vault = "<vault>"   # host path; not a Syncthing container path
 search = ["~", "/srv"]                    # where to look for main clones (depth 5)
 
 [project.pai]
